@@ -1,5 +1,13 @@
+from datetime import datetime
+
 from src.services import lark
 from src.config import Settings
+
+
+def _date_to_ms(date_str: str) -> int:
+    """Convert YYYY-MM-DD to milliseconds timestamp for Lark."""
+    dt = datetime.strptime(date_str, "%Y-%m-%d")
+    return int(dt.timestamp() * 1000)
 
 _settings: Settings | None = None
 
@@ -24,7 +32,7 @@ async def create_task(
         "Độ ưu tiên": priority,
     }
     if deadline:
-        fields["Deadline"] = deadline
+        fields["Deadline"] = _date_to_ms(deadline)
     if original_message:
         fields["Nội dung gốc"] = original_message
     if smart_analysis:
@@ -75,7 +83,7 @@ async def update_task(
     if status:
         fields["Trạng thái"] = status
     if deadline:
-        fields["Deadline"] = deadline
+        fields["Deadline"] = _date_to_ms(deadline)
     if priority:
         fields["Độ ưu tiên"] = priority
     if assignee:

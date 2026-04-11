@@ -12,12 +12,19 @@ def init_openai(api_key: str, chat_model: str, embedding_model: str):
     _embedding_model = embedding_model
 
 
-async def chat_with_tools(messages: list[dict], tools: list[dict]) -> dict:
+async def chat_with_tools(messages: list[dict], tools: list[dict]) -> tuple:
+    """Returns (message, usage_dict)"""
     kwargs = {"model": _chat_model, "messages": messages}
     if tools:
         kwargs["tools"] = tools
     response = await _client.chat.completions.create(**kwargs)
-    return response.choices[0].message
+    usage = response.usage
+    usage_dict = {
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_tokens": usage.total_tokens,
+    } if usage else {}
+    return response.choices[0].message, usage_dict
 
 
 async def embed(text: str) -> list[float]:

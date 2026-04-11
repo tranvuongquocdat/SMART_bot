@@ -49,7 +49,10 @@ async def create_record(table_id: str, fields: dict) -> dict:
         json={"fields": fields},
     )
     resp.raise_for_status()
-    return resp.json()["data"]["record"]
+    body = resp.json()
+    if body.get("code") != 0:
+        raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
+    return body["data"]["record"]
 
 
 async def search_records(table_id: str, filter_expr: str = "") -> list[dict]:
