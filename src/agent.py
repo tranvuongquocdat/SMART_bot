@@ -48,7 +48,7 @@ async def handle_message(text: str, chat_id: int):
 
     # 2. Get context (parallel)
     personal_note, recent, relevant = await asyncio.gather(
-        db.get_personal_note(),
+        db.get_personal_note(chat_id),
         db.get_recent(chat_id, limit=5),
         qdrant.search(text, chat_id, top_n=5),
     )

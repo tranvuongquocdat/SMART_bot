@@ -174,6 +174,6 @@ async def execute_tool(name: str, arguments: str, chat_id: int) -> str:
         case "get_summary":
             return await summary.get_summary(**args)
         case "update_personal_note":
-            return await note.update_personal_note(**args)
+            return await note.update_personal_note(chat_id=chat_id, **args)
         case _:
             return f"Tool '{name}' không tồn tại."

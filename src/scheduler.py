@@ -1,6 +1,7 @@
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
+from src import db
 from src.services import lark, telegram
 from src.config import Settings
 
@@ -8,18 +9,24 @@ _scheduler: AsyncIOScheduler | None = None
 _settings: Settings | None = None
 
 
+async def _send_to_all(text: str):
+    chat_ids = await db.get_all_chat_ids()
+    for chat_id in chat_ids:
+        await telegram.send(chat_id, text)
+
+
 async def _morning_summary():
     from src.tools.summary import get_summary
 
     text = await get_summary("today")
-    await telegram.send(_settings.ceo_chat_id, f"*Chào buổi sáng!*\n\n{text}")
+    await _send_to_all(f"*Chào buổi sáng!*\n\n{text}")
 
 
 async def _evening_summary():
     from src.tools.summary import get_summary
 
     text = await get_summary("today")
-    await telegram.send(_settings.ceo_chat_id, f"*Tóm tắt cuối ngày:*\n\n{text}")
+    await _send_to_all(f"*Tóm tắt cuối ngày:*\n\n{text}")
 
 
 async def _check_deadlines():
@@ -38,7 +45,7 @@ async def _check_deadlines():
         lines = ["*Nhắc deadline ngày mai:*"]
         for r in due_soon:
             lines.append(f"  - {r.get('Tên task', '?')} | {r.get('Khách hàng', 'N/A')}")
-        await telegram.send(_settings.ceo_chat_id, "\n".join(lines))
+        await _send_to_all("\n".join(lines))
 
 
 async def start(settings: Settings):
