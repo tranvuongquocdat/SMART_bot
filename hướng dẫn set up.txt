@@ -1,0 +1,112 @@
+HƯỚNG DẪN SETUP - AI TRỢ LÝ GIÁM ĐỐC ẢO
+==========================================
+
+Sau khi setup xong 3 phần dưới, đưa lại các thông tin cho tôi (Claude) để build server.
+
+==========================================
+PHẦN 1: TELEGRAM BOT (ưu tiên, dùng trước)
+==========================================
+Mục tiêu: Lấy Bot Token
+
+- Mở Telegram, tìm @BotFather
+- Gõ /newbot
+- Đặt tên bot (vd: "Trợ lý CEO")
+- Đặt username (vd: trolyceo_bot) — phải kết thúc bằng _bot
+- BotFather sẽ trả về Bot Token
+- Xong, 5 phút.
+
+>>> CẦN LẤY:
+- Bot Token: _______________
+
+==========================================
+PHẦN 1B: ZALO OA (sau khi được duyệt thì bổ sung)
+==========================================
+Trạng thái: ĐANG CHỜ DUYỆT
+- OA ID: 3596834131794949807
+- App ID: 3960873921407779621
+- Secret Key: (đã có, copy từ developers.zalo.me)
+→ Khi OA được duyệt → liên kết App với OA → cấu hình webhook
+
+==========================================
+PHẦN 2: LARK SUITE BASE
+==========================================
+Mục tiêu: Lấy được App ID, App Secret, Base URL (app_token)
+
+Bước 1: Tạo tài khoản Lark Suite
+- Vào https://www.larksuite.com (bản quốc tế)
+- Đăng ký workspace mới (free plan đủ dùng)
+
+Bước 2: Tạo Base (Bitable)
+- Trong Lark, vào Base (hoặc Bitable)
+- Tạo base mới, đặt tên "Task Manager"
+- Tạo bảng "Tasks" với các cột:
+    + Tên task (Text)
+    + Khách hàng (Text)
+    + Nội dung gốc (Text) — tin nhắn gốc CEO forward
+    + Phân tích SMART (Text)
+    + Trạng thái (Single Select): Mới / Đang làm / Xong / Quá hạn
+    + Deadline (Date)
+    + Độ ưu tiên (Single Select): Cao / Trung bình / Thấp
+    + Ghi chú (Text)
+- Tạo thêm bảng "Ideas" với các cột:
+    + Nội dung (Text)
+    + Ngày tạo (Date)
+    + Tag (Text)
+- Copy URL của base, dạng: https://xxx.larksuite.com/base/xxxxx
+  → Phần "xxxxx" chính là app_token
+
+Bước 3: Tạo App trên Lark Developer
+- Vào https://open.larksuite.com/app
+- Tạo Custom App mới
+- Vào "Permissions & Scopes", thêm:
+    + bitable:app (đọc/ghi Base)
+- Vào "App Info", ghi lại App ID và App Secret
+- Publish app (ấn "Create a version" → submit → tự approve trong workspace của mình)
+
+>>> CẦN LẤY:
+- App ID: _______________
+- App Secret: _______________
+- Base app_token: _______________
+- Table ID bảng Tasks: _______________ (xem trong URL khi mở bảng)
+- Table ID bảng Ideas: _______________
+
+==========================================
+PHẦN 3: OPENAI API
+==========================================
+Mục tiêu: Lấy API Key
+
+- Vào https://platform.openai.com
+- Đăng nhập / tạo tài khoản
+- Vào API Keys → tạo key mới
+- Nạp credit (tối thiểu $5, dùng được rất lâu cho demo)
+- Recommend model: gpt-4o-mini (rẻ, đủ thông minh cho phân tích SMART)
+
+>>> CẦN LẤY:
+- API Key: _______________
+- Model muốn dùng: gpt-4o-mini (recommend) hoặc _______________
+
+==========================================
+TÓM TẮT - CHECKLIST ĐƯA LẠI CHO CLAUDE
+==========================================
+Telegram:
+  [x] Bot Token: (đã có)
+
+Zalo OA (sau):
+  [x] App ID: 3960873921407779621
+  [x] OA ID: 3596834131794949807
+  [ ] Secret Key (copy từ developers.zalo.me)
+  [ ] Liên kết App ↔ OA (chờ duyệt)
+
+Lark Suite:
+  [x] App ID: cli_a95264af99a15ed1
+  [x] App Secret: (đã có)
+  [x] Base app_token: KEu0bMysead0tnsiXjllIRROgge
+  [x] Table ID bảng Tasks: tblFlveJDotPW1sI
+  [x] Table ID bảng Ideas: tbllenKyeKKwXIWx
+
+OpenAI:
+  [ ] API Key
+  [ ] Model name
+
+Khi có đủ, đưa lại cho Claude để build server Python/FastAPI + Docker.
+LƯU Ý: Không share các key này công khai, chỉ dùng trong conversation riêng.

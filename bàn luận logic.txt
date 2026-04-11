@@ -1,0 +1,189 @@
+BÀN LUẬN: KIẾN TRÚC AGENT + TOOLS
+====================================
+Ngày: 2026-04-10
+
+QUYẾT ĐỊNH: Dùng 1 agent GPT-5.4 + function calling, bỏ intent classification thủ công.
+
+MODEL: GPT-5.4 (tool calling mạnh, logic tốt)
+
+---
+
+FLOW CHÍNH:
+  CEO gửi tin nhắn Telegram
+  → Bot nhận qua webhook
+  → Inject sẵn vào context:
+      • Thời gian hiện tại (VD: 2026-04-10 14:30, Thứ Năm)
+      • 5 tin nhắn gần nhất (recent)
+      • 5 tin nhắn liên quan nhất (auto RAG từ tin nhắn hiện tại)
+  → Gửi cho Agent kèm tools
+  → Agent tự suy nghĩ, tự gọi tool (1 hoặc nhiều lần)
+  → Nếu cần thêm context → agent tự gọi search_history(query) với query tự tạo
+  → Trả lời CEO
+
+  Tại sao inject sẵn 5+5 mà vẫn giữ tool search_history?
+  - 5+5 xử lý được ~80% trường hợp, không cần gọi tool → nhanh hơn 1-2s
+  - Nhưng auto RAG match bằng tin nhắn gốc, có thể sai khi câu hỏi mơ hồ
+  - Agent hiểu câu hỏi → tự tạo query chính xác hơn → RAG kết quả tốt hơn
+  - VD: CEO hỏi "hồi đó bàn gì về Q3?" → auto RAG match mơ hồ
+        → agent tự gọi search_history("kế hoạch Q3") → kết quả đúng hơn
+
+---
+
+DANH SÁCH TOOLS:
+
+1. create_task(name, assignee, deadline, priority, original_message)
+   - Tạo task mới trên Lark Base
+   - VD: "Bách gửi video NAB trước thứ 6" → agent gọi create_task
+
+2. list_tasks(assignee?, status?, deadline_from?, deadline_to?)
+   - Lọc danh sách task, trả về list
+   - VD: "hôm nay có gì?" → list_tasks(deadline=today)
+   - VD: "task của Bách?" → list_tasks(assignee="Bách")
+
+3. update_task(search_keyword, status?, deadline?, priority?)
+   - Tìm task theo keyword rồi update
+   - VD: "done task video NAB" → update_task("video NAB", status="Xong")
+
+4. search_tasks(query)
+   - Tìm task theo nội dung (fuzzy/semantic)
+   - VD: "có task nào liên quan marketing ko?"
+
+5. create_idea(content, tags)
+   - Lưu ý tưởng vào bảng Ideas
+   - VD: "ý tưởng: làm podcast nội bộ" → create_idea("podcast nội bộ", "content")
+
+6. get_workload(assignee?)
+   - Đếm task theo người, nhóm theo status
+   - VD: "Bách đang bận ko?" → get_workload("Bách")
+
+7. search_history(query)
+   - Tìm trong lịch sử hội thoại (RAG/Qdrant)
+   - VD: "tháng trước bàn gì về NAB?" → search_history("NAB")
+
+8. get_summary(type: "today" | "week")
+   - Tổng hợp task theo ngày hoặc tuần
+   - VD: "brief cho anh" → get_summary("today")
+
+---
+
+VÍ DỤ MULTI-STEP (agent tự xử lý):
+
+CEO: "Kiểm tra task của Bách, cái nào quá hạn thì dời sang thứ 6"
+→ Agent nghĩ:
+  1. Gọi list_tasks(assignee="Bách", status="Quá hạn")
+  2. Với mỗi task quá hạn → gọi update_task(keyword, deadline="2026-04-17")
+  3. Tự tổng hợp: "Bách có 2 task quá hạn, em đã dời deadline sang thứ 6 hết rồi anh"
+
+CEO: "Bách đang ôm nhiều việc quá, có task nào chuyển cho Hùng được ko?"
+→ Agent nghĩ:
+  1. Gọi get_workload("Bách") → thấy 5 task
+  2. Gọi get_workload("Hùng") → thấy 2 task
+  3. Trả lời: "Bách đang 5 task, Hùng chỉ 2. Anh muốn chuyển task nào sang Hùng?"
+
+---
+
+PERSONAL NOTE:
+
+  Cơ chế:
+  - Là 1 đoạn text (~2000 tokens max), lưu trong DB
+  - LUÔN inject vào system prompt, mọi lượt chat
+  - Ban đầu trống → agent thấy trống → tự hiểu chưa biết gì → tự hỏi làm quen
+  - Không cần prompt onboard riêng, chỉ cần system prompt hướng dẫn cách dùng note
+
+  System prompt chỉ cần dặn:
+  - "Đây là personal note về sếp. Nếu trống = chưa biết gì, hãy làm quen."
+  - "Khi biết thêm thông tin quan trọng → update note."
+  - "Giữ note dưới 2000 tokens, tự tóm tắt lại nếu vượt."
+
+  Agent tự update note khi:
+  - Biết thêm thông tin (VD: "Bách nghỉ, Minh mới vào")
+  - Nhận ra thói quen (VD: sếp hay check task lúc 9h)
+  - Sếp chỉnh cách làm việc (VD: "đừng gửi summary chiều nữa")
+  - Không hỏi CEO xin phép, tự làm ngầm
+
+  Ví dụ note sau vài ngày dùng:
+      Sếp: Anh Đạt
+      Xưng hô: em - anh
+      Công ty: ABC Media, truyền thông/content
+      Team: Bách (video), Hùng (design), Linh (content writing)
+      Thói quen: giao việc qua Zalo, thích báo cáo ngắn gọn
+      Lưu ý: không thích bị hỏi nhiều, ưu tiên tự xử lý
+
+  Tool:
+  9. update_personal_note(note_content)
+     - Ghi đè toàn bộ note (agent tự soạn lại)
+     - Giới hạn 2000 tokens
+
+---
+
+SCHEDULER (chạy nền, không qua agent):
+- 8h sáng: gọi get_summary("today") → gửi CEO
+- 17h chiều: gọi get_summary("today") → gửi CEO
+- Mỗi ngày check deadline → nhắc task sắp hết hạn
+
+---
+
+CẤU TRÚC CODE:
+
+  src/
+    main.py              FastAPI app, webhook endpoint, lifespan
+    config.py            Pydantic settings (.env)
+    agent.py             Agent loop: build context → gọi AI → xử lý tool_calls → lặp
+    db.py                SQLite: messages + personal_note
+    services/
+      openai.py          OpenAI API: chat (function calling) + embeddings
+      lark.py            Lark Base CRUD (tasks, ideas)
+      telegram.py        Gửi tin nhắn Telegram
+      qdrant.py          Qdrant: upsert + hybrid search
+      cohere.py          Cohere rerank
+    tools/
+      __init__.py        Registry: map tên tool → hàm thực thi
+      tasks.py           create_task, list_tasks, update_task, search_tasks
+      ideas.py           create_idea
+      workload.py        get_workload
+      summary.py         get_summary
+      memory.py          search_history
+      note.py            update_personal_note
+    scheduler.py         APScheduler: summary sáng/chiều, check deadline
+
+  Flow trong agent.py:
+    1. Lấy personal_note từ DB
+    2. Lấy 5 recent + 5 RAG
+    3. Build messages = [system_prompt + note + time + context + user_msg]
+    4. Gọi OpenAI với tools=TOOL_DEFINITIONS
+    5. Nếu response có tool_calls → thực thi → append kết quả → quay lại bước 4
+    6. Nếu response có message → gửi CEO qua Telegram
+    7. Lưu message vào DB + Qdrant
+    8. Nếu agent gọi update_personal_note → ghi note mới vào DB
+
+---
+
+LIBS:
+
+  Core:
+    fastapi + uvicorn    Web server + webhook
+    httpx                HTTP client async (gọi Lark, Telegram, Cohere)
+    openai               OpenAI SDK (function calling native, gọn hơn raw httpx)
+    aiosqlite            SQLite async
+    qdrant-client        Vector DB client
+    pydantic-settings    Config từ .env
+
+  Scheduler:
+    apscheduler          Cron jobs (summary sáng/chiều, check deadline)
+
+  Infra:
+    Docker + Compose     App + Qdrant container
+
+  Tại sao dùng openai SDK thay vì raw httpx cho AI?
+  - Function calling với GPT-5.4 cần xử lý tool_calls loop
+  - SDK xử lý sẵn: parse tool_calls, streaming, retry
+  - Raw httpx phải tự parse JSON, tự handle edge case
+  - Các service khác (Lark, Telegram, Cohere) vẫn dùng httpx vì API đơn giản
+
+---
+
+CÒN BÀN:
+- [ ] System prompt cho agent viết sao?
+- [ ] Có cần tool "reassign_task" riêng không hay dùng update_task?
+- [ ] Follow-up tự động: scheduler check hay agent tự nhắc?
+- [ ] Giới hạn chỉ CEO dùng hay cho team dùng?

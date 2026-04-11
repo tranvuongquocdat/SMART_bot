@@ -1,0 +1,34 @@
+DỰ ÁN: AI TRỢ LÝ GIÁM ĐỐC ẢO
+================================
+Ngày: 2026-04-08
+
+BÀI TOÁN:
+CEO nhận tin nhắn công việc qua Zalo, cần bot AI tự phân tích thành task SMART, đẩy lên Lark Base dashboard.
+
+GIẢI PHÁP:
+CEO forward tin nhắn từ Zalo cá nhân → Zalo OA bot → AI phân tích → Lark Base
+
+KIẾN TRÚC:
+Zalo OA webhook → Python/FastAPI (Docker) → Claude API → Lark Base API
+SQLite lưu memory bot, APScheduler chạy nhắc nhở
+
+TÍNH NĂNG PHASE 1+2 (build ngay):
+- Forward tin nhắn → AI phân tích SMART → tạo task Lark Base
+- Nhắc deadline, follow-up, tóm tắt đầu/cuối ngày
+- Hỏi đáp task: "hôm nay có gì?", "task của Bách?"
+- Cập nhật task qua chat: "done task video NAB"
+- Ghi chú/ý tưởng nhanh
+
+SAU NÀY:
+Mini CRM, voice note, báo cáo tuần, kết nối Calendar/Email
+
+CHI PHÍ:
+- Demo: 0 đồng (local + ngrok)
+- Vận hành: ~150k/tháng (VPS + AI API)
+
+NEXT:
+- [ ] Setup Zalo OA + Lark Base
+- [ ] Scaffold Python/FastAPI + Docker
+- [ ] Code webhook + AI + Lark API
+- [ ] Scheduler nhắc nhở
+- [ ] Test 30 tin nhắn demo
