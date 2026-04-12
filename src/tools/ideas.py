@@ -1,23 +1,19 @@
-from datetime import date
-
+"""
+Idea creation tool. Takes ChatContext as first argument.
+"""
+from src.context import ChatContext
 from src.services import lark
-from src.config import Settings
-
-_settings: Settings | None = None
 
 
-def init(settings: Settings):
-    global _settings
-    _settings = settings
-
-
-async def create_idea(content: str, tags: str = "") -> str:
-    fields = {
+async def create_idea(ctx: ChatContext, content: str, tags: str = "", project: str = "") -> str:
+    fields: dict = {
         "Nội dung": content,
-        "Ngày tạo": date.today().isoformat(),
+        "Người tạo": ctx.sender_name,
     }
     if tags:
-        fields["Tag"] = tags
+        fields["Tags"] = tags
+    if project:
+        fields["Project"] = project
 
-    await lark.create_record(_settings.lark_table_ideas, fields)
+    await lark.create_record(ctx.lark_base_token, ctx.lark_table_ideas, fields)
     return f"Đã lưu ý tưởng: {content}"
