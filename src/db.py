@@ -75,6 +75,19 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             status          TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'done')),
             created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS token_usage (
+            id                INTEGER PRIMARY KEY AUTOINCREMENT,
+            boss_chat_id      INTEGER NOT NULL,
+            source            TEXT NOT NULL,
+            prompt_tokens     INTEGER DEFAULT 0,
+            completion_tokens INTEGER DEFAULT 0,
+            total_tokens      INTEGER DEFAULT 0,
+            created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_token_usage_boss_created
+            ON token_usage (boss_chat_id, created_at);
     """)
     await _migrate_schema(db)
     await db.commit()
@@ -425,6 +438,26 @@ async def delete_reminder(
     )
     await db.commit()
     return cur.rowcount > 0
+
+
+# ---------------------------------------------------------------------------
+# token_usage
+# ---------------------------------------------------------------------------
+
+async def log_token_usage(
+    boss_chat_id: int,
+    source: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    total_tokens: int,
+    db_path: str = "data/history.db",
+) -> None:
+    db = await get_db(db_path)
+    await db.execute(
+        "INSERT INTO token_usage (boss_chat_id, source, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?)",
+        (boss_chat_id, source, prompt_tokens, completion_tokens, total_tokens),
+    )
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------

@@ -89,13 +89,20 @@ MAX_TOOL_ROUNDS = 8
 # Internal agent loop
 # ---------------------------------------------------------------------------
 
-async def _run_agent_loop(ctx: ChatContext, system_prompt: str) -> str:
+async def _run_agent_loop(ctx: ChatContext, system_prompt: str, source: str = "advisor") -> str:
     """Shared agentic loop for both advisor functions."""
     messages = [{"role": "system", "content": system_prompt}]
 
     reply_text = ""
+    total_prompt = 0
+    total_completion = 0
+    total_tokens = 0
+
     for round_num in range(1, MAX_TOOL_ROUNDS + 1):
         response, usage = await openai_client.chat_with_tools(messages, ADVISOR_TOOLS)
+        total_prompt += usage.get("prompt_tokens", 0)
+        total_completion += usage.get("completion_tokens", 0)
+        total_tokens += usage.get("total_tokens", 0)
 
         logger.info(
             f"[advisor:{ctx.boss_chat_id}] Round {round_num} | "
@@ -108,7 +115,6 @@ async def _run_agent_loop(ctx: ChatContext, system_prompt: str) -> str:
             for tc in response.tool_calls:
                 logger.info(f"[advisor:{ctx.boss_chat_id}] TOOL: {tc.function.name}({tc.function.arguments})")
 
-            # Run all tool calls in parallel
             results = await asyncio.gather(
                 *(execute_tool(tc.function.name, tc.function.arguments, ctx)
                   for tc in response.tool_calls)
@@ -125,6 +131,8 @@ async def _run_agent_loop(ctx: ChatContext, system_prompt: str) -> str:
 
         reply_text = response.content or "..."
         break
+
+    await db.log_token_usage(ctx.boss_chat_id, source, total_prompt, total_completion, total_tokens)
 
     return reply_text
 
@@ -158,7 +166,7 @@ async def run_advisor(
     logger.info(
         f"[advisor:{ctx.boss_chat_id}] run_advisor | question: {question[:100]}"
     )
-    return await _run_agent_loop(ctx, system_prompt)
+    return await _run_agent_loop(ctx, system_prompt, source="advisor")
 
 
 async def run_daily_review(ctx: ChatContext, settings: Settings) -> str:
@@ -176,4 +184,4 @@ async def run_daily_review(ctx: ChatContext, settings: Settings) -> str:
     )
 
     logger.info(f"[advisor:{ctx.boss_chat_id}] run_daily_review | {current_time}")
-    return await _run_agent_loop(ctx, system_prompt)
+    return await _run_agent_loop(ctx, system_prompt, source="daily_review")

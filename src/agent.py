@@ -295,10 +295,14 @@ async def handle_message(
         # ------------------------------------------------------------------
         reply_text = ""
         total_tokens = 0
+        total_prompt = 0
+        total_completion = 0
 
         for round_num in range(1, MAX_TOOL_ROUNDS + 1):
             response, usage = await openai_client.chat_with_tools(messages, TOOL_DEFINITIONS)
             total_tokens += usage.get("total_tokens", 0)
+            total_prompt += usage.get("prompt_tokens", 0)
+            total_completion += usage.get("completion_tokens", 0)
 
             logger.info(
                 "%s Round %d | %din/%dout tokens",
@@ -402,6 +406,8 @@ async def handle_message(
             elapsed,
         )
 
+        await db.log_token_usage(boss_chat_id, "chat", total_prompt, total_completion, total_tokens)
+
     except Exception:
         logger.exception("%s Error handling message", log_prefix)
         try:
@@ -481,6 +487,13 @@ async def send_reminder(reminder: dict, settings: Settings):
         reply = response.content or ""
 
         logger.info("%s LLM reply (%d tokens): %s", log_prefix, usage.get("total_tokens", 0), reply[:150])
+
+        await db.log_token_usage(
+            boss_chat_id, "reminder",
+            usage.get("prompt_tokens", 0),
+            usage.get("completion_tokens", 0),
+            usage.get("total_tokens", 0),
+        )
 
         if not reply.strip():
             raise ValueError("empty LLM reply")
