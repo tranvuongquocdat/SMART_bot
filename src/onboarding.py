@@ -170,16 +170,19 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
         })
         logger.info("[onboarding] boss record added to Lark People table for chat_id=%s", chat_id)
 
-        # 6. Send success message
+        # 6. Send success message + Lark Base link
+        lark_base_url = f"https://larksuite.com/base/{base_token}"
         await telegram.send(
             chat_id,
             (
                 f"Workspace đã tạo xong cho *{name}* - *{company}*!\n\n"
+                f"Lark Base: {lark_base_url}\n"
+                "(Mở link trên để xem dữ liệu trực tiếp trên Lark)\n\n"
                 "Hướng dẫn nhanh:\n"
                 "- Nhắn tin bình thường để tôi ghi nhận và trả lời\n"
-                "- `/task [nội dung]` — tạo task mới\n"
-                "- `/summary` — tóm tắt công việc\n"
-                "- `/remind [thời gian] [nội dung]` — đặt nhắc nhở\n\n"
+                "- Giao task: \"giao Bách thiết kế logo deadline thứ 6\"\n"
+                "- Xem tóm tắt: \"hôm nay có gì?\"\n"
+                "- Nhắc nhở: \"nhắc tôi 3h chiều họp\"\n\n"
                 "Chúc anh/chị làm việc hiệu quả!"
             ),
         )
