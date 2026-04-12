@@ -346,6 +346,87 @@ async def mark_reminder_done(reminder_id: int, db_path: str = "data/history.db")
     await db.commit()
 
 
+async def list_reminders(
+    boss_chat_id: int,
+    status: str = "pending",
+    limit: int = 50,
+    db_path: str = "data/history.db",
+) -> list[dict]:
+    db = await get_db(db_path)
+    lim = max(1, min(limit, 200))
+    if status == "all":
+        async with db.execute(
+            """
+            SELECT * FROM reminders
+            WHERE boss_chat_id = ?
+            ORDER BY remind_at ASC
+            LIMIT ?
+            """,
+            (boss_chat_id, lim),
+        ) as cur:
+            rows = await cur.fetchall()
+    else:
+        async with db.execute(
+            """
+            SELECT * FROM reminders
+            WHERE boss_chat_id = ? AND status = ?
+            ORDER BY remind_at ASC
+            LIMIT ?
+            """,
+            (boss_chat_id, status, lim),
+        ) as cur:
+            rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def update_reminder(
+    reminder_id: int,
+    boss_chat_id: int,
+    *,
+    content: Optional[str] = None,
+    remind_at: Optional[datetime] = None,
+    update_target: bool = False,
+    target_chat_id: Optional[int] = None,
+    target_name: str = "",
+    db_path: str = "data/history.db",
+) -> bool:
+    db = await get_db(db_path)
+    sets: list[str] = []
+    params: list = []
+    if content is not None:
+        sets.append("content = ?")
+        params.append(content)
+    if remind_at is not None:
+        sets.append("remind_at = ?")
+        params.append(remind_at.isoformat(sep=" ", timespec="seconds"))
+    if update_target:
+        sets.append("target_chat_id = ?")
+        params.append(target_chat_id)
+        sets.append("target_name = ?")
+        params.append(target_name)
+    if not sets:
+        return False
+    params.extend([reminder_id, boss_chat_id])
+    sql = f"UPDATE reminders SET {', '.join(sets)} WHERE id = ? AND boss_chat_id = ?"
+    cur = await db.execute(sql, params)
+    await db.commit()
+    return cur.rowcount > 0
+
+
+async def delete_reminder(
+    reminder_id: int,
+    boss_chat_id: int,
+    db_path: str = "data/history.db",
+) -> bool:
+    db = await get_db(db_path)
+    cur = await db.execute(
+        "DELETE FROM reminders WHERE id = ? AND boss_chat_id = ?",
+        (reminder_id, boss_chat_id),
+    )
+    await db.commit()
+    return cur.rowcount > 0
+
+
 # ---------------------------------------------------------------------------
 # lifecycle
 # ---------------------------------------------------------------------------

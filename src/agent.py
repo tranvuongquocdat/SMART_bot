@@ -85,6 +85,10 @@ THINKING_MAP = {
     "web_search": "Đang tìm kiếm web...",
     "send_message": "Đang gửi tin nhắn...",
     "escalate_to_advisor": "Đang phân tích chiến lược...",
+    "create_reminder": "Đang tạo nhắc nhở...",
+    "list_reminders": "Đang xem nhắc nhở...",
+    "update_reminder": "Đang cập nhật nhắc nhở...",
+    "delete_reminder": "Đang xóa nhắc nhở...",
 }
 
 
@@ -404,3 +408,93 @@ async def handle_message(
             await telegram.send(chat_id, "Xin lỗi, có lỗi xảy ra. Vui lòng thử lại.")
         except Exception:
             logger.exception("%s Failed to send error message", log_prefix)
+
+
+# ---------------------------------------------------------------------------
+# Scheduler-driven reminder delivery via LLM
+# ---------------------------------------------------------------------------
+
+REMINDER_PROMPT = """Bạn là thư ký AI của {boss_name}{company_info}. Giao tiếp tiếng Việt, thân thiện, ngắn gọn.
+
+## Personal Note:
+{personal_note}
+
+## Thời gian: {current_time}
+
+## Nhiệm vụ:
+Hệ thống đã đến giờ gửi nhắc nhở. Hãy viết MỘT tin nhắn nhắc nhở tự nhiên, thân thiện dựa trên thông tin bên dưới.
+- Không cần nói "Nhắc nhở:" — hãy viết như đang nhắn tin bình thường.
+- Xưng hô theo personal note.
+- Ngắn gọn, 1-3 câu là đủ.
+"""
+
+
+async def send_reminder(reminder: dict, settings: Settings):
+    """Gửi reminder qua LLM để có giọng tự nhiên. Fallback nếu LLM lỗi."""
+    boss_chat_id = reminder["boss_chat_id"]
+    target_id = reminder.get("target_chat_id")
+    target_name = reminder.get("target_name", "")
+    content = reminder["content"]
+
+    log_prefix = f"[reminder:{reminder['id']}]"
+
+    try:
+        ctx = await context.resolve(boss_chat_id, boss_chat_id, False)
+        if not ctx:
+            logger.warning("%s Cannot resolve boss context, using fallback", log_prefix)
+            raise ValueError("no context")
+
+        personal_note_row = await db.get_note(boss_chat_id, "personal", str(boss_chat_id))
+        personal_note = personal_note_row["content"] if personal_note_row else ""
+
+        boss = await db.get_boss(boss_chat_id)
+        company = boss.get("company", "") if boss else ""
+        company_info = f" — {company}" if company else ""
+
+        tz = ZoneInfo(settings.timezone)
+        current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M (%A)")
+
+        system_content = REMINDER_PROMPT.format(
+            boss_name=ctx.boss_name,
+            company_info=company_info,
+            personal_note=personal_note,
+            current_time=current_time,
+        )
+
+        if target_id:
+            user_msg = (
+                f"Nhắc nhở cho {target_name or 'người nhận'}: \"{content}\"\n"
+                f"Viết tin nhắn gửi cho {target_name or 'người nhận'} (xưng là trợ lý của {ctx.boss_name})."
+            )
+        else:
+            user_msg = (
+                f"Nhắc nhở cho sếp: \"{content}\"\n"
+                f"Viết tin nhắn gửi cho sếp."
+            )
+
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": user_msg},
+        ]
+
+        response, usage = await openai_client.chat_with_tools(messages, tools=[])
+        reply = response.content or ""
+
+        logger.info("%s LLM reply (%d tokens): %s", log_prefix, usage.get("total_tokens", 0), reply[:150])
+
+        if not reply.strip():
+            raise ValueError("empty LLM reply")
+
+    except Exception:
+        logger.exception("%s LLM failed, using fallback", log_prefix)
+        if target_id:
+            reply = f"Nhắc nhở từ {target_name or 'sếp'}: {content}"
+        else:
+            reply = f"Nhắc nhở: {content}"
+
+    if target_id:
+        await telegram.send(target_id, reply)
+        # Báo sếp biết đã nhắc (raw, không cần LLM cho dòng này)
+        await telegram.send(boss_chat_id, f"✓ Đã nhắc {target_name or 'người nhận'}: {content}")
+    else:
+        await telegram.send(boss_chat_id, reply)

@@ -16,7 +16,7 @@ from src.tools import (
 
 
 # ---------------------------------------------------------------------------
-# Tool definitions — 26 tools
+# Tool definitions — 29 tools
 # ---------------------------------------------------------------------------
 
 TOOL_DEFINITIONS = [
@@ -459,7 +459,7 @@ TOOL_DEFINITIONS = [
         },
     },
     # ------------------------------------------------------------------
-    # Reminder tools (1)
+    # Reminder tools (4)
     # ------------------------------------------------------------------
     {
         "type": "function",
@@ -472,7 +472,7 @@ TOOL_DEFINITIONS = [
                     "content": {"type": "string", "description": "Nội dung nhắc nhở"},
                     "remind_at": {
                         "type": "string",
-                        "description": "Thời gian nhắc dạng YYYY-MM-DD HH:MM",
+                        "description": "Thời gian nhắc dạng YYYY-MM-DD HH:MM theo giờ địa phương (timezone app, mặc định Asia/Ho_Chi_Minh)",
                     },
                     "target": {
                         "type": "string",
@@ -480,6 +480,71 @@ TOOL_DEFINITIONS = [
                     },
                 },
                 "required": ["content", "remind_at"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_reminders",
+            "description": (
+                "Liệt kê nhắc nhở của workspace sếp (pending = chưa tới giờ gửi; done = đã gửi). "
+                "Gọi trước khi nói 'không có reminder' hoặc khi sếp hỏi lịch nhắc / muốn sửa xóa theo ID."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": ["pending", "done", "all"],
+                        "description": "pending (mặc định), done, hoặc all",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Số dòng tối đa (mặc định 30, tối đa 200)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_reminder",
+            "description": "Sửa nhắc nhở theo ID (lấy từ list_reminders). Chỉ truyền các field cần đổi.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reminder_id": {"type": "integer", "description": "ID nhắc nhở"},
+                    "content": {"type": "string", "description": "Nội dung mới (bỏ qua nếu không đổi)"},
+                    "remind_at": {
+                        "type": "string",
+                        "description": "Thời gian mới YYYY-MM-DD HH:MM giờ địa phương (bỏ qua nếu không đổi)",
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": (
+                            "Người nhận: tên trên Lark. Chuỗi rỗng = chỉ nhắc sếp. "
+                            "Bỏ qua field này = giữ nguyên người nhận."
+                        ),
+                    },
+                },
+                "required": ["reminder_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_reminder",
+            "description": "Xóa nhắc nhở theo ID (lấy từ list_reminders).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reminder_id": {"type": "integer"},
+                },
+                "required": ["reminder_id"],
             },
         },
     },
@@ -597,6 +662,12 @@ async def execute_tool(name: str, arguments: str, ctx: ChatContext) -> str:
         # Reminder tools
         case "create_reminder":
             return await reminder.create_reminder(ctx, **args)
+        case "list_reminders":
+            return await reminder.list_reminders(ctx, **args)
+        case "update_reminder":
+            return await reminder.update_reminder(ctx, **args)
+        case "delete_reminder":
+            return await reminder.delete_reminder(ctx, **args)
 
         # Web search tools
         case "web_search":
