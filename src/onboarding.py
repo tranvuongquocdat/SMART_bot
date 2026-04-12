@@ -200,15 +200,30 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
 # ---- Member / Partner path -----------------------------------------------
 
 async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
-    query = text.strip().lower()
+    query = text.strip()
     if not query:
         await telegram.send(chat_id, "Thuộc team của ai? Nhập tên sếp hoặc tên công ty nhé!")
         return
 
+    # Nếu đang có danh sách chờ chọn → cho chọn bằng số
+    pending = state.get("pending_matches")
+    if pending and query.isdigit():
+        idx = int(query) - 1
+        if 0 <= idx < len(pending):
+            state["boss"] = pending[idx]
+            state.pop("pending_matches", None)
+            state["step"] = "member_name"
+            await telegram.send(chat_id, "Tên bạn là gì?")
+            return
+        else:
+            await telegram.send(chat_id, f"Vui lòng chọn từ 1 đến {len(pending)}.")
+            return
+
     all_bosses = await db.get_all_bosses()
+    query_lower = query.lower()
     matches = [
         b for b in all_bosses
-        if query in b["name"].lower() or query in b.get("company", "").lower()
+        if query_lower in b["name"].lower() or query_lower in b.get("company", "").lower()
     ]
 
     if len(matches) == 0:
@@ -216,17 +231,19 @@ async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
         return
 
     if len(matches) > 1:
+        state["pending_matches"] = matches
         lines = "\n".join(
             f"{i + 1}. {b['name']} — {b.get('company', '')}"
             for i, b in enumerate(matches)
         )
         await telegram.send(
             chat_id,
-            f"Tìm thấy nhiều kết quả:\n{lines}\n\nBạn thuộc team nào? Nhập cụ thể hơn nhé!",
+            f"Tìm thấy nhiều kết quả:\n{lines}\n\nChọn số hoặc nhập cụ thể hơn nhé!",
         )
         return
 
     # Exactly 1 match
+    state.pop("pending_matches", None)
     boss = matches[0]
     state["boss"] = boss
     state["step"] = "member_name"

@@ -119,11 +119,23 @@ async def _check_deadlines():
 
 
 async def _check_reminders():
-    """Moi phut: check reminders den gio -> nhan sep."""
+    """Moi phut: check reminders den gio -> nhan dung nguoi."""
     reminders = await db.get_due_reminders()
     for r in reminders:
         try:
-            await telegram.send(r["boss_chat_id"], f"Nhac nho: {r['content']}")
+            target_id = r.get("target_chat_id")
+            target_name = r.get("target_name", "")
+            boss_id = r["boss_chat_id"]
+
+            if target_id:
+                # Nhac nguoi duoc chi dinh
+                await telegram.send(target_id, f"Nhac nho: {r['content']}")
+                # Bao sep biet da nhac
+                await telegram.send(boss_id, f"Da nhac {target_name}: {r['content']}")
+            else:
+                # Nhac sep
+                await telegram.send(boss_id, f"Nhac nho: {r['content']}")
+
             await db.mark_reminder_done(r["id"])
             logger.info("[scheduler] Reminder %d sent", r["id"])
         except Exception:

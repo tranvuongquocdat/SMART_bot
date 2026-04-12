@@ -27,22 +27,22 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_task",
-            "description": "Tạo task mới trên Lark Base. Dùng khi sếp giao việc hoặc forward tin nhắn công việc.",
+            "description": "Tạo task mới. Dùng khi sếp giao việc, ví dụ: 'giao Bách thiết kế logo deadline thứ 6'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Tên task ngắn gọn"},
-                    "assignee": {"type": "string", "description": "Người được giao việc"},
-                    "deadline": {"type": "string", "description": "Deadline dạng YYYY-MM-DD"},
+                    "name": {"type": "string", "description": "Tên task ngắn gọn, tóm tắt nội dung việc cần làm"},
+                    "assignee": {"type": "string", "description": "Tên người được giao (dùng đúng tên trong danh sách nhân sự)"},
+                    "deadline": {"type": "string", "description": "Deadline dạng YYYY-MM-DD. Nếu sếp nói 'thứ 6', 'tuần sau', tự quy đổi ra ngày cụ thể"},
                     "priority": {
                         "type": "string",
                         "enum": ["Cao", "Trung bình", "Thấp"],
-                        "description": "Độ ưu tiên",
+                        "description": "Độ ưu tiên. Mặc định Trung bình nếu không nói rõ",
                     },
-                    "project": {"type": "string", "description": "Tên dự án liên quan"},
-                    "start_time": {"type": "string", "description": "Thời gian bắt đầu dạng YYYY-MM-DD"},
-                    "location": {"type": "string", "description": "Địa điểm thực hiện"},
-                    "original_message": {"type": "string", "description": "Tin nhắn gốc sếp forward"},
+                    "project": {"type": "string", "description": "Tên dự án liên quan (dùng đúng tên dự án đã tạo)"},
+                    "start_time": {"type": "string", "description": "Ngày bắt đầu dạng YYYY-MM-DD (nếu có)"},
+                    "location": {"type": "string", "description": "Địa điểm thực hiện (nếu có)"},
+                    "original_message": {"type": "string", "description": "Tin nhắn gốc mà sếp forward/trích dẫn (nếu có)"},
                 },
                 "required": ["name"],
             },
@@ -52,17 +52,17 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "list_tasks",
-            "description": "Lọc danh sách task. Dùng khi sếp hỏi 'hôm nay có gì?', 'task của ai?', v.v.",
+            "description": "Liệt kê task có lọc. Dùng khi: 'hôm nay có gì?', 'task của Bách', 'task dự án X'. Gọi không tham số = tất cả task.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "assignee": {"type": "string", "description": "Lọc theo người được giao"},
+                    "assignee": {"type": "string", "description": "Lọc theo tên người được giao (tìm gần đúng)"},
                     "status": {
                         "type": "string",
                         "enum": ["Mới", "Đang làm", "Xong", "Quá hạn"],
-                        "description": "Lọc theo trạng thái",
+                        "description": "Lọc theo trạng thái task",
                     },
-                    "project": {"type": "string", "description": "Lọc theo dự án"},
+                    "project": {"type": "string", "description": "Lọc theo tên dự án (tìm gần đúng)"},
                 },
                 "required": [],
             },
@@ -72,11 +72,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_task",
-            "description": "Cập nhật task (trạng thái, deadline, ưu tiên, assignee, tên). Dùng khi sếp nói 'done task X', 'dời deadline', v.v.",
+            "description": "Cập nhật task. Dùng khi: 'done task X', 'dời deadline', 'chuyển task cho Y'. Tìm task theo tên rồi cập nhật.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "search_keyword": {"type": "string", "description": "Từ khóa tìm task cần cập nhật"},
+                    "search_keyword": {"type": "string", "description": "Từ khóa tìm trong TÊN task (ví dụ: 'thiết kế logo')"},
                     "status": {
                         "type": "string",
                         "enum": ["Mới", "Đang làm", "Xong", "Quá hạn"],
@@ -99,11 +99,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_task",
-            "description": "Xóa task khỏi hệ thống. Dùng khi sếp muốn hủy/xóa task.",
+            "description": "Xóa task. LUÔN hỏi sếp xác nhận trước khi gọi. Tìm task theo tên rồi xóa.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "search_keyword": {"type": "string", "description": "Từ khóa tìm task cần xóa"},
+                    "search_keyword": {"type": "string", "description": "Từ khóa tìm trong TÊN task cần xóa"},
                 },
                 "required": ["search_keyword"],
             },
@@ -113,7 +113,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_tasks",
-            "description": "Tìm task theo nội dung bằng semantic search. Dùng khi sếp hỏi 'có task nào liên quan X không?'",
+            "description": "Tìm task bằng semantic search (tìm theo nghĩa, không cần từ chính xác). Dùng khi: 'có task nào liên quan marketing?', 'task về khách hàng ABC'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -130,22 +130,22 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "add_people",
-            "description": "Thêm người mới (nhân viên, đối tác, khách hàng) vào hệ thống.",
+            "description": "Thêm người mới vào hệ thống nhân sự. Dùng khi sếp nói 'thêm Minh vào team', 'có nhân viên mới tên Lan'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Tên đầy đủ"},
-                    "chat_id": {"type": "integer", "description": "Chat ID Telegram"},
-                    "username": {"type": "string", "description": "Username Telegram"},
-                    "group": {"type": "string", "description": "Nhóm / phòng ban"},
+                    "name": {"type": "string", "description": "Tên đầy đủ của người cần thêm"},
+                    "chat_id": {"type": "integer", "description": "Chat ID Telegram (nếu biết). Thường chưa có, bỏ trống"},
+                    "username": {"type": "string", "description": "Username Telegram (không có @ phía trước)"},
+                    "group": {"type": "string", "description": "Nhóm / phòng ban, ví dụ: Tech, Media, Sale, Marketing"},
                     "person_type": {
                         "type": "string",
                         "enum": ["member", "partner", "customer"],
-                        "description": "Loại người dùng",
+                        "description": "member = nhân viên, partner = đối tác, customer = khách hàng",
                     },
-                    "role_desc": {"type": "string", "description": "Vai trò / chức vụ"},
-                    "skills": {"type": "string", "description": "Kỹ năng"},
-                    "note": {"type": "string", "description": "Ghi chú"},
+                    "role_desc": {"type": "string", "description": "Vai trò / chức vụ, ví dụ: Lập trình viên, Thiết kế, Quản lý"},
+                    "skills": {"type": "string", "description": "Kỹ năng chuyên môn, ví dụ: React, Figma, SEO"},
+                    "note": {"type": "string", "description": "Ghi chú thêm về người này"},
                 },
                 "required": ["name"],
             },
@@ -155,11 +155,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_people",
-            "description": "Xem thông tin chi tiết của một người.",
+            "description": "Xem thông tin chi tiết của một người. Dùng khi: 'Bách là ai?', 'thông tin của Linh'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "search_name": {"type": "string", "description": "Tên hoặc tên gọi để tìm"},
+                    "search_name": {"type": "string", "description": "Tên hoặc tên gọi (tìm gần đúng trong cả Tên và Tên gọi)"},
                 },
                 "required": ["search_name"],
             },
@@ -211,7 +211,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_people",
-            "description": "Xóa một người khỏi hệ thống.",
+            "description": "Xóa người khỏi hệ thống. LUÔN hỏi sếp xác nhận trước khi gọi.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -225,14 +225,14 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "check_effort",
-            "description": "Kiểm tra workload/effort của một người, phát hiện xung đột deadline.",
+            "description": "Kiểm tra workload của một người: liệt kê task đang làm, phát hiện xung đột/trùng deadline. GỌI TRƯỚC khi giao task mới cho ai đó.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "assignee": {"type": "string", "description": "Tên người cần kiểm tra"},
+                    "assignee": {"type": "string", "description": "Tên người cần kiểm tra (đúng tên trong danh sách nhân sự)"},
                     "deadline": {
                         "type": "string",
-                        "description": "Deadline cần so sánh dạng YYYY-MM-DD (tùy chọn)",
+                        "description": "Deadline task mới dạng YYYY-MM-DD — nếu có, sẽ so sánh với các task hiện tại để phát hiện xung đột",
                     },
                 },
                 "required": ["assignee"],
@@ -312,7 +312,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "delete_project",
-            "description": "Xóa dự án khỏi hệ thống.",
+            "description": "Xóa dự án khỏi hệ thống. LUÔN hỏi sếp xác nhận trước khi gọi.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -329,16 +329,17 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_note",
-            "description": "Cập nhật ghi chú về người, dự án, hoặc bất kỳ đối tượng nào. Gọi khi biết thêm thông tin mới cần lưu.",
+            "description": "Lưu ghi chú nội bộ (chỉ bot dùng, user không thấy). Gọi khi biết thêm thông tin quan trọng cần nhớ lâu dài, ví dụ: 'Bách nghỉ phép tuần sau', 'dự án X bị delay vì khách chưa duyệt'.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "note_type": {
                         "type": "string",
-                        "description": "Loại note (person / project / general)",
+                        "enum": ["personal", "project", "group"],
+                        "description": "personal = ghi chú về 1 người/sếp, project = về dự án, group = về nhóm chat",
                     },
-                    "ref_id": {"type": "string", "description": "ID tham chiếu (tên người, tên dự án, v.v.)"},
-                    "content": {"type": "string", "description": "Nội dung ghi chú mới"},
+                    "ref_id": {"type": "string", "description": "Khóa tham chiếu: tên người (vd 'Bách'), tên dự án (vd 'Rebranding'), hoặc ID nhóm"},
+                    "content": {"type": "string", "description": "Nội dung ghi chú (ghi đè toàn bộ note cũ nếu có, nên gộp thông tin cũ + mới)"},
                 },
                 "required": ["note_type", "ref_id", "content"],
             },
@@ -348,15 +349,16 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_note",
-            "description": "Lấy ghi chú đã lưu về một người hoặc dự án.",
+            "description": "Đọc ghi chú nội bộ đã lưu. Dùng khi cần nhớ lại thông tin về người/dự án/nhóm.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "note_type": {
                         "type": "string",
-                        "description": "Loại note (person / project / general)",
+                        "enum": ["personal", "project", "group"],
+                        "description": "personal = về người/sếp, project = về dự án, group = về nhóm chat",
                     },
-                    "ref_id": {"type": "string", "description": "ID tham chiếu"},
+                    "ref_id": {"type": "string", "description": "Khóa tham chiếu (cùng giá trị đã dùng khi update_note)"},
                 },
                 "required": ["note_type", "ref_id"],
             },
@@ -369,7 +371,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "search_history",
-            "description": "Tìm trong lịch sử hội thoại bằng semantic search. Dùng khi sếp hỏi về cuộc trò chuyện trước đó.",
+            "description": "Tìm trong lịch sử chat bằng semantic search. Dùng khi: 'hôm trước nói gì về X?', 'ai nhắc đến khách hàng Y?'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -426,13 +428,13 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_idea",
-            "description": "Lưu ý tưởng nhanh của sếp vào Lark Base.",
+            "description": "Lưu ý tưởng nhanh vào hệ thống. Dùng khi sếp nói 'lưu ý tưởng', 'idea', hoặc đề cập ý tưởng mới.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "Nội dung ý tưởng"},
-                    "tags": {"type": "string", "description": "Tag phân loại (vd: marketing, content, product)"},
-                    "project": {"type": "string", "description": "Dự án liên quan (nếu có)"},
+                    "content": {"type": "string", "description": "Nội dung ý tưởng (ghi lại nguyên văn hoặc tóm tắt ý chính)"},
+                    "tags": {"type": "string", "description": "Tag phân loại, phân cách bằng dấu phẩy. Ví dụ: marketing, content, product"},
+                    "project": {"type": "string", "description": "Tên dự án liên quan (nếu có, dùng đúng tên dự án đã tạo)"},
                 },
                 "required": ["content"],
             },
@@ -445,12 +447,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "send_message",
-            "description": "Gửi tin nhắn Telegram đến một người trong danh sách nhân sự.",
+            "description": "Gửi tin nhắn Telegram thay sếp. Tra tên người nhận trong danh sách nhân sự để lấy Chat ID. Dùng khi: 'nhắn Bách mai 9h họp', 'gửi Linh file thiết kế'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "to": {"type": "string", "description": "Tên người nhận"},
-                    "content": {"type": "string", "description": "Nội dung tin nhắn"},
+                    "to": {"type": "string", "description": "Tên người nhận (tìm gần đúng trong danh sách nhân sự)"},
+                    "content": {"type": "string", "description": "Nội dung tin nhắn gửi đi (viết hoàn chỉnh, lịch sự)"},
                 },
                 "required": ["to", "content"],
             },
@@ -463,7 +465,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_reminder",
-            "description": "Tạo nhắc nhở vào một thời điểm cụ thể.",
+            "description": "Tạo nhắc nhở vào một thời điểm cụ thể. Có thể nhắc sếp hoặc nhắc người khác trong team.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -471,6 +473,10 @@ TOOL_DEFINITIONS = [
                     "remind_at": {
                         "type": "string",
                         "description": "Thời gian nhắc dạng YYYY-MM-DD HH:MM",
+                    },
+                    "target": {
+                        "type": "string",
+                        "description": "Tên người cần nhắc. Để trống = nhắc sếp.",
                     },
                 },
                 "required": ["content", "remind_at"],
@@ -502,8 +508,9 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "escalate_to_advisor",
             "description": (
-                "Chuyển sang Advisor khi sếp cần phân tích chiến lược, sắp xếp tổng thể. "
-                "KHÔNG gọi cho CRUD đơn giản."
+                "Chuyển sang Cố vấn chiến lược khi sếp hỏi phân tích tổng thể, sắp xếp nhân sự, so sánh phương án. "
+                "Ví dụ: 'sắp xếp nhân sự Q3', 'phân tích workload team xem ai quá tải'. "
+                "KHÔNG gọi cho CRUD đơn giản (tạo/xem/sửa/xóa task, người, dự án)."
             ),
             "parameters": {
                 "type": "object",

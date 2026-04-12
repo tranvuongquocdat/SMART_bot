@@ -150,11 +150,15 @@ async def handle_message(
         # Step 1: Group + not mentioned → only persist, no reply
         # ------------------------------------------------------------------
         if is_group and not bot_mentioned:
+            group_info = await db.get_group(chat_id)
+            if not group_info:
+                return  # group chưa đăng ký → bỏ qua
+            boss_id = group_info["boss_chat_id"]
             msg_id = await db.save_message(chat_id, "user", text, sender_id)
             vector = await openai_client.embed(text)
             asyncio.create_task(
                 qdrant.upsert(
-                    collection=f"messages_{chat_id}",
+                    collection=f"messages_{boss_id}",
                     point_id=msg_id,
                     chat_id=chat_id,
                     role="user",
@@ -303,23 +307,30 @@ async def handle_message(
             if response.tool_calls:
                 messages.append(response)
 
-                for tool_call in response.tool_calls:
-                    tool_name = tool_call.function.name
-                    tool_args = tool_call.function.arguments
+                # Thinking UX: show all tool names being called
+                tool_names = [tc.function.name for tc in response.tool_calls]
+                if thinking_msg_id:
+                    if len(tool_names) == 1:
+                        thinking_text = THINKING_MAP.get(tool_names[0], f"Đang xử lý {tool_names[0]}...")
+                    else:
+                        parts = [THINKING_MAP.get(n, n) for n in tool_names]
+                        thinking_text = " | ".join(parts)
+                    await telegram.edit_message(chat_id, thinking_msg_id, f"_{thinking_text}_")
 
-                    # Update thinking UX
-                    thinking_text = THINKING_MAP.get(tool_name, f"Đang xử lý {tool_name}...")
-                    if thinking_msg_id:
-                        await telegram.edit_message(chat_id, thinking_msg_id, f"_{thinking_text}_")
+                for tc in response.tool_calls:
+                    logger.info("%s TOOL: %s(%s)", log_prefix, tc.function.name, tc.function.arguments[:200])
 
-                    logger.info("%s TOOL: %s(%s)", log_prefix, tool_name, tool_args[:200])
+                # Run all tool calls in parallel
+                raw_results = await asyncio.gather(
+                    *(execute_tool(tc.function.name, tc.function.arguments, ctx)
+                      for tc in response.tool_calls)
+                )
 
-                    result = await execute_tool(tool_name, tool_args, ctx)
-
-                    # Handle advisor escalation
+                # Process results + handle escalation
+                for tool_call, result in zip(response.tool_calls, raw_results):
                     if result == "__ESCALATE__":
                         try:
-                            args_dict = json.loads(tool_args) if isinstance(tool_args, str) else tool_args
+                            args_dict = json.loads(tool_call.function.arguments) if isinstance(tool_call.function.arguments, str) else tool_call.function.arguments
                         except Exception:
                             args_dict = {}
 

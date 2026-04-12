@@ -2,6 +2,7 @@
 Advisor agent: strategy analysis on-demand + smart daily review (cron 8am).
 Read-only — never mutates data.
 """
+import asyncio
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -103,14 +104,18 @@ async def _run_agent_loop(ctx: ChatContext, system_prompt: str) -> str:
 
         if response.tool_calls:
             messages.append(response)
-            for tool_call in response.tool_calls:
-                tool_name = tool_call.function.name
-                tool_args = tool_call.function.arguments
-                logger.info(f"[advisor:{ctx.boss_chat_id}] TOOL: {tool_name}({tool_args})")
 
-                result = await execute_tool(tool_name, tool_args, ctx)
+            for tc in response.tool_calls:
+                logger.info(f"[advisor:{ctx.boss_chat_id}] TOOL: {tc.function.name}({tc.function.arguments})")
+
+            # Run all tool calls in parallel
+            results = await asyncio.gather(
+                *(execute_tool(tc.function.name, tc.function.arguments, ctx)
+                  for tc in response.tool_calls)
+            )
+
+            for tool_call, result in zip(response.tool_calls, results):
                 logger.info(f"[advisor:{ctx.boss_chat_id}] TOOL RESULT: {result[:200]}")
-
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tool_call.id,

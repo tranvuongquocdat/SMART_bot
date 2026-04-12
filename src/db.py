@@ -66,12 +66,14 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
         );
 
         CREATE TABLE IF NOT EXISTS reminders (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            boss_chat_id INTEGER NOT NULL REFERENCES bosses(chat_id),
-            content      TEXT NOT NULL,
-            remind_at    TIMESTAMP NOT NULL,
-            status       TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'done')),
-            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            boss_chat_id    INTEGER NOT NULL REFERENCES bosses(chat_id),
+            target_chat_id  INTEGER,
+            target_name     TEXT DEFAULT '',
+            content         TEXT NOT NULL,
+            remind_at       TIMESTAMP NOT NULL,
+            status          TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'done')),
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
     await db.commit()
@@ -290,13 +292,15 @@ async def create_reminder(
     boss_chat_id: int,
     content: str,
     remind_at: datetime,
+    target_chat_id: Optional[int] = None,
+    target_name: str = "",
     db_path: str = "data/history.db",
 ) -> int:
     db = await get_db(db_path)
     remind_at_str = remind_at.isoformat(sep=" ", timespec="seconds")
     cur = await db.execute(
-        "INSERT INTO reminders (boss_chat_id, content, remind_at) VALUES (?, ?, ?)",
-        (boss_chat_id, content, remind_at_str),
+        "INSERT INTO reminders (boss_chat_id, target_chat_id, target_name, content, remind_at) VALUES (?, ?, ?, ?, ?)",
+        (boss_chat_id, target_chat_id, target_name, content, remind_at_str),
     )
     await db.commit()
     return cur.lastrowid
