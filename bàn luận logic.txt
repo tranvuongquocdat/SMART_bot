@@ -187,3 +187,660 @@ CÒN BÀN:
 - [ ] Có cần tool "reassign_task" riêng không hay dùng update_task?
 - [ ] Follow-up tự động: scheduler check hay agent tự nhắc?
 - [ ] Giới hạn chỉ CEO dùng hay cho team dùng?
+
+
+
+Note các tính năng cần thêm:
+- Cho phép người được giao task chỉnh sửa nội dung task
+- Cần tạo DB tạo liên kết nhân sự để bot giao tiếp mượt hơn
+- Search task linh động hơn, không nhất thiết phải đúng từng từ trên task
+- Tự nhắn tin và tự cập nhật tiến độ cho người liên quan
+- Tập trung vào chat và quản lý nhóm:
+    - Nhóm sẽ có:
+        - Tasks nhóm
+        - Tasks cá nhân
+            - Check effort của người được giao task còn trống không, ko thì sẽ cần phản hồi lại
+        - Dự án của nhóm
+            - Note dự án
+            - Phân công dự án 
+
+    - Nhắn tin riêng:
+        - Cập nhật thông tin giữa người dùng nhắn cho bot về việc của sếp Tùng
+        - Giao tasks -> Giao cá nhân và giao nhóm -> thông báo đến cá nhân/ nhóm liên quan
+        - Follow up các dự án với sếp
+
+
+- Tạo liên kết giữa mọi người với nhau:
+    - bằng cách nào tôi chưa nghĩ ra???
+
+
+====================================
+BRAINSTORM V2: CEO ASSISTANT AGENT
+====================================
+Ngày: 2026-04-12
+
+Thiết kế lại toàn bộ kiến trúc, chuyển từ bot 1-1 cho CEO sang hệ thống trợ lý giám đốc
+đầy đủ, tương tác với cả team, đối tác, quản lý nhóm + dự án.
+
+---
+
+QUYẾT ĐỊNH TỔNG QUAN:
+
+  1. Platform: Telegram (1-1 + group chat). Lark Base chỉ là backend lưu data.
+     Lý do: phổ biến, ai cũng dùng, không cần thuộc tổ chức.
+
+  2. Multi-user: 4 loại người dùng:
+     - Sếp (boss): toàn quyền
+     - Thành viên (member): xem/cập nhật task mình, sửa nội dung/tên/assignee task
+     - Đối tác (partner): nhận task, cập nhật task, nhắn qua bot
+     - Khách lạ: chưa xác định → onboard
+
+  3. Phân quyền: CEO toàn quyền, member + partner hạn chế.
+     Member sửa được: status, nội dung task, tên task, đẩy lại assignee (bot báo sếp).
+     Member/partner KHÔNG được: giao task, xem task người khác, xem tổng quan.
+
+  4. Mỗi sếp 1 Lark Base riêng (auto provision khi onboard).
+     Test xác nhận: free plan hỗ trợ tạo base + table + fields qua API.
+
+  5. 2 Agent architecture:
+     - Secretary agent: xử lý chat realtime, CRUD, nhắn tin, phản hồi nhanh
+     - Advisor agent: bàn chiến lược, smart daily review, phân tích sâu
+
+  6. Tất cả người dùng phải có Telegram. Không hỗ trợ file/ảnh/voice phase đầu.
+
+---
+
+DATA MODEL — LARK BASE (mỗi sếp 1 base riêng):
+
+  Khi sếp onboard → bot tạo base "{tên công ty} - AI Secretary" với 4 bảng:
+
+  Bảng People:
+    - Tên              (Text)    Tên đầy đủ
+    - Tên gọi          (Text)    Tên hay gọi (Bách, Hùng...)
+    - Chat ID          (Number)  Telegram chat_id
+    - Username          (Text)    Telegram @username
+    - Type              (Text)    boss / member / partner
+    - Nhóm              (Text)    Team nào (member) hoặc công ty nào (partner)
+    - Vai trò           (Text)    Editor, designer, giám đốc bên X...
+    - Kỹ năng           (Text)    Premiere, Figma, lập trình...
+    - SĐT               (Text)    Số điện thoại
+    - Ghi chú           (Text)    Context tự do (ở Tây Hồ, hay remote...)
+
+    Lưu ý: KHÔNG có field biệt danh cố định. Agent tự suy luận từ context.
+    VD: "Bách dev" → agent đọc People, thấy Bách vai trò editor team media → match.
+    Nếu trùng tên → agent hỏi lại CEO.
+
+  Bảng Tasks:
+    - Tên task          (Text)    Nội dung việc
+    - Assignee          (Text)    Tên người được giao (member hoặc partner)
+    - Deadline          (Date)    Hạn hoàn thành
+    - Start time        (Date)    Thời gian bắt đầu (cho cuộc họp/lịch hẹn)
+    - Location          (Text)    Địa điểm (nếu có)
+    - Priority          (Text)    Cao / Trung bình / Thấp
+    - Status            (Text)    Mới / Đang làm / Xong / Quá hạn
+    - Project           (Text)    Thuộc dự án nào (nếu có)
+    - Giao bởi          (Text)    Ai giao
+    - Tin nhắn gốc      (Text)    Lưu lại lời sếp nói
+    - Group ID          (Number)  Giao từ group nào (nếu có)
+
+  Bảng Projects:
+    - Tên dự án         (Text)    NAB 2026, Podcast nội bộ...
+    - Mô tả             (Text)    Mục tiêu, scope
+    - Người phụ trách   (Text)    Lead dự án
+    - Thành viên        (Text)    Ai tham gia
+    - Deadline          (Date)    Hạn dự án
+    - Trạng thái        (Text)    Planning / Active / Done
+
+  Bảng Ideas:
+    - Nội dung          (Text)    Ý tưởng
+    - Tags              (Text)    Phân loại
+    - Người tạo         (Text)    Ai đề xuất
+    - Project           (Text)    Thuộc dự án nào (nếu có)
+
+---
+
+DATA MODEL — SQLITE (DB nội bộ bot):
+
+  Bảng bosses — quản lý sếp + workspace:
+    - chat_id             INTEGER PK    Telegram chat_id sếp
+    - name                TEXT          Tên sếp
+    - lark_base_token     TEXT          App token Lark Base riêng
+    - lark_table_tasks    TEXT          Table ID bảng Tasks
+    - lark_table_people   TEXT          Table ID bảng People
+    - lark_table_projects TEXT          Table ID bảng Projects
+    - lark_table_ideas    TEXT          Table ID bảng Ideas
+    - created_at          TIMESTAMP
+
+  Bảng people_map — routing nhanh: ai → thuộc sếp nào:
+    - chat_id             INTEGER PK    Telegram chat_id
+    - boss_chat_id        INTEGER FK    Thuộc sếp nào
+    - type                TEXT          boss / member / partner
+    - name                TEXT          Cache tên
+
+  Bảng group_map — link group → sếp:
+    - group_chat_id       INTEGER PK    Telegram group chat_id
+    - boss_chat_id        INTEGER FK    Group thuộc sếp nào
+    - group_name          TEXT
+
+  Bảng messages — lịch sử chat (mở rộng):
+    - id                  INTEGER PK
+    - chat_id             INTEGER       Chat 1-1 hoặc group chat_id
+    - sender_id           INTEGER       Ai gửi (phân biệt trong group)
+    - role                TEXT          user / assistant
+    - content             TEXT
+    - created_at          TIMESTAMP
+
+  Bảng notes — bộ nhớ nội bộ bot:
+    - id                  INTEGER PK
+    - boss_chat_id        INTEGER FK    Thuộc workspace sếp nào
+    - type                TEXT          personal / project / group
+    - ref_id              TEXT          chat_id người / project name / group_chat_id
+    - content             TEXT          Nội dung note
+    - updated_at          TIMESTAMP
+
+    Note là bộ nhớ của bot, KHÔNG phải cho user đọc.
+    - personal note: ghi nhớ về từng người (thói quen, cách làm việc)
+    - project note: ghi nhớ về dự án (context, quyết định đã bàn)
+    - group note: ghi nhớ về nhóm (cách hoạt động, tình hình)
+    Inject vào context theo ngữ cảnh: chat ở đâu dùng note bên đó.
+
+  Bảng reminders — nhắc nhở cá nhân CEO:
+    - id                  INTEGER PK
+    - boss_chat_id        INTEGER FK
+    - content             TEXT          Nội dung nhắc
+    - remind_at           TIMESTAMP     Thời điểm nhắc
+    - status              TEXT          pending / done
+    - created_at          TIMESTAMP
+
+---
+
+QDRANT COLLECTIONS (mỗi sếp riêng):
+
+  messages_{boss_chat_id}   Lịch sử chat (1-1 + group)
+  tasks_{boss_chat_id}      Index task để semantic search
+
+  Khi tạo/update/xóa task → tự động sync Qdrant.
+  Context mỗi cuộc chat: 8 recent + 5 RAG + tool search_history nếu cần thêm.
+
+---
+
+2 AGENT ARCHITECTURE:
+
+  Agent 1 — Secretary (realtime):
+    Vai trò: xử lý mọi chat, CRUD, nhắn tin, phản hồi nhanh
+    Khi nào chạy: mỗi khi có tin nhắn đến
+    Tools: tất cả 23 tools
+    System prompt: gọn, tập trung vào hành động
+    Context: notes + 8 recent + 5 RAG + People list (gọn)
+
+  Agent 2 — Advisor (chiến lược):
+    Vai trò: phân tích, đề xuất, bàn chiến lược
+    Khi nào chạy:
+      - CEO hỏi ý kiến / bàn chiến lược → Secretary chuyển sang Advisor
+      - Smart daily review (cron 8h sáng)
+    Tools: list_tasks, list_members, check_effort, list_projects, get_note, search_history
+    System prompt: tập trung phân tích + đề xuất có lý do
+    Context: inject NHIỀU data hơn — toàn bộ task, workload, timeline, notes
+
+  Flow routing:
+    Tin nhắn → Secretary xử lý
+      ├─ Lệnh bình thường → Secretary tự xử lý
+      └─ Sếp muốn bàn chiến lược → Secretary chuyển Advisor
+         VD: "Tuần này sắp xếp thế nào?", "Nên phân ai làm gì?"
+         → Advisor phân tích data → đề xuất → trả CEO
+
+---
+
+BỘ TOOLS (8 nhóm, 23 tools):
+
+  1. Task tools (5):
+     create_task(name, assignee, deadline, priority, project?, start_time?, location?, original_message?)
+       - Auto check effort + xung đột trước khi tạo
+       - Nếu conflict → cảnh báo + gợi ý giải pháp → chờ CEO quyết
+     list_tasks(assignee?, status?, deadline_from?, deadline_to?, project?)
+     update_task(search_keyword, status?, deadline?, assignee?, priority?, name?, content?)
+     delete_task(search_keyword)
+       - LUÔN confirm trước khi xóa
+       - Xóa task + xóa vector trong Qdrant
+     search_tasks(query)
+       - Semantic search qua Qdrant collection tasks
+       - Dùng cho query mơ hồ: "task nào liên quan marketing?"
+
+  2. People tools (6):
+     add_people(name, chat_id?, username?, group?, type?, role_desc?, skills?, note?)
+     get_people(search_name)
+     list_people(group?, type?)
+     update_people(search_name, **fields)
+     delete_people(search_name)
+       - LUÔN confirm trước khi xóa
+       - Xóa Lark Base + people_map
+     check_effort(assignee, deadline?)
+       - Check 2 chiều: quá tải + xung đột deadline/lịch
+       - Trả về: số task đang có, task trùng deadline, gợi ý
+
+  3. Project tools (5):
+     create_project(name, description?, lead?, members?, deadline?)
+     get_project(search_name)
+       - Trả về chi tiết project + tasks liên quan
+     list_projects(status?)
+     update_project(search_name, **fields)
+     delete_project(search_name)
+       - LUÔN confirm trước khi xóa
+
+  4. Note tools (2):
+     update_note(type, ref_id, content)
+       - type: personal / project / group
+       - Agent tự gọi khi biết thêm thông tin
+     get_note(type, ref_id)
+       - Agent gọi khi cần thêm context
+
+  5. Memory tools (1):
+     search_history(query, chat_id?)
+       - Hybrid search Qdrant (vector + keyword)
+       - Search trong chat 1-1 hoặc group
+
+  6. Summary tools (2):
+     get_summary(type: "today"/"week", assignee?)
+     get_workload(assignee?)
+
+  7. Idea tools (1):
+     create_idea(content, tags?, project?)
+
+  8. Messaging tools (1):
+     send_message(to, content)
+       - Nhắn tin cho member/partner/group thay sếp
+       - 2 chiều: sếp → member, member → sếp
+       - Tra People → lấy chat_id → gửi Telegram
+       - Chỉ sếp dùng chủ động; member chỉ nhờ chuyển lời
+
+  9. Search tools (1):
+     web_search(query)
+       - Tìm kiếm web (DuckDuckGo hoặc Tavily)
+       - Khi CEO hỏi thông tin bên ngoài
+
+  10. Reminder tools (1):
+      create_reminder(content, remind_at)
+        - Tạo nhắc nhở cá nhân cho sếp
+        - "Nhắc anh 5h gọi đối tác" → create_reminder
+
+  Tổng: 10 nhóm, 25 tools
+
+---
+
+FLOW AGENT — XỬ LÝ TIN NHẮN:
+
+  Tin nhắn đến
+    │
+    ├─ Từ group chat?
+    │   ├─ Có tag @bot? → XỬ LÝ
+    │   │   ├─ Check sender: sếp → full quyền
+    │   │   └─ Check sender: member/partner → hạn chế
+    │   └─ Không tag → LƯU messages + Qdrant, KHÔNG xử lý
+    │
+    └─ Từ chat 1-1?
+        ├─ Check bosses → là sếp → FULL QUYỀN
+        ├─ Check people_map → là member/partner → HẠN CHẾ
+        └─ Không ai biết → ONBOARD
+
+  Context injection:
+
+    Sếp chat 1-1:
+      - System prompt (full quyền)
+      - Personal note của sếp
+      - 8 recent + 5 RAG
+      - Danh sách People (gọn, để agent nhận diện tên)
+
+    Member/Partner chat 1-1:
+      - System prompt (hạn chế, xưng trợ lý của sếp X)
+      - Personal note của member
+      - 8 recent + 5 RAG (chat riêng)
+      - Task của người đó (gọn)
+
+    Group chat (khi tag bot):
+      - System prompt (quyền tùy người tag)
+      - Group note
+      - 8 recent + 5 RAG (group context)
+      - Danh sách People trong group
+
+---
+
+SCHEDULER:
+
+  Cron jobs hàng ngày (loop qua tất cả bosses):
+
+    8h sáng:
+      - Advisor agent chạy smart daily review
+      - Đọc toàn bộ: tasks, workload, deadline, projects
+      - Suy luận + đề xuất chiến lược (không phải template cứng)
+      - Gửi CEO briefing + đề xuất
+
+    17h chiều:
+      - Gửi CEO tổng kết ngày: xong/chưa xong/cần follow up
+
+  Nhắc deadline:
+    - Task deadline trong 24h → nhắn người được giao
+    - Task deadline trong 2h → nhắn lại nếu chưa xong
+    - Task quá hạn → nhắn người + báo CEO
+
+  Follow up tiến độ:
+    - Task giao > 2 ngày, chưa update → bot hỏi "Task X tới đâu rồi?"
+    - Người trả lời → bot tóm tắt, báo CEO
+    - Không trả lời trong 24h → báo CEO
+
+  Reminders:
+    - Check bảng reminders mỗi phút
+    - Đến giờ → nhắn sếp → mark done
+
+  Thông báo realtime (không phải cron, trigger khi có sự kiện):
+    - CEO tạo task → nhắn assignee
+    - CEO đổi deadline/assignee → nhắn người liên quan
+    - Member cập nhật task → báo CEO
+    - Member đẩy lại assignee → báo CEO
+
+---
+
+ONBOARDING FLOW:
+
+  Sếp mới:
+    1. Người lạ nhắn bot
+    2. Bot: "Chào! Em là trợ lý AI. Anh/chị là quản lý hay thành viên team?"
+    3. "Anh là sếp"
+    4. Bot hỏi: tên, công ty, cách xưng hô
+    5. Bot tự động:
+       a. Tạo Lark Base "{công ty} - AI Secretary"
+       b. Tạo 4 bảng: People, Tasks, Projects, Ideas (đúng schema)
+       c. Tạo 2 Qdrant collections: messages_{id}, tasks_{id}
+       d. Lưu SQLite: bosses + people_map (type=boss)
+       e. Tạo personal note
+       f. Thêm sếp vào bảng People trên Lark Base (type=boss)
+    6. Bot: "Xong rồi! Anh có thể giao việc hoặc thêm thành viên."
+
+  Thành viên/Đối tác mới:
+    1. Người lạ nhắn bot
+    2. "Em là thành viên" / "Tôi là đối tác"
+    3. Bot: "Thuộc team của ai? Tên sếp hoặc công ty?"
+    4. Bot tra bosses → match
+    5. Bot hỏi: tên, vai trò, nhóm, kỹ năng
+    6. Bot tự động:
+       a. Thêm vào People trên Lark Base (type=member/partner)
+       b. Lưu people_map trong SQLite
+       c. Tạo personal note
+    7. Bot: "OK! Đã liên kết với team anh X. Khi có task em sẽ nhắn nhé."
+
+  Group mới:
+    1. Bot được add vào group Telegram
+    2. Bot: "Chào! Group này thuộc workspace của ai ạ?"
+    3. Sếp trả lời
+    4. Bot lưu group_map → link group với sếp
+    5. Bắt đầu lưu tin nhắn group
+
+---
+
+THINKING UX (Telegram):
+
+  Dùng Telegram API editMessageText — gửi 1 tin nhắn, cập nhật realtime:
+
+  User hỏi
+    → Bot gửi: "Đang xem task..."
+    → Agent gọi list_tasks
+    → Bot sửa: "Đang kiểm tra lịch..."
+    → Agent gọi check_effort
+    → Bot sửa: "Đang sắp xếp..."
+    → Agent xong
+    → Bot sửa: câu trả lời cuối cùng (replace toàn bộ)
+
+  Map tool → text thân thiện:
+    list_tasks       → "Đang xem danh sách task..."
+    check_effort     → "Đang kiểm tra lịch..."
+    search_history   → "Đang tra lịch sử..."
+    web_search       → "Đang tìm kiếm thông tin..."
+    create_task      → "Đang tạo task..."
+    send_message     → "Đang nhắn tin..."
+
+---
+
+TÍNH NĂNG BÀN CHIẾN LƯỢC:
+
+  Reactive — sếp hỏi thì bàn:
+    - "Dự án NAB nên phân ai?" → Advisor phân tích workload + skill → gợi ý
+    - "Tuần này ưu tiên gì?" → Advisor xem deadline, task tồn → đề xuất
+    - "Sắp xếp task cho team" → Advisor cân đối effort → đề xuất phân công
+
+  Proactive — bot chủ động bàn (smart daily review):
+    - "Tuần sau 3 deadline dồn, đề xuất chuyển task X cho Hùng"
+    - "Dự án NAB chậm 2 task, anh muốn em nhắn team họp nhanh không?"
+    - Không template cứng — agent tự suy luận từ data
+
+---
+
+TECH STACK:
+
+  Giữ nguyên:
+    - Python + FastAPI + uvicorn
+    - OpenAI GPT-5.4 (function calling)
+    - Qdrant (vector DB)
+    - SQLite (aiosqlite)
+    - Lark Base API (data storage)
+    - Telegram Bot API (polling)
+    - APScheduler (cron)
+    - httpx (HTTP client)
+    - Cohere (rerank)
+
+  Thêm mới:
+    - DuckDuckGo hoặc Tavily (web search)
+
+---
+
+ĐÃ QUYẾT ĐỊNH (trước đây CÒN BÀN):
+
+---
+
+SECRETARY → ADVISOR ROUTING:
+
+  Cơ chế: tool escalate_to_advisor(context, question)
+  - Secretary tự phán đoán khi nào cần chuyển (không dùng keyword detect)
+  - GPT-5.4 đủ thông minh hiểu ngữ cảnh
+  - Tool này = "kích hoạt extended skill" cho Secretary
+
+  Khi nào Secretary nên escalate:
+    - Sếp hỏi ý kiến chiến lược, phân tích tình hình
+    - Sắp xếp / cân đối công việc tổng thể cho team
+    - So sánh, đánh giá, đề xuất phương án
+    - Câu hỏi cần nhìn toàn cảnh (nhiều người, nhiều project)
+
+  Khi nào Secretary TỰ XỬ LÝ:
+    - CRUD đơn giản (tạo/sửa/xóa task, member, project)
+    - Hỏi thông tin cụ thể (task của Bách, deadline hôm nay)
+    - Nhắn tin, reminder, summary
+    - Giao tiếp thông thường
+
+  Flow:
+    CEO: "Tuần sau nên sắp xếp thế nào?"
+      → Secretary nhận, nhận ra cần phân tích sâu
+      → Gọi escalate_to_advisor(
+          context="CEO hỏi sắp xếp công việc tuần sau",
+          question="Phân tích workload team và đề xuất sắp xếp công việc tuần sau"
+        )
+      → Advisor chạy: kéo tasks, workload, deadlines, projects, notes
+      → Advisor phân tích + soạn đề xuất
+      → Trả về Secretary → Secretary gửi CEO
+
+  Tổng tools cập nhật: 10 nhóm, 26 tools (thêm escalate_to_advisor)
+
+---
+
+SYSTEM PROMPT — SECRETARY AGENT:
+
+  """
+  Bạn là thư ký AI của {boss_name}, công ty {company_name}. Giao tiếp tiếng Việt,
+  thân thiện, ngắn gọn, chuyên nghiệp.
+
+  ## Thông tin sếp:
+  {personal_note}
+
+  ## Thời gian: {current_time}
+
+  ## Danh sách nhân sự:
+  {people_summary}
+
+  ## Bạn đang nói chuyện với:
+  Chat: {chat_type} (1-1 / group)
+  Người: {sender_name} ({sender_type}: boss/member/partner)
+  {context_note}
+
+  ## Quy tắc phân quyền:
+  - Nếu đang nói với SẾP ({boss_name}):
+    → Toàn quyền. Xưng hô theo personal note.
+    → Khi sếp giao task → check_effort trước → cảnh báo nếu xung đột → gợi ý giải pháp.
+    → Khi sếp hỏi chiến lược / sắp xếp tổng thể → gọi escalate_to_advisor.
+    → Mọi thao tác xóa → confirm trước.
+
+  - Nếu đang nói với MEMBER/PARTNER:
+    → Xưng "em là trợ lý của {boss_name}".
+    → Chỉ cho xem/cập nhật task của họ.
+    → Member được sửa: status, nội dung, tên task, đẩy lại assignee.
+    → Khi member đẩy lại assignee hoặc cập nhật quan trọng → ghi nhận, báo sếp.
+    → KHÔNG cho xem task người khác, xem tổng quan, giao task mới.
+    → Không tự quyết thay sếp. Nếu không chắc → "Em ghi nhận, báo lại {boss_name} nhé."
+
+  - Nếu trong GROUP:
+    → Chỉ phản hồi khi được tag.
+    → Quyền tùy người tag (sếp hay member).
+
+  ## Hướng dẫn chung:
+  - Trả lời ngắn gọn, đi thẳng vấn đề.
+  - Có thể gọi nhiều tool liên tiếp.
+  - Khi biết thêm thông tin về người/nhóm/dự án → update_note.
+  - Khi cần context cũ → search_history.
+  - Nhận diện người bằng tên gọi + context từ danh sách nhân sự. Nếu không chắc → hỏi lại.
+  """
+
+---
+
+SYSTEM PROMPT — ADVISOR AGENT:
+
+  """
+  Bạn là cố vấn chiến lược cho {boss_name}, CEO {company_name}.
+  Vai trò: phân tích tình hình, đề xuất giải pháp, giúp sếp ra quyết định.
+
+  ## Thông tin sếp:
+  {personal_note}
+
+  ## Thời gian: {current_time}
+
+  ## Câu hỏi từ sếp:
+  {question}
+
+  ## Context từ Secretary:
+  {secretary_context}
+
+  ## Hướng dẫn:
+  - Phân tích dựa trên DATA thực tế. Gọi tools để lấy data trước khi đưa ý kiến.
+  - Luôn đưa ra đề xuất cụ thể, có lý do, kèm phương án thay thế.
+  - Xem xét: workload từng người, deadline, kỹ năng phù hợp, xung đột lịch.
+  - Nếu thiếu thông tin → nói rõ thiếu gì, đề xuất dựa trên cái đang có.
+  - Trả lời có cấu trúc: Tình hình → Phân tích → Đề xuất → Lý do.
+  - Ngôn ngữ: tiếng Việt, chuyên nghiệp, đi thẳng vấn đề.
+  - Không dài dòng lý thuyết, tập trung vào hành động cụ thể sếp cần làm.
+  """
+
+---
+
+SMART DAILY REVIEW — ADVISOR PROMPT:
+
+  Chạy mỗi sáng 8h cho mỗi sếp:
+
+  """
+  Bạn là cố vấn AI của {boss_name}. Hôm nay là {current_time}.
+  Nhiệm vụ: phân tích tổng quan và soạn briefing sáng cho sếp.
+
+  Hãy:
+  1. Xem tasks hôm nay + tasks quá hạn + tasks deadline trong 3 ngày tới
+  2. Xem workload từng người
+  3. Xem tiến độ các dự án đang active
+  4. Phân tích: có gì cần cảnh báo? Ai quá tải? Deadline nào nguy hiểm?
+  5. Đề xuất hành động cụ thể nếu cần
+
+  Format trả lời:
+  - Mở đầu: chào sếp, tóm 1 câu tình hình chung
+  - Tasks hôm nay (nếu có)
+  - Cảnh báo (nếu có): quá hạn, quá tải, xung đột
+  - Đề xuất (nếu có): chuyển task, dời deadline, nhắc team
+  - Kết: ngắn gọn, hỏi sếp muốn em xử lý gì không
+
+  Ngắn gọn, không quá 300 từ. Chỉ nêu điều quan trọng.
+  """
+
+---
+
+GIỚI HẠN TOKEN — CONTEXT INJECTION:
+
+  Vấn đề: khi sếp có 50 người, 200 task → inject hết sẽ tràn context.
+
+  Giải pháp theo tầng:
+
+  People summary (luôn inject):
+    - Chỉ inject danh sách gọn: "Bách (editor, team media), Hùng (designer, team media)..."
+    - Ước tính: ~20 tokens/người × 50 người = ~1000 tokens. Chấp nhận được.
+    - Nếu > 100 người: chỉ inject nhóm liên quan (cùng group chat, cùng project đang bàn).
+
+  Tasks (KHÔNG inject, dùng tool):
+    - Secretary KHÔNG inject danh sách task vào context.
+    - Khi cần → agent tự gọi list_tasks, search_tasks.
+    - Ngoại lệ: member chat 1-1 → inject gọn task của người đó (thường < 10 task).
+
+  Notes (inject theo ngữ cảnh):
+    - Chỉ inject note liên quan: personal note người đang chat + project/group note nếu relevant.
+    - Mỗi note giới hạn 2000 tokens (agent tự tóm tắt khi update).
+
+  Advisor agent:
+    - Được inject nhiều hơn: gọi tool lấy data rồi tự phân tích.
+    - Không inject cứng — Advisor tự kéo data qua tools.
+
+  Budget ước tính mỗi request Secretary:
+    - System prompt:     ~500 tokens
+    - Personal note:     ~500 tokens
+    - People summary:    ~1000 tokens
+    - Context note:      ~500 tokens
+    - 8 recent messages: ~2000 tokens
+    - 5 RAG messages:    ~1500 tokens
+    - Tool definitions:  ~3000 tokens
+    Tổng: ~9000 tokens input. Còn thoải mái cho GPT-5.4 (128k context).
+
+---
+
+RATE LIMIT — LARK API FREE PLAN:
+
+  Lark API free plan: ~100 requests/phút (tùy endpoint).
+  Bot dự kiến: ~5-20 Lark requests/tin nhắn (CRUD + search).
+
+  Giải pháp:
+  - Retry với exponential backoff khi bị 429.
+  - Cache danh sách People trong memory (refresh mỗi 5 phút hoặc khi có thay đổi).
+    → Giảm call Lark mỗi tin nhắn (không cần query People mỗi lần).
+  - Batch operations: khi update nhiều task → dùng batch API của Lark.
+  - Nếu scale lớn (>10 sếp active) → cân nhắc upgrade Lark plan.
+
+---
+
+BACKUP / RECOVERY:
+
+  SQLite:
+  - Backup tự động mỗi ngày (cron copy file DB → backup folder với timestamp).
+  - Giữ 7 bản backup gần nhất, xóa cũ hơn.
+  - SQLite là file đơn, dễ backup/restore.
+
+  Qdrant:
+  - Qdrant có snapshot API: POST /collections/{name}/snapshots
+  - Backup mỗi ngày, giữ 3 bản.
+  - Nếu mất Qdrant → rebuild từ messages + tasks trong Lark Base + SQLite.
+    (embed lại toàn bộ, chậm nhưng không mất data)
+
+  Lark Base:
+  - Là cloud service, Lark tự backup.
+  - Bot chỉ đọc/ghi, không cần backup phía mình.
+
+  Recovery priority:
+  1. SQLite (bosses, people_map, group_map) — quan trọng nhất, mất = không biết ai là ai
+  2. Qdrant — mất thì rebuild được, chỉ tốn thời gian
+  3. Lark Base — cloud, ít rủi ro

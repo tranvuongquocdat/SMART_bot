@@ -13,29 +13,25 @@ logging.basicConfig(
 from src import agent, db, scheduler
 from src.config import Settings
 from src.services import cohere, lark, openai_client, qdrant, telegram
-from src.tools import init_tools
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     settings = Settings()
 
-    # Init all services
-    await db.init_db(settings.db_path)
+    # Init services
+    await db.get_db(settings.db_path)
     openai_client.init_openai(
         settings.openai_api_key,
         settings.openai_chat_model,
         settings.openai_embedding_model,
     )
-    await qdrant.init_qdrant(settings.qdrant_url, settings.qdrant_collection)
+    await qdrant.init_qdrant(settings.qdrant_url)
     await cohere.init_cohere(settings.cohere_api_key)
-    await lark.init_lark(
-        settings.lark_app_id, settings.lark_app_secret, settings.lark_base_app_token
-    )
+    await lark.init_lark(settings.lark_app_id, settings.lark_app_secret)
     await telegram.init_telegram(settings.telegram_bot_token)
 
-    # Init tools + agent
-    init_tools(settings)
+    # Init agent
     agent.init_agent(settings)
 
     # Start scheduler + polling
