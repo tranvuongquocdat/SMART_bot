@@ -76,7 +76,22 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    await _migrate_schema(db)
     await db.commit()
+
+
+async def _migrate_schema(db: aiosqlite.Connection) -> None:
+    """Apply additive SQLite migrations (CREATE IF NOT EXISTS does not alter old tables)."""
+    async with db.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'"
+    ) as cur:
+        if not await cur.fetchone():
+            return
+    async with db.execute("PRAGMA table_info(messages)") as cur:
+        rows = await cur.fetchall()
+    col_names = {r[1] for r in rows}
+    if "sender_id" not in col_names:
+        await db.execute("ALTER TABLE messages ADD COLUMN sender_id INTEGER")
 
 
 # ---------------------------------------------------------------------------
