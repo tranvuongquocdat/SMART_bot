@@ -1,21 +1,84 @@
 """Onboarding state machine for new users.
 
+Uses AI to understand user intent at every step — no keyword matching.
+
 Three paths:
   boss    — create a new workspace
   member  — join an existing team as member
   partner — join an existing team as partner
 """
 
+import json
 import logging
 
 from src import db
-from src.services import lark, qdrant
+from src.services import lark, openai_client, qdrant
 from src.services import telegram
 
 logger = logging.getLogger("onboarding")
 
 # in-memory state: {chat_id: {"step": str, ...}}
 _onboarding: dict[int, dict] = {}
+
+# ---------------------------------------------------------------------------
+# AI classifier
+# ---------------------------------------------------------------------------
+
+async def _ai_classify(system_prompt: str, user_text: str) -> dict:
+    """Send a short classification request to the LLM. Returns parsed JSON."""
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_text},
+    ]
+    response, _ = await openai_client.chat_with_tools(messages, [])
+    content = response.content or ""
+    # Extract JSON from response
+    try:
+        # Try direct parse first
+        return json.loads(content)
+    except json.JSONDecodeError:
+        # Try to find JSON in the response
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            return json.loads(content[start:end])
+        return {}
+
+
+_CLASSIFY_TYPE_PROMPT = """\
+Bạn phân loại tin nhắn của người dùng mới. Họ đang cho biết vai trò của mình.
+
+Có 3 loại:
+- "boss" = sếp, giám đốc, quản lý, chủ doanh nghiệp, người muốn tạo workspace mới
+- "member" = nhân viên, thành viên, người làm trong team
+- "partner" = đối tác, cộng tác viên, freelancer, khách hàng
+
+Trả về JSON duy nhất, không giải thích:
+{"type": "boss"} hoặc {"type": "member"} hoặc {"type": "partner"} hoặc {"type": "unclear"}
+
+Nếu không rõ → {"type": "unclear"}\
+"""
+
+_CLASSIFY_CONFIRM_PROMPT = """\
+Người dùng đang được hỏi xác nhận tạo workspace. Họ cần đồng ý hoặc từ chối.
+
+Trả về JSON duy nhất, không giải thích:
+{"confirm": true} nếu họ đồng ý (ok, ừ, được, oke, yes, tạo đi, đồng ý, v.v.)
+{"confirm": false} nếu họ từ chối hoặc muốn sửa (không, chờ, sai rồi, hủy, v.v.)
+{"confirm": null} nếu không liên quan\
+"""
+
+_CLASSIFY_BOSS_SEARCH_PROMPT = """\
+Người dùng đang chọn team để tham gia. Có danh sách sau:
+{boss_list}
+
+Người dùng nói: "{user_text}"
+
+Nếu họ chọn bằng số hoặc nêu tên/công ty khớp 1 kết quả → trả về index (bắt đầu từ 0).
+Nếu không rõ hoặc không khớp → trả về -1.
+
+Trả về JSON duy nhất: {{"index": 0}} hoặc {{"index": -1}}\
+"""
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -29,7 +92,7 @@ def is_onboarding(chat_id: int) -> bool:
 
 def start_onboarding(chat_id: int) -> None:
     """Begin onboarding for a new user."""
-    _onboarding[chat_id] = {"step": "ask_type"}
+    _onboarding[chat_id] = {"step": "ask_type", "first": True}
     logger.info("[onboarding] started for chat_id=%s", chat_id)
 
 
@@ -61,43 +124,45 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
 # Step handlers
 # ---------------------------------------------------------------------------
 
-_BOSS_KEYWORDS = {"1", "sếp", "quản lý", "giám đốc"}
-_MEMBER_KEYWORDS = {"2", "thành viên", "member", "nhân viên"}
-_PARTNER_KEYWORDS = {"3", "đối tác", "partner"}
-
 _WELCOME = (
-    "Chào mừng! Bạn là:\n"
+    "Xin chào! Tôi là trợ lý AI.\n\n"
+    "Để bắt đầu, cho tôi biết bạn là:\n"
     "1. Sếp / Giám đốc — tạo workspace mới\n"
-    "2. Thành viên / Nhân viên — tham gia team\n"
-    "3. Đối tác / Partner — tham gia team\n\n"
-    "Trả lời 1, 2 hoặc 3 nhé!"
+    "2. Thành viên / Nhân viên — tham gia team có sẵn\n"
+    "3. Đối tác / Partner — tham gia team có sẵn\n\n"
+    "Bạn thuộc nhóm nào?"
 )
 
 
-async def _send_welcome(chat_id: int) -> None:
-    await telegram.send(chat_id, _WELCOME)
-
-
 async def _step_ask_type(text: str, chat_id: int, state: dict) -> None:
-    normalized = text.strip().lower()
+    # Lần đầu nhắn → gửi welcome, bỏ qua message hiện tại
+    if state.pop("first", False):
+        await telegram.send(chat_id, _WELCOME)
+        return
 
-    if normalized in _BOSS_KEYWORDS:
+    result = await _ai_classify(_CLASSIFY_TYPE_PROMPT, text)
+    user_type = result.get("type", "unclear")
+
+    if user_type == "boss":
         state["step"] = "boss_name"
         state["type"] = "boss"
         await telegram.send(chat_id, "Tên anh/chị là gì ạ?")
 
-    elif normalized in _MEMBER_KEYWORDS:
+    elif user_type == "member":
         state["step"] = "member_boss"
         state["type"] = "member"
-        await telegram.send(chat_id, "Thuộc team của ai? Nhập tên sếp hoặc tên công ty nhé!")
+        await telegram.send(chat_id, "Bạn thuộc team của ai? Cho tôi biết tên sếp hoặc tên công ty nhé!")
 
-    elif normalized in _PARTNER_KEYWORDS:
+    elif user_type == "partner":
         state["step"] = "member_boss"
         state["type"] = "partner"
-        await telegram.send(chat_id, "Thuộc team của ai? Nhập tên sếp hoặc tên công ty nhé!")
+        await telegram.send(chat_id, "Bạn thuộc team của ai? Cho tôi biết tên sếp hoặc tên công ty nhé!")
 
     else:
-        await telegram.send(chat_id, "Trả lời 1, 2 hoặc 3 nhé!")
+        await telegram.send(
+            chat_id,
+            "Tôi chưa hiểu rõ. Bạn là sếp muốn tạo workspace mới, hay là thành viên/đối tác muốn tham gia team có sẵn?",
+        )
 
 
 # ---- Boss path -----------------------------------------------------------
@@ -109,7 +174,7 @@ async def _step_boss_name(text: str, chat_id: int, state: dict) -> None:
         return
     state["name"] = name
     state["step"] = "boss_company"
-    await telegram.send(chat_id, "Công ty/tổ chức tên gì ạ?")
+    await telegram.send(chat_id, f"Chào {name}! Công ty/tổ chức tên gì ạ?")
 
 
 async def _step_boss_company(text: str, chat_id: int, state: dict) -> None:
@@ -122,16 +187,25 @@ async def _step_boss_company(text: str, chat_id: int, state: dict) -> None:
     name = state["name"]
     await telegram.send(
         chat_id,
-        f"Tạo workspace cho *{name}* - *{company}* nhé? Trả lời OK",
+        f"Tạo workspace cho *{name}* - *{company}* nhé?\nXác nhận để tôi bắt đầu tạo.",
     )
 
 
 async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
-    if text.strip().upper() != "OK":
+    result = await _ai_classify(_CLASSIFY_CONFIRM_PROMPT, text)
+    confirm = result.get("confirm")
+
+    if confirm is None:
         await telegram.send(
             chat_id,
-            f"Tạo workspace cho *{state['name']}* - *{state['company']}* nhé? Trả lời OK",
+            f"Tạo workspace cho *{state['name']}* - *{state['company']}* nhé?\nXác nhận hoặc cho tôi biết cần sửa gì.",
         )
+        return
+
+    if not confirm:
+        # User muốn sửa → quay lại hỏi tên
+        state["step"] = "boss_name"
+        await telegram.send(chat_id, "OK, bắt đầu lại nhé. Tên anh/chị là gì ạ?")
         return
 
     name = state["name"]
@@ -205,32 +279,53 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
 async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
     query = text.strip()
     if not query:
-        await telegram.send(chat_id, "Thuộc team của ai? Nhập tên sếp hoặc tên công ty nhé!")
+        await telegram.send(chat_id, "Bạn thuộc team của ai? Cho tôi biết tên sếp hoặc tên công ty nhé!")
         return
 
-    # Nếu đang có danh sách chờ chọn → cho chọn bằng số
+    all_bosses = await db.get_all_bosses()
+    if not all_bosses:
+        await telegram.send(chat_id, "Hiện chưa có workspace nào trong hệ thống. Sếp của bạn cần đăng ký trước nhé!")
+        return
+
+    # Nếu đang có danh sách chờ chọn → dùng AI phân tích lựa chọn
     pending = state.get("pending_matches")
-    if pending and query.isdigit():
-        idx = int(query) - 1
+    if pending:
+        boss_list = "\n".join(
+            f"{i}. {b['name']} — {b.get('company', '')}"
+            for i, b in enumerate(pending)
+        )
+        prompt = _CLASSIFY_BOSS_SEARCH_PROMPT.format(boss_list=boss_list, user_text=query)
+        result = await _ai_classify(prompt, query)
+        idx = result.get("index", -1)
         if 0 <= idx < len(pending):
             state["boss"] = pending[idx]
             state.pop("pending_matches", None)
             state["step"] = "member_name"
             await telegram.send(chat_id, "Tên bạn là gì?")
             return
-        else:
-            await telegram.send(chat_id, f"Vui lòng chọn từ 1 đến {len(pending)}.")
-            return
+        # AI không chọn được → tiếp tục search bên dưới
 
-    all_bosses = await db.get_all_bosses()
+    # Tìm bằng text match trong tên sếp / tên công ty
     query_lower = query.lower()
     matches = [
         b for b in all_bosses
         if query_lower in b["name"].lower() or query_lower in b.get("company", "").lower()
     ]
 
+    # Nếu text match không ra → dùng AI tìm trong toàn bộ danh sách
+    if not matches and len(all_bosses) > 0:
+        boss_list = "\n".join(
+            f"{i}. {b['name']} — {b.get('company', '')}"
+            for i, b in enumerate(all_bosses)
+        )
+        prompt = _CLASSIFY_BOSS_SEARCH_PROMPT.format(boss_list=boss_list, user_text=query)
+        result = await _ai_classify(prompt, query)
+        idx = result.get("index", -1)
+        if 0 <= idx < len(all_bosses):
+            matches = [all_bosses[idx]]
+
     if len(matches) == 0:
-        await telegram.send(chat_id, "Không tìm thấy, thử lại?")
+        await telegram.send(chat_id, "Không tìm thấy team nào phù hợp. Thử nhập lại tên sếp hoặc tên công ty?")
         return
 
     if len(matches) > 1:
@@ -241,7 +336,7 @@ async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
         )
         await telegram.send(
             chat_id,
-            f"Tìm thấy nhiều kết quả:\n{lines}\n\nChọn số hoặc nhập cụ thể hơn nhé!",
+            f"Tìm thấy nhiều kết quả:\n{lines}\n\nBạn thuộc team nào?",
         )
         return
 
