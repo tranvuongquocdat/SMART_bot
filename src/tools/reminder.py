@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import asyncio
+
 from src import db
 from src.config import Settings
 from src.context import ChatContext
@@ -67,6 +69,22 @@ async def create_reminder(ctx: ChatContext, content: str, remind_at: str, target
         target_chat_id=target_chat_id,
         target_name=target_name,
     )
+
+    # Sync to Lark async (non-blocking)
+    if ctx.lark_table_reminders:
+        boss = await db.get_boss(str(ctx.boss_chat_id))
+        if boss:
+            asyncio.create_task(lark.sync_reminder_to_lark(
+                ctx.lark_base_token,
+                ctx.lark_table_reminders,
+                {
+                    "content": content,
+                    "remind_at_local": remind_at,
+                    "target_name": target_name,
+                    "status": "pending",
+                },
+                reminder_id,
+            ))
 
     if target_name and target_chat_id:
         return f"Da tao nhac nho #{reminder_id}: '{content}' cho {target_name} luc {remind_at}."

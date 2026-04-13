@@ -169,8 +169,12 @@ async def run_advisor(
     return await _run_agent_loop(ctx, system_prompt, source="advisor")
 
 
-async def run_daily_review(ctx: ChatContext, settings: Settings) -> str:
-    """Smart morning briefing triggered by cron at 8am."""
+async def run_daily_review(
+    ctx: ChatContext,
+    settings: Settings,
+    custom_prompt: str = "",
+) -> str:
+    """Smart morning briefing triggered by cron. Supports custom prompt override."""
     boss = await db.get_boss(ctx.boss_chat_id)
     company = boss.get("company", "") if boss else ""
     company_info = f" ({company})" if company else ""
@@ -178,10 +182,16 @@ async def run_daily_review(ctx: ChatContext, settings: Settings) -> str:
     tz = ZoneInfo(settings.timezone)
     current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M (%A)")
 
-    system_prompt = DAILY_REVIEW_PROMPT.format(
-        boss_name=ctx.boss_name + company_info,
-        current_time=current_time,
-    )
+    if custom_prompt:
+        system_prompt = (
+            f"Bạn là cố vấn AI của {ctx.boss_name}{company_info}. Hôm nay {current_time}.\n\n"
+            f"{custom_prompt}"
+        )
+    else:
+        system_prompt = DAILY_REVIEW_PROMPT.format(
+            boss_name=ctx.boss_name + company_info,
+            current_time=current_time,
+        )
 
     logger.info(f"[advisor:{ctx.boss_chat_id}] run_daily_review | {current_time}")
     return await _run_agent_loop(ctx, system_prompt, source="daily_review")

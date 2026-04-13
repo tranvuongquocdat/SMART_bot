@@ -1,6 +1,6 @@
 import aiosqlite
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -418,7 +418,7 @@ async def update_note(
     db_path: str = "data/history.db",
 ) -> None:
     db = await get_db(db_path)
-    now = datetime.utcnow().isoformat(sep=" ", timespec="seconds")
+    now = datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds")
     await db.execute(
         """
         INSERT INTO notes (boss_chat_id, type, ref_id, content, updated_at)
@@ -460,7 +460,7 @@ async def get_due_reminders(
 ) -> list[dict]:
     db = await get_db(db_path)
     if now is None:
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
     now_str = now.isoformat(sep=" ", timespec="seconds")
     async with db.execute(
         "SELECT * FROM reminders WHERE status = 'pending' AND remind_at <= ? ORDER BY remind_at",
@@ -632,8 +632,8 @@ async def delete_membership(db, chat_id: str, boss_chat_id: str):
 
 async def create_approval(db, boss_chat_id: str, requester_id: str,
                            task_record_id: str, payload: str) -> int:
-    from datetime import datetime, timedelta
-    expires = (datetime.utcnow() + timedelta(hours=48)).isoformat()
+    from datetime import datetime, timedelta, timezone
+    expires = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat()
     async with db.execute("""
         INSERT INTO pending_approvals (boss_chat_id, requester_id, task_record_id, payload, expires_at)
         VALUES (?, ?, ?, ?, ?)
@@ -712,23 +712,39 @@ async def create_scheduled_review(db, owner_id: str, cron_time: str,
         return cur.lastrowid
 
 
-async def update_scheduled_review(db, review_id: int, **kwargs):
+async def update_scheduled_review(db, review_id: int, owner_id: str = None, **kwargs) -> bool:
     invalid = set(kwargs) - _REVIEW_ALLOWED_COLS
     if invalid:
         raise ValueError(f"Invalid column(s) for scheduled_reviews: {invalid}")
     if not kwargs:
-        return
+        return False
     sets = ", ".join(f"{k} = ?" for k in kwargs)
+    if owner_id is not None:
+        async with db.execute(
+            f"UPDATE scheduled_reviews SET {sets} WHERE id = ? AND owner_id = ?",
+            (*kwargs.values(), review_id, str(owner_id))
+        ) as cur:
+            await db.commit()
+            return cur.rowcount > 0
     await db.execute(
         f"UPDATE scheduled_reviews SET {sets} WHERE id = ?",
         (*kwargs.values(), review_id)
     )
     await db.commit()
+    return True
 
 
-async def delete_scheduled_review(db, review_id: int):
+async def delete_scheduled_review(db, review_id: int, owner_id: str = None) -> bool:
+    if owner_id is not None:
+        async with db.execute(
+            "DELETE FROM scheduled_reviews WHERE id = ? AND owner_id = ?",
+            (review_id, str(owner_id))
+        ) as cur:
+            await db.commit()
+            return cur.rowcount > 0
     await db.execute("DELETE FROM scheduled_reviews WHERE id = ?", (review_id,))
     await db.commit()
+    return True
 
 
 async def get_all_enabled_reviews(db) -> list[dict]:

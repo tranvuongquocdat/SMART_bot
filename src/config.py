@@ -17,7 +17,7 @@ class Settings(BaseSettings):
 
     db_path: str = "data/history.db"
     timezone: str = "Asia/Ho_Chi_Minh"
-    recent_messages: int = 8
-    rag_messages: int = 5
+    recent_messages: int = 15
+    rag_messages: int = 8
 
     model_config = {"env_file": ".env"}

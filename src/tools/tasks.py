@@ -1,8 +1,10 @@
 import asyncio
+import json
 from datetime import datetime
 
+from src import db as db_mod
 from src.context import ChatContext
-from src.services import lark, qdrant
+from src.services import lark, qdrant, telegram
 from src.services import openai_client
 
 
@@ -46,6 +48,34 @@ async def _embed_and_upsert(ctx: ChatContext, record_id: str, fields: dict):
     await qdrant.upsert_task(ctx.tasks_collection, record_id, text, vector)
 
 
+async def _find_assignee_chat_id(ctx: ChatContext, assignee_name: str) -> tuple[str | None, bool]:
+    """Search People table for assignee. Returns (chat_id_or_None, found_in_people)."""
+    if not assignee_name:
+        return None, False
+    records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_people)
+    name_lower = assignee_name.lower()
+    for r in records:
+        full = (r.get("Tên", "") + " " + r.get("Tên gọi", "")).lower()
+        if name_lower in full:
+            raw = r.get("Chat ID")
+            return (str(int(raw)) if raw else None, True)
+    return None, False
+
+
+async def _notify_assignee_task(
+    assignee_chat_id: str, task_name: str, deadline: str,
+    assigner_name: str,
+):
+    msg = (
+        f"📋 Bạn vừa được giao task mới!\n\n"
+        f"Task: {task_name}\n"
+        f"Deadline: {deadline or 'Chưa xác định'}\n"
+        f"Giao bởi: {assigner_name}\n\n"
+        f"Reply để xác nhận, hỏi thêm thông tin, hoặc đề xuất thay đổi nhé."
+    )
+    await telegram.send(int(assignee_chat_id), msg)
+
+
 async def create_task(
     ctx: ChatContext,
     name: str,
@@ -83,7 +113,30 @@ async def create_task(
 
     asyncio.create_task(_embed_and_upsert(ctx, record_id, fields))
 
-    return f"Đã tạo task '{name}' (ID: {record_id})"
+    # Validate assignee & notify
+    warning = ""
+    assignee_chat_id = None
+    if assignee:
+        assignee_chat_id, found = await _find_assignee_chat_id(ctx, assignee)
+        if not found:
+            warning = (f"\n\n⚠️ Không tìm thấy '{assignee}' trong danh sách nhân sự — "
+                       f"task vẫn được tạo nhưng không tự động thông báo.")
+        elif not assignee_chat_id:
+            warning = (f"\n\n⚠️ '{assignee}' có trong danh sách nhưng chưa có tài khoản liên kết — "
+                       f"sẽ không tự động nhận thông báo.")
+
+    # Track notification in DB
+    await db_mod.upsert_task_notification(
+        db_mod._db, record_id, str(ctx.boss_chat_id), assignee_chat_id
+    )
+
+    # Notify assignee async
+    if assignee_chat_id:
+        asyncio.create_task(_notify_assignee_task(
+            assignee_chat_id, name, deadline, ctx.sender_name or ctx.boss_name
+        ))
+
+    return f"Đã tạo task '{name}' (ID: {record_id}).{warning}"
 
 
 async def list_tasks(
@@ -141,6 +194,39 @@ async def update_task(
     if not fields:
         return "Không có gì để cập nhật."
 
+    # Non-boss: create pending approval request
+    if ctx.sender_type in ("member", "partner"):
+        record = matched[0]
+        payload = json.dumps({
+            "record_id": record["record_id"],
+            "task_name": record.get("Tên task", ""),
+            "changes": fields,
+        })
+        await db_mod.create_approval(
+            db_mod._db,
+            str(ctx.boss_chat_id),
+            str(ctx.sender_chat_id),
+            record["record_id"],
+            payload,
+        )
+        # Notify boss
+        changes_str = ", ".join(
+            f"{k}: {_ms_to_date(v) if k == 'Deadline' else v}"
+            for k, v in fields.items()
+        )
+        boss = await db_mod.get_boss(str(ctx.boss_chat_id))
+        if boss:
+            await telegram.send(
+                ctx.boss_chat_id,
+                f"📝 Yêu cầu cập nhật task từ {ctx.sender_name}:\n\n"
+                f"Task: {record.get('Tên task')}\n"
+                f"Thay đổi: {changes_str}\n\n"
+                f"Reply 'ok task {record.get('Tên task', '')}' để approve.",
+            )
+        return (f"Yêu cầu cập nhật '{record.get('Tên task')}' đã gửi đến sếp. "
+                f"Bạn sẽ được thông báo khi được xử lý.")
+
+    # Boss: apply directly
     updated = []
     for r in matched:
         rid = r["record_id"]

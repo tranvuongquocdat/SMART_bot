@@ -134,6 +134,60 @@ async def _build_people_summary(ctx: ChatContext) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Task approval handler
+# ---------------------------------------------------------------------------
+
+async def _handle_task_approval(text: str, ctx) -> str | None:
+    """
+    Check if boss is approving a pending task update request via natural language.
+    Simple heuristic: if there are pending approvals, AI intent detection is used in the
+    main loop. Here we only handle explicit 'ok task <name>' or 'approve task <name>' patterns.
+    Returns response string if handled, None otherwise.
+    """
+    import json as _json
+    import re
+    lower = text.lower().strip()
+    # Match patterns like "ok task Fix bug", "approve task X", "từ chối task X"
+    m = re.match(r'(ok|approve|từ chối|reject|duyệt)\s+task\s+(.+)', lower)
+    if not m:
+        return None
+
+    action = m.group(1)
+    task_keyword = m.group(2).strip()
+    approved = action in ("ok", "approve", "duyệt")
+
+    pending = await db.get_pending_approvals(db._db, str(ctx.boss_chat_id))
+    matched = [
+        a for a in pending
+        if task_keyword.lower() in _json.loads(a["payload"]).get("task_name", "").lower()
+    ]
+    if not matched:
+        return None
+
+    approval = matched[0]
+    payload = _json.loads(approval["payload"])
+    requester_id = approval["requester_id"]
+
+    if not approved:
+        await db.update_approval_status(db._db, approval["id"], "rejected")
+        await telegram.send(int(requester_id),
+            f"Yêu cầu cập nhật task '{payload['task_name']}' của bạn đã bị từ chối.")
+        return f"Đã từ chối yêu cầu cập nhật '{payload['task_name']}'."
+
+    # Apply changes
+    changes = payload["changes"]
+    await lark.update_record(ctx.lark_base_token, ctx.lark_table_tasks,
+                              payload["record_id"], changes)
+    await db.update_approval_status(db._db, approval["id"], "approved")
+
+    changes_str = ", ".join(f"{k}: {v}" for k, v in changes.items())
+    await telegram.send(int(requester_id),
+        f"✅ Yêu cầu cập nhật task '{payload['task_name']}' đã được sếp chấp nhận. "
+        f"Thay đổi: {changes_str}")
+    return f"Đã approve và áp dụng thay đổi cho task '{payload['task_name']}'."
+
+
+# ---------------------------------------------------------------------------
 # Main handler
 # ---------------------------------------------------------------------------
 
@@ -209,13 +263,34 @@ async def handle_message(
         log_prefix = f"[chat:{chat_id} sender:{sender_id} boss:{ctx.boss_chat_id}]"
 
         # ------------------------------------------------------------------
-        # Step 2b: Boss approving/rejecting a join request
+        # Step 2b: Boss approving/rejecting a join request or task update
         # ------------------------------------------------------------------
         if not is_group and ctx.sender_type == "boss":
             from src import onboarding as _onb  # noqa: PLC0415
+            from src.tools import reset as _reset  # noqa: PLC0415
+
+            # Active reset confirmation flow
+            if _reset.is_reset_session(ctx.boss_chat_id):
+                reply = await _reset.handle_reset_message(text, ctx)
+                if reply is not None:
+                    await telegram.send(chat_id, reply)
+                    return
+
+            # Reset trigger keyword
+            if _reset.is_reset_trigger(text):
+                reply = await _reset.start_reset(ctx)
+                await telegram.send(chat_id, reply)
+                return
+
             decision = await _onb.handle_boss_join_decision(text, str(ctx.boss_chat_id))
             if decision:
                 await telegram.send(chat_id, decision)
+                return
+
+            # Check pending task approvals
+            approval_reply = await _handle_task_approval(text, ctx)
+            if approval_reply:
+                await telegram.send(chat_id, approval_reply)
                 return
 
         # ------------------------------------------------------------------

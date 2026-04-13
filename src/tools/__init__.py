@@ -11,6 +11,7 @@ from src.tools import (
     summary,
     messaging,
     reminder,
+    review_config,
     web_search,
 )
 
@@ -549,6 +550,69 @@ TOOL_DEFINITIONS = [
         },
     },
     # ------------------------------------------------------------------
+    # Review schedule config tools (4)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "add_review_schedule",
+            "description": "Thêm lịch review tự động (briefing sáng, tổng kết chiều, hoặc tuỳ chỉnh). Sếp dùng khi muốn nhận báo cáo định kỳ vào giờ cố định.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cron_time": {"type": "string", "description": "Giờ dạng HH:MM, ví dụ: 08:00, 17:30"},
+                    "content_type": {
+                        "type": "string",
+                        "enum": ["morning_brief", "evening_summary", "custom"],
+                        "description": "Loại nội dung: morning_brief = briefing sáng, evening_summary = tổng kết chiều, custom = tuỳ chỉnh theo prompt",
+                    },
+                    "custom_prompt": {
+                        "type": "string",
+                        "description": "Prompt tuỳ chỉnh (chỉ dùng khi content_type = custom). Ví dụ: 'Liệt kê task quá hạn và workload team'",
+                    },
+                },
+                "required": ["cron_time"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_review_schedules",
+            "description": "Xem danh sách lịch review tự động đang được cấu hình.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "toggle_review",
+            "description": "Bật hoặc tắt một lịch review theo ID (lấy từ list_review_schedules).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "review_id": {"type": "integer", "description": "ID lịch review"},
+                    "enabled": {"type": "boolean", "description": "true = bật, false = tắt"},
+                },
+                "required": ["review_id", "enabled"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delete_review_schedule",
+            "description": "Xoá một lịch review theo ID. LUÔN hỏi xác nhận trước khi gọi.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "review_id": {"type": "integer", "description": "ID lịch review cần xoá"},
+                },
+                "required": ["review_id"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
     # Web Search tools (1)
     # ------------------------------------------------------------------
     {
@@ -668,6 +732,16 @@ async def execute_tool(name: str, arguments: str, ctx: ChatContext) -> str:
             return await reminder.update_reminder(ctx, **args)
         case "delete_reminder":
             return await reminder.delete_reminder(ctx, **args)
+
+        # Review schedule config tools
+        case "add_review_schedule":
+            return await review_config.add_review_schedule(ctx, **args)
+        case "list_review_schedules":
+            return await review_config.list_review_schedules(ctx)
+        case "toggle_review":
+            return await review_config.toggle_review(ctx, **args)
+        case "delete_review_schedule":
+            return await review_config.delete_review_schedule(ctx, **args)
 
         # Web search tools
         case "web_search":

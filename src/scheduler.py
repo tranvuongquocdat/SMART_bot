@@ -134,15 +134,153 @@ async def _check_reminders():
             logger.exception("[scheduler] Reminder %d failed", r["id"])
 
 
+async def _check_deadline_push():
+    """Moi 30p: push assignee khi task con 24h hoac 2h toi deadline."""
+    from datetime import datetime, timezone
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    h24_ms = now_ms + 24 * 3600 * 1000
+    h2_ms  = now_ms + 2  * 3600 * 1000
+
+    bosses = await db.get_all_bosses()
+    for boss in bosses:
+        try:
+            tasks = await lark.search_records(boss["lark_base_token"], boss["lark_table_tasks"])
+            open_tasks = [
+                t for t in tasks
+                if t.get("Status") not in ("Hoàn thành", "Huỷ", "Done", "Cancelled")
+            ]
+            for task in open_tasks:
+                deadline = task.get("Deadline")
+                if not isinstance(deadline, (int, float)):
+                    continue
+                record_id = task["record_id"]
+
+                kind = None
+                if deadline <= h2_ms and deadline > now_ms:
+                    kind = "2h"
+                elif deadline <= h24_ms and deadline > now_ms:
+                    kind = "24h"
+                if not kind:
+                    continue
+
+                notifs = await db.get_unnotified_tasks(db._db, boss["chat_id"], kind)
+                notif = next((n for n in notifs if n["task_record_id"] == record_id), None)
+                if not notif:
+                    continue
+
+                assignee_chat_id = notif.get("assignee_chat_id")
+                if assignee_chat_id:
+                    label = "2 tiếng" if kind == "2h" else "24 tiếng"
+                    await telegram.send(
+                        int(assignee_chat_id),
+                        f"⏰ Task '{task.get('Tên task')}' còn khoảng {label} đến deadline!\n"
+                        f"Hãy cập nhật tiến độ nhé.",
+                    )
+                await db.mark_notification_sent(db._db, record_id, boss["chat_id"], kind)
+        except Exception:
+            logger.exception("[scheduler] Deadline push failed for %s", boss.get("name"))
+
+
+async def _sync_lark_to_sqlite():
+    """Moi 30s: sync Lark Reminders table -> SQLite (2-way sync)."""
+    bosses = await db.get_all_bosses()
+    for boss in bosses:
+        try:
+            tbl = boss.get("lark_table_reminders", "")
+            if not tbl:
+                continue
+            records = await lark.search_records(boss["lark_base_token"], tbl)
+            for rec in records:
+                sqlite_id = rec.get("SQLite ID")
+                if not isinstance(sqlite_id, (int, float)):
+                    continue
+                await db.sync_reminder_from_lark(
+                    db._db,
+                    int(sqlite_id),
+                    content=rec.get("Nội dung", ""),
+                    status=rec.get("Trạng thái", "pending"),
+                )
+        except Exception:
+            logger.exception("[scheduler] Lark sync failed for %s", boss.get("name"))
+
+
+async def _run_dynamic_reviews():
+    """Moi phut: chay scheduled_reviews dong theo DB thay vi hardcode."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from src.advisor import run_daily_review
+    from src.tools.summary import get_summary
+
+    reviews = await db.get_all_enabled_reviews(db._db)
+    bosses_cache: dict = {}
+
+    for review in reviews:
+        try:
+            tz = ZoneInfo(review.get("timezone", "Asia/Ho_Chi_Minh"))
+            current_time = datetime.now(tz).strftime("%H:%M")
+            if current_time != review["cron_time"]:
+                continue
+
+            owner_id = review["owner_id"]
+            if owner_id not in bosses_cache:
+                bosses_cache[owner_id] = await db.get_boss(owner_id)
+            boss = bosses_cache[owner_id]
+            if not boss:
+                continue
+
+            ctx = _make_ctx(boss)
+            content_type = review["content_type"]
+
+            if content_type == "morning_brief":
+                text = await run_daily_review(ctx, _settings)
+            elif content_type == "evening_summary":
+                text = await get_summary(ctx, "today")
+                text = f"*Tổng kết cuối ngày:*\n\n{text}"
+            elif content_type == "custom":
+                prompt = review.get("custom_prompt", "")
+                if not prompt:
+                    continue
+                text = await run_daily_review(ctx, _settings, custom_prompt=prompt)
+            else:
+                continue
+
+            await telegram.send(int(owner_id), text)
+            logger.info("[scheduler] Dynamic review '%s' sent to %s", content_type, boss["name"])
+        except Exception:
+            logger.exception("[scheduler] Dynamic review failed for review_id=%s", review.get("id"))
+
+
+async def _seed_default_reviews():
+    """One-time seed: add default morning/evening reviews for bosses without any review config."""
+    bosses = await db.get_all_bosses()
+    for boss in bosses:
+        existing = await db.list_scheduled_reviews(db._db, str(boss["chat_id"]))
+        if not existing:
+            await db.create_scheduled_review(db._db, str(boss["chat_id"]), "08:00", "morning_brief")
+            await db.create_scheduled_review(db._db, str(boss["chat_id"]), "17:00", "evening_summary")
+            logger.info("[scheduler] Seeded default reviews for %s", boss["name"])
+
+
 async def start(settings: Settings):
     global _scheduler, _settings
     _settings = settings
-    tz = settings.timezone
     _scheduler = AsyncIOScheduler()
-    _scheduler.add_job(_morning_review, CronTrigger(hour=8, timezone=tz))
-    _scheduler.add_job(_evening_summary, CronTrigger(hour=17, timezone=tz))
-    _scheduler.add_job(_check_deadlines, CronTrigger(hour=9, minute=30, timezone=tz))
+
+    # Seed default reviews for existing bosses (idempotent)
+    try:
+        await _seed_default_reviews()
+    except Exception:
+        logger.exception("[scheduler] Failed to seed default reviews")
+
+    # Dynamic reviews replace hardcoded morning/evening jobs
+    _scheduler.add_job(_run_dynamic_reviews, IntervalTrigger(minutes=1))
+
+    # Fixed jobs
+    _scheduler.add_job(_check_deadlines, CronTrigger(hour=9, minute=30,
+                                                      timezone=settings.timezone))
     _scheduler.add_job(_check_reminders, IntervalTrigger(minutes=1))
+    _scheduler.add_job(_check_deadline_push, IntervalTrigger(minutes=30))
+    _scheduler.add_job(_sync_lark_to_sqlite, IntervalTrigger(seconds=30))
     _scheduler.start()
     logger.info("Scheduler started")
 
