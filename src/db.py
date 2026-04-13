@@ -1,7 +1,24 @@
 import aiosqlite
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+_NOTIFICATION_KIND_COL = {
+    "assigned": "notified_assigned",
+    "24h": "notified_24h",
+    "2h": "notified_2h",
+}
+
+def _notification_col(kind: str) -> str:
+    col = _NOTIFICATION_KIND_COL.get(kind)
+    if col is None:
+        raise ValueError(f"Unknown notification kind: {kind!r}")
+    return col
+
+_REVIEW_ALLOWED_COLS = frozenset({
+    "cron_time", "content_type", "custom_prompt", "enabled", "timezone"
+})
 
 _db: Optional[aiosqlite.Connection] = None
 
@@ -170,8 +187,9 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         try:
             await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
             await db.commit()
-        except Exception:
-            pass
+        except Exception as exc:
+            if "duplicate column name" not in str(exc):
+                raise
 
     # Migrate existing people_map -> memberships
     try:
@@ -181,8 +199,10 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
             FROM people_map
         """)
         await db.commit()
-    except Exception:
-        pass
+    except Exception as exc:
+        # Only suppress if people_map doesn't exist yet (fresh install)
+        if "no such table" not in str(exc).lower():
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -596,8 +616,9 @@ async def create_approval(db, boss_chat_id: str, requester_id: str,
         INSERT INTO pending_approvals (boss_chat_id, requester_id, task_record_id, payload, expires_at)
         VALUES (?, ?, ?, ?, ?)
     """, (str(boss_chat_id), str(requester_id), task_record_id, payload, expires)) as cur:
-        await db.commit()
-        return cur.lastrowid
+        row_id = cur.lastrowid
+    await db.commit()
+    return row_id
 
 
 async def get_pending_approvals(db, boss_chat_id: str) -> list[dict]:
@@ -630,7 +651,7 @@ async def upsert_task_notification(db, task_record_id: str, boss_chat_id: str,
 
 
 async def mark_notification_sent(db, task_record_id: str, boss_chat_id: str, kind: str):
-    col = {"assigned": "notified_assigned", "24h": "notified_24h", "2h": "notified_2h"}[kind]
+    col = _notification_col(kind)
     await db.execute(
         f"UPDATE task_notifications SET {col} = 1 WHERE task_record_id = ? AND boss_chat_id = ?",
         (task_record_id, str(boss_chat_id))
@@ -639,7 +660,7 @@ async def mark_notification_sent(db, task_record_id: str, boss_chat_id: str, kin
 
 
 async def get_unnotified_tasks(db, boss_chat_id: str, kind: str) -> list[dict]:
-    col = {"assigned": "notified_assigned", "24h": "notified_24h", "2h": "notified_2h"}[kind]
+    col = _notification_col(kind)
     async with db.execute(
         f"SELECT * FROM task_notifications WHERE boss_chat_id = ? AND {col} = 0",
         (str(boss_chat_id),)
@@ -670,6 +691,11 @@ async def create_scheduled_review(db, owner_id: str, cron_time: str,
 
 
 async def update_scheduled_review(db, review_id: int, **kwargs):
+    invalid = set(kwargs) - _REVIEW_ALLOWED_COLS
+    if invalid:
+        raise ValueError(f"Invalid column(s) for scheduled_reviews: {invalid}")
+    if not kwargs:
+        return
     sets = ", ".join(f"{k} = ?" for k in kwargs)
     await db.execute(
         f"UPDATE scheduled_reviews SET {sets} WHERE id = ?",
