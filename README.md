@@ -187,16 +187,14 @@ Bot lưu tất cả tin nhắn, chỉ phản hồi khi được `@tag`. Quyền 
 
 Mỗi công ty có 1 Lark Base riêng với **6 bảng**:
 
-| Bảng | Nội dung |
-|------|----------|
-| **People** | Nhân sự: tên, Chat ID, vai trò, kỹ năng |
-| **Tasks** | Công việc: assignee, deadline, priority, status |
-| **Projects** | Dự án: người phụ trách, deadline, trạng thái |
-| **Ideas** | Ý tưởng: nội dung, tags, project |
-| **Reminders** | Nhắc nhở (sync 2 chiều với bot) |
-| **Notes** | Ghi chú nội bộ của bot |
-
-Dữ liệu thay đổi qua bot tự cập nhật lên Lark ngay lập tức. Reminders sửa trên Lark sẽ sync về bot mỗi 30 giây.
+| Bảng | Nội dung | Sync |
+|------|----------|------|
+| **People** | Nhân sự: tên, Chat ID, vai trò, kỹ năng | Bot → Lark ngay lập tức |
+| **Tasks** | Công việc: assignee, deadline, priority, status | Bot → Lark ngay lập tức |
+| **Projects** | Dự án: người phụ trách, deadline, trạng thái | Bot → Lark ngay lập tức |
+| **Ideas** | Ý tưởng: nội dung, tags, project | Bot → Lark ngay lập tức |
+| **Reminders** | Nhắc nhở có giờ, người nhận | 2 chiều: Bot → Lark ngay; Lark → Bot mỗi 30 giây |
+| **Notes** | Ghi chú nội bộ (dự phòng) | Tạo sẵn, chưa dùng — dữ liệu lưu trong SQLite |
 
 ---
 
@@ -289,14 +287,14 @@ Telegram ←→ FastAPI (Polling)
               │     telegram.py     ← Send / edit messages
               │
               └── src/tools/        ← 33 tool functions
-                    tasks.py        ← CRUD + approval flow + auto-notify
+                    tasks.py        ← CRUD + approval flow + auto-notify assignee
                     people.py       ← CRUD + workload check
                     projects.py     ← CRUD
-                    reminder.py     ← CRUD + Lark sync
+                    reminder.py     ← CRUD + sync lên Lark
                     review_config.py← Scheduled review CRUD
                     reset.py        ← 2-step workspace reset
-                    note.py         ← Internal notes
-                    summary.py      ← Reports
+                    note.py         ← Ghi chú nội bộ (SQLite only)
+                    summary.py      ← Báo cáo ngày/tuần/workload
                     ...
 ```
 
