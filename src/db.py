@@ -89,6 +89,62 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_token_usage_boss_created
             ON token_usage (boss_chat_id, created_at);
     """)
+
+    # New tables for many-to-many memberships and additional features
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS memberships (
+            chat_id         TEXT NOT NULL,
+            boss_chat_id    TEXT NOT NULL,
+            person_type     TEXT NOT NULL,
+            name            TEXT,
+            lark_record_id  TEXT,
+            status          TEXT DEFAULT 'pending',
+            request_info    TEXT,
+            requested_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            approved_at     TIMESTAMP,
+            PRIMARY KEY (chat_id, boss_chat_id)
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS pending_approvals (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            boss_chat_id    TEXT NOT NULL,
+            requester_id    TEXT NOT NULL,
+            task_record_id  TEXT NOT NULL,
+            change_type     TEXT DEFAULT 'update_task',
+            payload         TEXT NOT NULL,
+            status          TEXT DEFAULT 'pending',
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at      TIMESTAMP
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS task_notifications (
+            task_record_id      TEXT NOT NULL,
+            boss_chat_id        TEXT NOT NULL,
+            assignee_chat_id    TEXT,
+            notified_assigned   INTEGER DEFAULT 0,
+            notified_24h        INTEGER DEFAULT 0,
+            notified_2h         INTEGER DEFAULT 0,
+            PRIMARY KEY (task_record_id, boss_chat_id)
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS scheduled_reviews (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            owner_id      TEXT NOT NULL,
+            cron_time     TEXT NOT NULL,
+            content_type  TEXT NOT NULL,
+            custom_prompt TEXT,
+            enabled       INTEGER DEFAULT 1,
+            timezone      TEXT DEFAULT 'Asia/Ho_Chi_Minh',
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     await _migrate_schema(db)
     await db.commit()
 
@@ -105,6 +161,28 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
     col_names = {r[1] for r in rows}
     if "sender_id" not in col_names:
         await db.execute("ALTER TABLE messages ADD COLUMN sender_id INTEGER")
+
+    # Add new columns to bosses
+    for col, definition in [
+        ("lark_table_reminders", "TEXT DEFAULT ''"),
+        ("lark_table_notes",     "TEXT DEFAULT ''"),
+    ]:
+        try:
+            await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
+            await db.commit()
+        except Exception:
+            pass
+
+    # Migrate existing people_map -> memberships
+    try:
+        await db.execute("""
+            INSERT OR IGNORE INTO memberships (chat_id, boss_chat_id, person_type, name, status)
+            SELECT chat_id, boss_chat_id, type, name, 'active'
+            FROM people_map
+        """)
+        await db.commit()
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +534,166 @@ async def log_token_usage(
     await db.execute(
         "INSERT INTO token_usage (boss_chat_id, source, prompt_tokens, completion_tokens, total_tokens) VALUES (?, ?, ?, ?, ?)",
         (boss_chat_id, source, prompt_tokens, completion_tokens, total_tokens),
+    )
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# memberships
+# ---------------------------------------------------------------------------
+
+async def get_memberships(db, chat_id: str) -> list[dict]:
+    async with db.execute(
+        "SELECT * FROM memberships WHERE chat_id = ? AND status = 'active'",
+        (str(chat_id),)
+    ) as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
+async def get_membership(db, chat_id: str, boss_chat_id: str) -> dict | None:
+    async with db.execute(
+        "SELECT * FROM memberships WHERE chat_id = ? AND boss_chat_id = ?",
+        (str(chat_id), str(boss_chat_id))
+    ) as cur:
+        row = await cur.fetchone()
+        return dict(row) if row else None
+
+
+async def upsert_membership(db, chat_id: str, boss_chat_id: str, person_type: str,
+                             name: str, status: str = "active",
+                             request_info: str = None, lark_record_id: str = None):
+    await db.execute("""
+        INSERT INTO memberships (chat_id, boss_chat_id, person_type, name, status, request_info, lark_record_id, requested_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(chat_id, boss_chat_id) DO UPDATE SET
+            person_type = excluded.person_type,
+            name = excluded.name,
+            status = excluded.status,
+            request_info = COALESCE(excluded.request_info, request_info),
+            lark_record_id = COALESCE(excluded.lark_record_id, lark_record_id),
+            approved_at = CASE WHEN excluded.status = 'active' THEN CURRENT_TIMESTAMP ELSE approved_at END
+    """, (str(chat_id), str(boss_chat_id), person_type, name, status, request_info, lark_record_id))
+    await db.commit()
+
+
+async def delete_membership(db, chat_id: str, boss_chat_id: str):
+    await db.execute(
+        "DELETE FROM memberships WHERE chat_id = ? AND boss_chat_id = ?",
+        (str(chat_id), str(boss_chat_id))
+    )
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# pending_approvals
+# ---------------------------------------------------------------------------
+
+async def create_approval(db, boss_chat_id: str, requester_id: str,
+                           task_record_id: str, payload: str) -> int:
+    from datetime import datetime, timedelta
+    expires = (datetime.utcnow() + timedelta(hours=48)).isoformat()
+    async with db.execute("""
+        INSERT INTO pending_approvals (boss_chat_id, requester_id, task_record_id, payload, expires_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (str(boss_chat_id), str(requester_id), task_record_id, payload, expires)) as cur:
+        await db.commit()
+        return cur.lastrowid
+
+
+async def get_pending_approvals(db, boss_chat_id: str) -> list[dict]:
+    async with db.execute(
+        "SELECT * FROM pending_approvals WHERE boss_chat_id = ? AND status = 'pending' ORDER BY created_at",
+        (str(boss_chat_id),)
+    ) as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
+async def update_approval_status(db, approval_id: int, status: str):
+    await db.execute(
+        "UPDATE pending_approvals SET status = ? WHERE id = ?",
+        (status, approval_id)
+    )
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# task_notifications
+# ---------------------------------------------------------------------------
+
+async def upsert_task_notification(db, task_record_id: str, boss_chat_id: str,
+                                    assignee_chat_id: str = None):
+    await db.execute("""
+        INSERT OR IGNORE INTO task_notifications (task_record_id, boss_chat_id, assignee_chat_id)
+        VALUES (?, ?, ?)
+    """, (task_record_id, str(boss_chat_id), str(assignee_chat_id) if assignee_chat_id else None))
+    await db.commit()
+
+
+async def mark_notification_sent(db, task_record_id: str, boss_chat_id: str, kind: str):
+    col = {"assigned": "notified_assigned", "24h": "notified_24h", "2h": "notified_2h"}[kind]
+    await db.execute(
+        f"UPDATE task_notifications SET {col} = 1 WHERE task_record_id = ? AND boss_chat_id = ?",
+        (task_record_id, str(boss_chat_id))
+    )
+    await db.commit()
+
+
+async def get_unnotified_tasks(db, boss_chat_id: str, kind: str) -> list[dict]:
+    col = {"assigned": "notified_assigned", "24h": "notified_24h", "2h": "notified_2h"}[kind]
+    async with db.execute(
+        f"SELECT * FROM task_notifications WHERE boss_chat_id = ? AND {col} = 0",
+        (str(boss_chat_id),)
+    ) as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# scheduled_reviews
+# ---------------------------------------------------------------------------
+
+async def list_scheduled_reviews(db, owner_id: str) -> list[dict]:
+    async with db.execute(
+        "SELECT * FROM scheduled_reviews WHERE owner_id = ? ORDER BY cron_time",
+        (str(owner_id),)
+    ) as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
+async def create_scheduled_review(db, owner_id: str, cron_time: str,
+                                   content_type: str, custom_prompt: str = None) -> int:
+    async with db.execute("""
+        INSERT INTO scheduled_reviews (owner_id, cron_time, content_type, custom_prompt)
+        VALUES (?, ?, ?, ?)
+    """, (str(owner_id), cron_time, content_type, custom_prompt)) as cur:
+        await db.commit()
+        return cur.lastrowid
+
+
+async def update_scheduled_review(db, review_id: int, **kwargs):
+    sets = ", ".join(f"{k} = ?" for k in kwargs)
+    await db.execute(
+        f"UPDATE scheduled_reviews SET {sets} WHERE id = ?",
+        (*kwargs.values(), review_id)
+    )
+    await db.commit()
+
+
+async def delete_scheduled_review(db, review_id: int):
+    await db.execute("DELETE FROM scheduled_reviews WHERE id = ?", (review_id,))
+    await db.commit()
+
+
+async def get_all_enabled_reviews(db) -> list[dict]:
+    async with db.execute(
+        "SELECT * FROM scheduled_reviews WHERE enabled = 1"
+    ) as cur:
+        return [dict(r) for r in await cur.fetchall()]
+
+
+async def sync_reminder_from_lark(db, sqlite_id: int, content: str, status: str):
+    await db.execute(
+        "UPDATE reminders SET content = ?, status = ? WHERE id = ?",
+        (content, status, sqlite_id)
     )
     await db.commit()
 
