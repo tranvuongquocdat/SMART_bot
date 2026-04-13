@@ -79,14 +79,16 @@ async def resolve(chat_id: int, sender_id: int, is_group: bool,
     if not memberships:
         return None
 
-    # Preferred workspace (explicit selection)
+    # Preferred workspace (explicit selection) — return None if not found, never fall through
     if preferred_boss_id is not None:
         m = next((m for m in memberships if m["boss_chat_id"] == str(preferred_boss_id)), None)
-        if m:
-            boss = await db_mod.get_boss(_db, m["boss_chat_id"])
-            if boss:
-                return _build_ctx(boss, sender_id, m["name"], m["person_type"],
-                                   chat_id, False, "", memberships)
+        if not m:
+            return None
+        boss = await db_mod.get_boss(_db, m["boss_chat_id"])
+        if not boss:
+            return None
+        return _build_ctx(boss, sender_id, m["name"], m["person_type"],
+                           chat_id, False, "", memberships)
 
     # Single workspace: use directly
     if len(memberships) == 1:
