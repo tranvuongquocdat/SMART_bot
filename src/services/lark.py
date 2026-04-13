@@ -58,6 +58,23 @@ IDEAS_FIELDS = [
     {"field_name": "Project", "type": 1},
 ]
 
+REMINDERS_FIELDS = [
+    {"field_name": "Nội dung",       "type": 1},
+    {"field_name": "Thời gian nhắc", "type": 1},
+    {"field_name": "Người nhận",     "type": 1},
+    {"field_name": "Trạng thái",     "type": 1},
+    {"field_name": "SQLite ID",      "type": 2},
+    {"field_name": "Cập nhật lúc",   "type": 1},
+]
+
+NOTES_FIELDS = [
+    {"field_name": "Loại",          "type": 1},
+    {"field_name": "Ref ID",        "type": 1},
+    {"field_name": "Nội dung",      "type": 1},
+    {"field_name": "SQLite ID",     "type": 2},
+    {"field_name": "Cập nhật lúc",  "type": 1},
+]
+
 # ---------------------------------------------------------------------------
 # Initialisation / teardown
 # ---------------------------------------------------------------------------
@@ -127,10 +144,10 @@ async def create_base(name: str) -> dict:
     }
 
 
-async def create_table(base_token: str, name: str, fields: list[dict]) -> str:
+async def create_table(base_token: str, name: str, fields: list[dict]) -> dict:
     """Create a table inside a Bitable app.
 
-    Returns the new ``table_id``.
+    Returns a dict with key ``table_id``.
     """
     resp = await _client.post(
         f"{LARK_API}/bitable/v1/apps/{base_token}/tables",
@@ -141,7 +158,7 @@ async def create_table(base_token: str, name: str, fields: list[dict]) -> str:
     body = resp.json()
     if body.get("code") != 0:
         raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
-    return body["data"]["table_id"]
+    return {"table_id": body["data"]["table_id"]}
 
 
 async def delete_table(base_token: str, table_id: str):
@@ -161,7 +178,7 @@ async def provision_workspace(company_name: str) -> dict:
 
     Steps:
     1. Create a new Bitable app named "{company_name} - AI Secretary".
-    2. Create 4 tables: People, Tasks, Projects, Ideas.
+    2. Create 6 tables: People, Tasks, Projects, Ideas, Reminders, Notes.
     3. Delete the default table auto-created by Lark.
 
     Returns:
@@ -171,26 +188,31 @@ async def provision_workspace(company_name: str) -> dict:
             "table_tasks": str,
             "table_projects": str,
             "table_ideas": str,
+            "table_reminders": str,
+            "table_notes": str,
         }
     """
-    base_info = await create_base(f"{company_name} - AI Secretary")
-    base_token = base_info["app_token"]
-    default_table_id = base_info["default_table_id"]
+    base = await create_base(f"{company_name} - AI Secretary")
+    base_token = base["app_token"]
+    default_tbl = base["default_table_id"]
 
-    table_people = await create_table(base_token, "People", PEOPLE_FIELDS)
-    table_tasks = await create_table(base_token, "Tasks", TASKS_FIELDS)
-    table_projects = await create_table(base_token, "Projects", PROJECTS_FIELDS)
-    table_ideas = await create_table(base_token, "Ideas", IDEAS_FIELDS)
+    people_tbl    = (await create_table(base_token, "People",    PEOPLE_FIELDS))["table_id"]
+    tasks_tbl     = (await create_table(base_token, "Tasks",     TASKS_FIELDS))["table_id"]
+    projects_tbl  = (await create_table(base_token, "Projects",  PROJECTS_FIELDS))["table_id"]
+    ideas_tbl     = (await create_table(base_token, "Ideas",     IDEAS_FIELDS))["table_id"]
+    reminders_tbl = (await create_table(base_token, "Reminders", REMINDERS_FIELDS))["table_id"]
+    notes_tbl     = (await create_table(base_token, "Notes",     NOTES_FIELDS))["table_id"]
 
-    if default_table_id:
-        await delete_table(base_token, default_table_id)
+    await delete_table(base_token, default_tbl)
 
     return {
-        "base_token": base_token,
-        "table_people": table_people,
-        "table_tasks": table_tasks,
-        "table_projects": table_projects,
-        "table_ideas": table_ideas,
+        "base_token":       base_token,
+        "table_people":     people_tbl,
+        "table_tasks":      tasks_tbl,
+        "table_projects":   projects_tbl,
+        "table_ideas":      ideas_tbl,
+        "table_reminders":  reminders_tbl,
+        "table_notes":      notes_tbl,
     }
 
 
@@ -246,3 +268,51 @@ async def delete_record(base_token: str, table_id: str, record_id: str):
     body = resp.json()
     if body.get("code") != 0:
         raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
+
+
+# ---------------------------------------------------------------------------
+# Sync helpers
+# ---------------------------------------------------------------------------
+
+
+async def sync_reminder_to_lark(base_token: str, table_id: str,
+                                 reminder: dict, sqlite_id: int) -> str | None:
+    """Upsert reminder record in Lark. Returns lark record_id or None if table_id empty."""
+    if not table_id:
+        return None
+    fields = {
+        "Nội dung":       reminder.get("content", ""),
+        "Thời gian nhắc": reminder.get("remind_at_local", ""),
+        "Người nhận":     reminder.get("target_name", ""),
+        "Trạng thái":     reminder.get("status", "pending"),
+        "SQLite ID":      sqlite_id,
+        "Cập nhật lúc":   reminder.get("updated_at", ""),
+    }
+    existing = await search_records(base_token, table_id,
+                                    f'CurrentValue.[SQLite ID] = {sqlite_id}')
+    if existing:
+        await update_record(base_token, table_id, existing[0]["record_id"], fields)
+        return existing[0]["record_id"]
+    rec = await create_record(base_token, table_id, fields)
+    return rec.get("record_id")
+
+
+async def sync_note_to_lark(base_token: str, table_id: str,
+                             note: dict, sqlite_id: int) -> str | None:
+    """Upsert note record in Lark. Returns lark record_id or None if table_id empty."""
+    if not table_id:
+        return None
+    fields = {
+        "Loại":          note.get("type", ""),
+        "Ref ID":        str(note.get("ref_id", "")),
+        "Nội dung":      note.get("content", ""),
+        "SQLite ID":     sqlite_id,
+        "Cập nhật lúc":  note.get("updated_at", ""),
+    }
+    existing = await search_records(base_token, table_id,
+                                    f'CurrentValue.[SQLite ID] = {sqlite_id}')
+    if existing:
+        await update_record(base_token, table_id, existing[0]["record_id"], fields)
+        return existing[0]["record_id"]
+    rec = await create_record(base_token, table_id, fields)
+    return rec.get("record_id")

@@ -225,6 +225,8 @@ async def create_boss(
     lark_table_tasks: Optional[str] = None,
     lark_table_projects: Optional[str] = None,
     lark_table_ideas: Optional[str] = None,
+    lark_table_reminders: Optional[str] = None,
+    lark_table_notes: Optional[str] = None,
     db_path: str = "data/history.db",
 ) -> None:
     db = await get_db(db_path)
@@ -232,19 +234,23 @@ async def create_boss(
         """
         INSERT INTO bosses
             (chat_id, name, company, lark_base_token, lark_table_people,
-             lark_table_tasks, lark_table_projects, lark_table_ideas)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             lark_table_tasks, lark_table_projects, lark_table_ideas,
+             lark_table_reminders, lark_table_notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(chat_id) DO UPDATE SET
-            name                = excluded.name,
-            company             = excluded.company,
-            lark_base_token     = excluded.lark_base_token,
-            lark_table_people   = excluded.lark_table_people,
-            lark_table_tasks    = excluded.lark_table_tasks,
-            lark_table_projects = excluded.lark_table_projects,
-            lark_table_ideas    = excluded.lark_table_ideas
+            name                 = excluded.name,
+            company              = excluded.company,
+            lark_base_token      = excluded.lark_base_token,
+            lark_table_people    = excluded.lark_table_people,
+            lark_table_tasks     = excluded.lark_table_tasks,
+            lark_table_projects  = excluded.lark_table_projects,
+            lark_table_ideas     = excluded.lark_table_ideas,
+            lark_table_reminders = excluded.lark_table_reminders,
+            lark_table_notes     = excluded.lark_table_notes
         """,
         (chat_id, name, company, lark_base_token, lark_table_people,
-         lark_table_tasks, lark_table_projects, lark_table_ideas),
+         lark_table_tasks, lark_table_projects, lark_table_ideas,
+         lark_table_reminders, lark_table_notes),
     )
     await db.commit()
 

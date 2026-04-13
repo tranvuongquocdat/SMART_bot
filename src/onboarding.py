@@ -298,12 +298,16 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
         table_tasks = ws["table_tasks"]
         table_projects = ws["table_projects"]
         table_ideas = ws["table_ideas"]
+        table_reminders = ws["table_reminders"]
+        table_notes = ws["table_notes"]
         logger.info("[onboarding] Lark workspace provisioned for chat_id=%s", chat_id)
 
         # 2. Persist boss record
         await db.create_boss(
             chat_id, name, company,
             base_token, table_people, table_tasks, table_projects, table_ideas,
+            lark_table_reminders=table_reminders,
+            lark_table_notes=table_notes,
         )
         logger.info("[onboarding] boss created in DB for chat_id=%s", chat_id)
 
