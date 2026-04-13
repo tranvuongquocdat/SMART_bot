@@ -10,7 +10,7 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from src import agent, db, scheduler
+from src import agent, context, db, scheduler
 from src.config import Settings
 from src.services import cohere, lark, openai_client, qdrant, telegram
 
@@ -20,7 +20,8 @@ async def lifespan(_app: FastAPI):
     settings = Settings()
 
     # Init services
-    await db.get_db(settings.db_path)
+    database = await db.get_db(settings.db_path)
+    context.init_context(database)
     openai_client.init_openai(
         settings.openai_api_key,
         settings.openai_chat_model,

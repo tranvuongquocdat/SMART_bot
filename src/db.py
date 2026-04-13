@@ -209,8 +209,16 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
 # bosses
 # ---------------------------------------------------------------------------
 
-async def get_boss(chat_id: int, db_path: str = "data/history.db") -> Optional[dict]:
-    db = await get_db(db_path)
+async def get_boss(db_or_chat_id, chat_id_or_path=None) -> Optional[dict]:
+    """get_boss(chat_id) or get_boss(db, chat_id) — both calling styles supported."""
+    import aiosqlite as _aiosqlite
+    if isinstance(db_or_chat_id, _aiosqlite.Connection):
+        db = db_or_chat_id
+        chat_id = chat_id_or_path
+    else:
+        chat_id = db_or_chat_id
+        db_path = chat_id_or_path if isinstance(chat_id_or_path, str) else "data/history.db"
+        db = await get_db(db_path)
     async with db.execute("SELECT * FROM bosses WHERE chat_id = ?", (chat_id,)) as cur:
         row = await cur.fetchone()
     return dict(row) if row else None
@@ -305,8 +313,16 @@ async def delete_person(chat_id: int, db_path: str = "data/history.db") -> None:
 # group_map
 # ---------------------------------------------------------------------------
 
-async def get_group(group_chat_id: int, db_path: str = "data/history.db") -> Optional[dict]:
-    db = await get_db(db_path)
+async def get_group(db_or_group_chat_id, group_chat_id_or_path=None) -> Optional[dict]:
+    """get_group(group_chat_id) or get_group(db, group_chat_id) — both calling styles supported."""
+    import aiosqlite as _aiosqlite
+    if isinstance(db_or_group_chat_id, _aiosqlite.Connection):
+        db = db_or_group_chat_id
+        group_chat_id = group_chat_id_or_path
+    else:
+        group_chat_id = db_or_group_chat_id
+        db_path = group_chat_id_or_path if isinstance(group_chat_id_or_path, str) else "data/history.db"
+        db = await get_db(db_path)
     async with db.execute(
         "SELECT * FROM group_map WHERE group_chat_id = ?", (group_chat_id,)
     ) as cur:

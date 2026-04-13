@@ -31,6 +31,8 @@ def _make_ctx(boss: dict) -> ChatContext:
         lark_table_tasks=boss["lark_table_tasks"],
         lark_table_projects=boss["lark_table_projects"],
         lark_table_ideas=boss["lark_table_ideas"],
+        lark_table_reminders=boss.get("lark_table_reminders", ""),
+        lark_table_notes=boss.get("lark_table_notes", ""),
         chat_id=boss["chat_id"],
         is_group=False,
         group_name="",
