@@ -15,11 +15,15 @@ import logging
 from src import db
 from src.services import lark, openai_client, qdrant
 from src.services import telegram
+from src.services import telegram as tg
 
 logger = logging.getLogger("onboarding")
 
 # in-memory state: {chat_id: {"step": str, ...}}
 _onboarding: dict[int, dict] = {}
+
+# join flow state: {chat_id: {"step": str, ...}}
+_join_sessions: dict[int, dict] = {}
 
 # ---------------------------------------------------------------------------
 # AI core
@@ -128,6 +132,11 @@ Ví dụ:
 - "Solar Creative nhé anh" → {"company": "Solar Creative"}
 
 Trả về JSON duy nhất: {"company": "..."} hoặc {"company": ""} nếu không tìm thấy.\
+"""
+
+_CLASSIFY_BOSS_PICK_PROMPT = """
+Người dùng đang chọn công ty trong danh sách. Trả về JSON {{"index": N}} với N là index (0-based) của công ty được chọn, hoặc {{"index": -1}} nếu không rõ.
+Danh sách công ty: {boss_list}
 """
 
 # ---------------------------------------------------------------------------
@@ -501,3 +510,148 @@ async def _step_member_name(text: str, chat_id: int, state: dict) -> None:
 
     _onboarding.pop(chat_id, None)
     logger.info("[onboarding] completed (%s) for chat_id=%s", person_type, chat_id)
+
+
+# ---------------------------------------------------------------------------
+# Join flow (discover companies and request to join)
+# ---------------------------------------------------------------------------
+
+async def handle_join_inquiry(chat_id: int) -> str:
+    """Called when user wants to see available companies. Returns listing message."""
+    bosses = await db.get_all_bosses()
+    if not bosses:
+        return "Hiện chưa có tổ chức nào được đăng ký trên hệ thống."
+
+    lines = ["Các tổ chức hiện đang hoạt động:\n"]
+    for i, b in enumerate(bosses, 1):
+        lines.append(f"{i}. {b['company']} — sếp: {b['name']}")
+    lines.append("\nBạn muốn join tổ chức nào với tư cách nào (nhân viên/đối tác)?")
+
+    _join_sessions[chat_id] = {"step": "pick_company", "bosses": bosses}
+    return "\n".join(lines)
+
+
+def is_join_session(chat_id: int) -> bool:
+    return chat_id in _join_sessions
+
+
+async def handle_join_message(text: str, chat_id: int) -> str:
+    session = _join_sessions.get(chat_id)
+    if not session:
+        return ""
+
+    step = session["step"]
+
+    if step == "pick_company":
+        bosses = session["bosses"]
+        boss_list = [f"{i}: {b['company']}" for i, b in enumerate(bosses)]
+        result = await _ai_classify(
+            _CLASSIFY_BOSS_PICK_PROMPT.format(boss_list="\n".join(boss_list)), text
+        )
+        idx = result.get("index", -1)
+        if not isinstance(idx, int) or idx < 0 or idx >= len(bosses):
+            return "Tôi chưa rõ bạn muốn join tổ chức nào. Bạn có thể nói lại không?"
+        session["target_boss"] = bosses[idx]
+        session["step"] = "pick_role"
+        return f"Bạn muốn join {bosses[idx]['company']} với tư cách nhân viên hay đối tác?"
+
+    if step == "pick_role":
+        lower = text.lower()
+        if "đối tác" in lower or "partner" in lower:
+            session["role"] = "partner"
+        elif "nhân viên" in lower or "member" in lower:
+            session["role"] = "member"
+        else:
+            return "Bạn muốn join với tư cách nhân viên hay đối tác?"
+        session["step"] = "get_info"
+        return "Bạn có thể giới thiệu về bản thân không? (tên, vai trò, lý do muốn join...)"
+
+    if step == "get_info":
+        boss = session["target_boss"]
+        role = session["role"]
+
+        name_result = await _ai_classify(_EXTRACT_NAME_PROMPT, text)
+        name = name_result.get("name", "Không rõ")
+
+        _db = await db.get_db()
+        await db.upsert_membership(
+            _db,
+            chat_id=str(chat_id),
+            boss_chat_id=str(boss["chat_id"]),
+            person_type=role,
+            name=name,
+            status="pending",
+            request_info=text,
+        )
+
+        request_msg = (
+            f"Yêu cầu join tổ chức mới!\n\n"
+            f"Người dùng chat_id={chat_id} ({name}) muốn join với tư cách {role}.\n"
+            f"Thông tin: {text}\n\n"
+            f"Reply: 'approve {chat_id}' hoặc 'reject {chat_id}'\n"
+            f"Hoặc điều chỉnh: 'approve {chat_id} nhân viên nhóm Marketing'"
+        )
+        await tg.send_message(boss["chat_id"], request_msg)
+
+        del _join_sessions[chat_id]
+        return (f"Yêu cầu của bạn đã được gửi đến {boss['company']}. "
+                f"Bạn sẽ được thông báo khi sếp xử lý.")
+
+    return ""
+
+
+async def handle_boss_join_decision(text: str, boss_chat_id: str) -> str | None:
+    """
+    Process boss reply to a join request.
+    Patterns: 'approve <chat_id>', 'reject <chat_id>', 'approve <chat_id> <adjustments>'
+    Returns response string if handled, None if not a join decision.
+    """
+    import re
+    m = re.match(r'(approve|reject)\s+(\d+)(.*)?', text.strip().lower())
+    if not m:
+        return None
+
+    action = m.group(1)
+    target_id = m.group(2)
+    adjustments = (m.group(3) or "").strip()
+
+    _db = await db.get_db()
+    membership = await db.get_membership(_db, target_id, boss_chat_id)
+    if not membership or membership["status"] != "pending":
+        return None
+
+    boss = await db.get_boss(_db, boss_chat_id)
+
+    if action == "reject":
+        await db.upsert_membership(_db, target_id, boss_chat_id,
+                                   membership["person_type"], membership["name"], "rejected")
+        await tg.send_message(int(target_id),
+            f"Yêu cầu join {boss['company']} của bạn đã bị từ chối.")
+        return f"Đã từ chối yêu cầu của user {target_id}."
+
+    # Approve — parse role adjustments
+    person_type = membership["person_type"]
+    if adjustments:
+        if "đối tác" in adjustments or "partner" in adjustments:
+            person_type = "partner"
+        elif "nhân viên" in adjustments or "member" in adjustments:
+            person_type = "member"
+
+    # Add to Lark People table
+    fields = {
+        "Tên": membership["name"],
+        "Chat ID": int(target_id),
+        "Type": person_type,
+        "Ghi chú": membership.get("request_info", ""),
+    }
+    rec = await lark.create_record(boss["lark_base_token"], boss["lark_table_people"], fields)
+
+    await db.upsert_membership(_db, target_id, boss_chat_id, person_type,
+                               membership["name"], "active",
+                               lark_record_id=rec.get("record_id"))
+
+    await tg.send_message(int(target_id),
+        f"Yêu cầu join {boss['company']} của bạn đã được chấp nhận với tư cách {person_type}. "
+        f"Hãy bắt đầu trò chuyện với thư ký AI nhé!")
+
+    return f"Đã approve user {target_id} với tư cách {person_type}."

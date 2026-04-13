@@ -174,6 +174,27 @@ async def handle_message(
             return
 
         # ------------------------------------------------------------------
+        # Step 1b: Join flow (active session or join inquiry intent)
+        # ------------------------------------------------------------------
+        if not is_group:
+            from src import onboarding as _onb  # noqa: PLC0415
+            if _onb.is_join_session(sender_id):
+                reply = await _onb.handle_join_message(text, sender_id)
+                if reply:
+                    await telegram.send(chat_id, reply)
+                return
+
+            join_keywords = [
+                "xem danh sách công ty", "muốn join", "muốn đăng ký vào",
+                "danh sách tổ chức", "các công ty đang hỗ trợ",
+                "có những công ty nào",
+            ]
+            if any(k in text.lower() for k in join_keywords):
+                reply = await _onb.handle_join_inquiry(sender_id)
+                await telegram.send(chat_id, reply)
+                return
+
+        # ------------------------------------------------------------------
         # Step 2: Resolve context
         # ------------------------------------------------------------------
         ctx = await context.resolve(chat_id, sender_id, is_group)
@@ -186,6 +207,16 @@ async def handle_message(
             return
 
         log_prefix = f"[chat:{chat_id} sender:{sender_id} boss:{ctx.boss_chat_id}]"
+
+        # ------------------------------------------------------------------
+        # Step 2b: Boss approving/rejecting a join request
+        # ------------------------------------------------------------------
+        if not is_group and ctx.sender_type == "boss":
+            from src import onboarding as _onb  # noqa: PLC0415
+            decision = await _onb.handle_boss_join_decision(text, str(ctx.boss_chat_id))
+            if decision:
+                await telegram.send(chat_id, decision)
+                return
 
         # ------------------------------------------------------------------
         # Step 3: Save user message to DB + Qdrant (async embed)
