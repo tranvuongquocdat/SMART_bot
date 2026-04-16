@@ -1,7 +1,8 @@
-"""Onboarding state machine for new users.
+"""Onboarding for new users.
 
-Uses AI for everything — understanding intent, extracting info, generating responses.
-No hardcoded messages, no keyword matching.
+Uses a single LLM collector: each turn extracts any available fields and
+generates the reply in one shot. State accumulates in DB until all required
+fields are present, then completion runs.
 
 Three paths:
   boss    — create a new workspace
@@ -23,7 +24,7 @@ logger = logging.getLogger("onboarding")
 _join_sessions: dict[int, dict] = {}
 
 # ---------------------------------------------------------------------------
-# AI core
+# Persona
 # ---------------------------------------------------------------------------
 
 _PERSONA = """\
@@ -35,320 +36,119 @@ Bạn là trợ lý thư ký giám đốc AI — lịch sự, chuyên nghiệp, 
 - Trả lời tối đa 3-4 câu, đi thẳng vào vấn đề\
 """
 
+# ---------------------------------------------------------------------------
+# LLM collector (replaces 7 step handlers + 7 classify prompts)
+# ---------------------------------------------------------------------------
 
-async def _ai_classify(system_prompt: str, user_text: str) -> dict:
-    """Send a classification/extraction request to the LLM. Returns parsed JSON."""
+_COLLECTOR_PROMPT = """\
+You are a smart onboarding assistant for an AI secretary app.
+Extract structured fields from the user's message and generate a natural reply.
+
+## Current collected state
+{state_json}
+
+## Available workspaces (for member/partner to join)
+{boss_list}
+
+## Extraction rules
+- "type": sếp/giám đốc/chủ → "boss"; nhân viên/thành viên → "member"; đối tác/partner/freelancer → "partner"
+- "language": infer from the user's own writing style if not stated — Vietnamese → "vi", English → "en". Default "vi".
+- "target_boss_id": if user mentions a boss name or company, match against available workspaces; return their chat_id (integer). Return null if no match or ambiguous.
+- "confirmed": set to true if the user is explicitly confirming ("ok", "đúng rồi", "tạo đi", "xác nhận"); false if cancelling ("không", "sai", "hủy", "làm lại"). null otherwise.
+- Never overwrite an existing non-null field with null.
+
+## Reply rules
+- Write naturally in the user's inferred language.
+- Ask ONLY for fields still missing. Priority: type → name → company (boss) or target workspace (member/partner).
+- If all required fields for the detected type are present and confirmed is null: summarize and ask for confirmation.
+- If confirmed is true: acknowledge and say you are creating the workspace / sending the request.
+
+Return ONLY valid JSON:
+{{
+  "extracted": {{
+    "type": "boss" | "member" | "partner" | null,
+    "name": "..." | null,
+    "company": "..." | null,
+    "language": "vi" | "en" | "..." | null,
+    "target_boss_id": 123 | null,
+    "confirmed": true | false | null
+  }},
+  "reply": "..."
+}}
+"""
+
+
+async def _collector(state: dict, text: str, boss_list: str) -> dict:
+    state_copy = {k: v for k, v in state.items() if k != "first"}
+    prompt = _COLLECTOR_PROMPT.format(
+        state_json=json.dumps(state_copy, ensure_ascii=False),
+        boss_list=boss_list or "Chưa có workspace nào.",
+    )
     messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_text},
+        {"role": "system", "content": prompt},
+        {"role": "user", "content": text},
     ]
     response, _ = await openai_client.chat_with_tools(messages, [])
-    content = response.content or ""
+    content = (response.content or "").strip()
     try:
         return json.loads(content)
     except json.JSONDecodeError:
         start = content.find("{")
         end = content.rfind("}") + 1
         if start >= 0 and end > start:
-            return json.loads(content[start:end])
-        return {}
+            try:
+                return json.loads(content[start:end])
+            except json.JSONDecodeError:
+                pass
+    return {"extracted": {}, "reply": ""}
 
 
-async def _ai_reply(situation: str) -> str:
-    """Generate a natural response for the given situation."""
+async def _greeting() -> str:
     messages = [
         {"role": "system", "content": _PERSONA},
-        {"role": "user", "content": f"Tình huống: {situation}\n\nViết câu trả lời:"},
+        {"role": "user", "content": (
+            "Tình huống: Người dùng mới vừa nhắn lần đầu. "
+            "Chào, giới thiệu ngắn gọn em là trợ lý thư ký AI giúp quản lý công việc. "
+            "Hỏi họ là: (1) Sếp/Giám đốc muốn tạo workspace mới, "
+            "(2) Thành viên/Nhân viên, hoặc (3) Đối tác. Tối đa 3-4 câu."
+        )},
     ]
-    response, _ = await openai_client.chat_with_tools(messages, [])
-    return (response.content or "").strip()
+    resp, _ = await openai_client.chat_with_tools(messages, [])
+    return (resp.content or "").strip()
 
 
-# ---------------------------------------------------------------------------
-# Classification & extraction prompts
-# ---------------------------------------------------------------------------
-
-_CLASSIFY_TYPE_PROMPT = """\
-Bạn phân loại tin nhắn của người dùng mới. Họ đang cho biết vai trò của mình.
-
-Có 3 loại:
-- "boss" = sếp, giám đốc, quản lý, chủ doanh nghiệp, người muốn tạo workspace mới
-- "member" = nhân viên, thành viên, người làm trong team
-- "partner" = đối tác, cộng tác viên, freelancer, khách hàng
-
-Trả về JSON duy nhất, không giải thích:
-{"type": "boss"} hoặc {"type": "member"} hoặc {"type": "partner"} hoặc {"type": "unclear"}
-
-Nếu không rõ → {"type": "unclear"}\
-"""
-
-_CLASSIFY_CONFIRM_PROMPT = """\
-Người dùng đang được hỏi xác nhận tạo workspace. Họ cần đồng ý hoặc từ chối.
-
-Trả về JSON duy nhất, không giải thích:
-{"confirm": true} nếu họ đồng ý (ok, ừ, được, oke, yes, tạo đi, đồng ý, v.v.)
-{"confirm": false} nếu họ từ chối hoặc muốn sửa (không, chờ, sai rồi, hủy, v.v.)
-{"confirm": null} nếu không liên quan\
-"""
-
-_CLASSIFY_BOSS_SEARCH_PROMPT = """\
-Người dùng đang chọn team để tham gia. Có danh sách sau:
-{boss_list}
-
-Người dùng nói: "{user_text}"
-
-Nếu họ chọn bằng số hoặc nêu tên/công ty khớp 1 kết quả → trả về index (bắt đầu từ 0).
-Nếu không rõ hoặc không khớp → trả về -1.
-
-Trả về JSON duy nhất: {{"index": 0}} hoặc {{"index": -1}}\
-"""
-
-_EXTRACT_NAME_PROMPT = """\
-Trích xuất TÊN NGƯỜI từ tin nhắn. Loại bỏ mọi từ đệm, trợ từ \
-(nhé, nha, ạ, à, nè, đây, luôn, hen, ha, nhen, v.v.).
-
-Ví dụ:
-- "Đạt nhé" → {"name": "Đạt"}
-- "Tôi là Nguyễn Văn Bách" → {"name": "Nguyễn Văn Bách"}
-- "Minh đây" → {"name": "Minh"}
-- "em tên Linh ạ" → {"name": "Linh"}
-- "Trần Văn A nha anh" → {"name": "Trần Văn A"}
-- "mình là Hương nè" → {"name": "Hương"}
-
-Trả về JSON duy nhất: {"name": "..."} hoặc {"name": ""} nếu không tìm thấy tên.\
-"""
-
-_EXTRACT_COMPANY_PROMPT = """\
-Trích xuất TÊN CÔNG TY hoặc TỔ CHỨC từ tin nhắn. Loại bỏ từ đệm, giữ tên chính thức.
-
-Ví dụ:
-- "Công ty ABC" → {"company": "ABC"}
-- "FPT Software" → {"company": "FPT Software"}
-- "bên em là Nova Group nha" → {"company": "Nova Group"}
-- "Tập đoàn Vingroup ạ" → {"company": "Vingroup"}
-- "Solar Creative nhé anh" → {"company": "Solar Creative"}
-
-Trả về JSON duy nhất: {"company": "..."} hoặc {"company": ""} nếu không tìm thấy.\
-"""
-
-_CLASSIFY_BOSS_PICK_PROMPT = """
-Người dùng đang chọn công ty trong danh sách. Trả về JSON {{"index": N}} với N là index (0-based) của công ty được chọn, hoặc {{"index": -1}} nếu không rõ.
-Danh sách công ty: {boss_list}
-"""
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
+def _boss_fields_complete(state: dict) -> bool:
+    return all(state.get(f) for f in ("type", "name", "company", "language"))
 
 
-async def is_onboarding(chat_id: int) -> bool:
-    """Return True if chat_id is currently in the onboarding flow."""
-    state = await db.get_onboarding_state(chat_id)
-    return bool(state)
-
-
-async def start_onboarding(chat_id: int) -> None:
-    """Begin onboarding for a new user."""
-    await db.save_onboarding_state(chat_id, {"step": "ask_type", "first": True})
-    logger.info("[onboarding] started for chat_id=%s", chat_id)
-
-
-async def handle_onboard_message(text: str, chat_id: int) -> None:
-    """Route message to the correct handler based on current step."""
-    state = await db.get_onboarding_state(chat_id)
-    if state is None:
-        return
-
-    step = state["step"]
-
-    if step == "ask_type":
-        await _step_ask_type(text, chat_id, state)
-    elif step == "ask_language":
-        await _step_ask_language(text, chat_id, state)
-    elif step == "boss_name":
-        await _step_boss_name(text, chat_id, state)
-    elif step == "boss_company":
-        await _step_boss_company(text, chat_id, state)
-    elif step == "boss_confirm":
-        await _step_boss_confirm(text, chat_id, state)
-    elif step == "member_boss":
-        await _step_member_boss(text, chat_id, state)
-    elif step == "member_name":
-        await _step_member_name(text, chat_id, state)
-    else:
-        logger.warning("[onboarding] unknown step=%s for chat_id=%s", step, chat_id)
-
-
-# ---------------------------------------------------------------------------
-# Step handlers
-# ---------------------------------------------------------------------------
-
-
-async def _step_ask_type(text: str, chat_id: int, state: dict) -> None:
-    # First contact → greet and ask role
-    if state.pop("first", False):
-        await db.save_onboarding_state(chat_id, state)
-        reply = await _ai_reply(
-            "Người dùng mới vừa nhắn tin lần đầu. "
-            "Chào họ, giới thiệu ngắn gọn em là trợ lý thư ký AI giúp quản lý công việc. "
-            "Hỏi họ thuộc nhóm nào: "
-            "(1) Sếp / Giám đốc — muốn tạo workspace mới, "
-            "(2) Thành viên / Nhân viên — tham gia team có sẵn, "
-            "(3) Đối tác / Partner — tham gia team có sẵn."
-        )
-        await telegram.send(chat_id, reply)
-        return
-
-    result = await _ai_classify(_CLASSIFY_TYPE_PROMPT, text)
-    user_type = result.get("type", "unclear")
-
-    if user_type == "boss":
-        state["step"] = "ask_language"
-        state["type"] = "boss"
-        await db.save_onboarding_state(chat_id, state)
-        reply = await _ai_reply(
-            "Người dùng cho biết họ là sếp/giám đốc. Phản hồi tích cực ngắn gọn. "
-            "Sau đó hỏi ngôn ngữ ưa thích: (1) English, (2) Tiếng Việt — "
-            "hoặc nhập mã ngôn ngữ khác (ví dụ: fr, ja)."
-        )
-        await telegram.send(chat_id, reply)
-
-    elif user_type in ("member", "partner"):
-        state["step"] = "ask_language"
-        state["type"] = user_type
-        await db.save_onboarding_state(chat_id, state)
-        label = "thành viên" if user_type == "member" else "đối tác"
-        reply = await _ai_reply(
-            f"Người dùng cho biết họ là {label}. Phản hồi tích cực ngắn gọn. "
-            "Sau đó hỏi ngôn ngữ ưa thích: (1) English, (2) Tiếng Việt — "
-            "hoặc nhập mã ngôn ngữ khác (ví dụ: fr, ja)."
-        )
-        await telegram.send(chat_id, reply)
-
-    else:
-        reply = await _ai_reply(
-            "Người dùng trả lời không rõ vai trò. "
-            "Hỏi lại nhẹ nhàng: anh/chị là sếp muốn tạo workspace mới, "
-            "hay thành viên/đối tác muốn tham gia team có sẵn?"
-        )
-        await telegram.send(chat_id, reply)
-
-
-# ---- Language step -------------------------------------------------------
-
-_CLASSIFY_LANGUAGE_PROMPT = """\
-Người dùng đang chọn ngôn ngữ ưa thích.
-
-Quy tắc:
-- "1" hoặc "english" hoặc "tiếng anh" → trả về "en"
-- "2" hoặc "tiếng việt" hoặc "vietnamese" hoặc "viet" → trả về "vi"
-- Mã BCP-47 hợp lệ khác (ví dụ: "fr", "ja", "zh") → trả về nguyên mã đó (chữ thường)
-- Nếu không nhận ra → trả về "vi" (mặc định)
-
-Trả về JSON duy nhất, không giải thích: {"language": "vi"}\
-"""
-
-
-async def _step_ask_language(text: str, chat_id: int, state: dict) -> None:
-    result = await _ai_classify(_CLASSIFY_LANGUAGE_PROMPT, text)
-    language = result.get("language", "vi").strip().lower() or "vi"
-    state["language"] = language
-
-    user_type = state.get("type", "boss")
-    if user_type == "boss":
-        state["step"] = "boss_name"
-        await db.save_onboarding_state(chat_id, state)
-        reply = await _ai_reply(
-            f"Người dùng chọn ngôn ngữ '{language}'. "
-            "Xác nhận ngắn gọn và hỏi tên anh/chị."
-        )
-    else:
-        state["step"] = "member_boss"
-        await db.save_onboarding_state(chat_id, state)
-        label = "thành viên" if user_type == "member" else "đối tác"
-        reply = await _ai_reply(
-            f"Người dùng ({label}) chọn ngôn ngữ '{language}'. "
-            "Xác nhận ngắn gọn và hỏi họ thuộc team của ai — "
-            "cho biết tên sếp hoặc tên công ty để em tìm."
-        )
-    await telegram.send(chat_id, reply)
-
-
-# ---- Boss path -----------------------------------------------------------
-
-async def _step_boss_name(text: str, chat_id: int, state: dict) -> None:
-    result = await _ai_classify(_EXTRACT_NAME_PROMPT, text)
-    name = result.get("name", "").strip()
-    if not name:
-        reply = await _ai_reply(
-            "Không trích xuất được tên từ tin nhắn. "
-            "Hỏi lại tên anh/chị một cách tự nhiên."
-        )
-        await telegram.send(chat_id, reply)
-        return
-    state["name"] = name
-    state["step"] = "boss_company"
-    await db.save_onboarding_state(chat_id, state)
-    reply = await _ai_reply(
-        f"Sếp tên là {name}. Chào bằng tên và hỏi tên công ty/tổ chức của anh/chị."
+def _member_fields_complete(state: dict) -> bool:
+    return (
+        all(state.get(f) for f in ("type", "name", "language"))
+        and state.get("target_boss_id") is not None
     )
-    await telegram.send(chat_id, reply)
 
 
-async def _step_boss_company(text: str, chat_id: int, state: dict) -> None:
-    result = await _ai_classify(_EXTRACT_COMPANY_PROMPT, text)
-    company = result.get("company", "").strip()
-    if not company:
-        reply = await _ai_reply(
-            "Không trích xuất được tên công ty. Hỏi lại một cách tự nhiên."
-        )
-        await telegram.send(chat_id, reply)
-        return
-    state["company"] = company
-    state["step"] = "boss_confirm"
-    await db.save_onboarding_state(chat_id, state)
+# ---------------------------------------------------------------------------
+# Completion actions
+# ---------------------------------------------------------------------------
+
+async def _complete_boss(chat_id: int, state: dict) -> None:
+    """Provision Lark workspace and persist boss record. Called after confirmation."""
     name = state["name"]
-    reply = await _ai_reply(
-        f"Sếp tên {name}, công ty {company}. "
-        f"Xác nhận lại thông tin: tạo workspace cho *{name}* — *{company}*, "
-        "hỏi anh/chị xác nhận để em bắt đầu tạo, hoặc cần sửa gì không."
-    )
-    await telegram.send(chat_id, reply)
+    company = state["company"]
+    language = state.get("language", "vi")
 
-
-async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
-    result = await _ai_classify(_CLASSIFY_CONFIRM_PROMPT, text)
-    confirm = result.get("confirm")
-
-    name, company = state["name"], state["company"]
-
-    if confirm is None:
-        reply = await _ai_reply(
-            f"Người dùng trả lời không liên quan đến xác nhận. "
-            f"Nhắc lại: tạo workspace cho {name} - {company}, "
-            "hỏi anh/chị xác nhận hoặc cần sửa gì."
-        )
-        await telegram.send(chat_id, reply)
-        return
-
-    if not confirm:
-        state["step"] = "boss_name"
-        await db.save_onboarding_state(chat_id, state)
-        reply = await _ai_reply(
-            "Người dùng muốn sửa thông tin. "
-            "Nói dạ, em bắt đầu lại nhé, và hỏi lại tên."
-        )
-        await telegram.send(chat_id, reply)
-        return
-
-    wait_reply = await _ai_reply(
-        f"Người dùng xác nhận tạo workspace cho {name} - {company}. "
-        "Nói em đang tạo workspace, vui lòng chờ vài giây."
-    )
-    await telegram.send(chat_id, wait_reply)
+    messages = [
+        {"role": "system", "content": _PERSONA},
+        {"role": "user", "content": (
+            f"Người dùng xác nhận tạo workspace cho {name} - {company}. "
+            "Nói đang tạo, chờ vài giây."
+        )},
+    ]
+    resp, _ = await openai_client.chat_with_tools(messages, [])
+    await telegram.send(chat_id, (resp.content or "Đang tạo workspace...").strip())
 
     try:
-        # 1. Provision Lark workspace
         ws = await lark.provision_workspace(company)
         base_token = ws["base_token"]
         table_people = ws["table_people"]
@@ -359,7 +159,6 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
         table_notes = ws["table_notes"]
         logger.info("[onboarding] Lark workspace provisioned for chat_id=%s", chat_id)
 
-        # 2. Persist boss record
         await db.create_boss(
             chat_id, name, company,
             base_token, table_people, table_tasks, table_projects, table_ideas,
@@ -368,8 +167,6 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
         )
         logger.info("[onboarding] boss created in DB for chat_id=%s", chat_id)
 
-        # 2b. Persist language preference (create_boss doesn't accept language param)
-        language = state.get("language", "vi")
         _db = await db.get_db()
         await _db.execute(
             "UPDATE bosses SET language = ? WHERE chat_id = ?",
@@ -378,14 +175,10 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
         await _db.commit()
         logger.info("[onboarding] boss language='%s' saved for chat_id=%s", language, chat_id)
 
-        # 3. Add boss to people_map
         await db.add_person(chat_id, chat_id, "boss", name)
-
-        # 4. Provision Qdrant collections
         await qdrant.provision_collections(chat_id)
         logger.info("[onboarding] Qdrant collections provisioned for chat_id=%s", chat_id)
 
-        # 5. Add boss to People table on Lark
         await lark.create_record(base_token, table_people, {
             "Tên": name,
             "Chat ID": chat_id,
@@ -393,18 +186,18 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
         })
         logger.info("[onboarding] boss record added to Lark People table for chat_id=%s", chat_id)
 
-        # 6. AI generates success message
         lark_base_url = f"https://larksuite.com/base/{base_token}"
-        success_reply = await _ai_reply(
-            f"Workspace đã tạo xong cho {name} - {company}. "
-            "Thông báo thành công, hướng dẫn nhanh vài tính năng chính: "
-            "giao task bằng ngôn ngữ tự nhiên (ví dụ: giao Bách thiết kế logo deadline thứ 6), "
-            "xem tóm tắt ngày (hôm nay có gì?), "
-            "đặt nhắc nhở (nhắc tôi 3h chiều họp), "
-            "gửi tin nhắn cho team member. "
-            "Chúc anh/chị làm việc hiệu quả."
-        )
-        # Append Lark link separately to ensure it's always correct
+        messages2 = [
+            {"role": "system", "content": _PERSONA},
+            {"role": "user", "content": (
+                f"Workspace đã tạo xong cho {name} - {company}. "
+                "Thông báo thành công, hướng dẫn nhanh: giao task bằng ngôn ngữ tự nhiên, "
+                "xem tóm tắt ngày, đặt nhắc nhở, gửi tin nhắn team. "
+                "Chúc anh/chị làm việc hiệu quả."
+            )},
+        ]
+        resp2, _ = await openai_client.chat_with_tools(messages2, [])
+        success_reply = (resp2.content or "").strip()
         await telegram.send(
             chat_id,
             f"{success_reply}\n\nLark Base: {lark_base_url}\n"
@@ -413,133 +206,37 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
 
     except Exception:
         logger.exception("[onboarding] provision failed for chat_id=%s", chat_id)
-        error_reply = await _ai_reply(
-            "Có lỗi xảy ra khi tạo workspace. "
-            "Xin lỗi anh/chị và đề nghị thử lại sau hoặc liên hệ hỗ trợ."
-        )
-        await telegram.send(chat_id, error_reply)
+        messages3 = [
+            {"role": "system", "content": _PERSONA},
+            {"role": "user", "content": "Có lỗi khi tạo workspace. Xin lỗi và đề nghị thử lại sau."},
+        ]
+        resp3, _ = await openai_client.chat_with_tools(messages3, [])
+        await telegram.send(chat_id, (resp3.content or "Có lỗi. Vui lòng thử lại.").strip())
         return
 
-    # 7. Clear onboarding state from DB
     await db.clear_onboarding_state(chat_id)
     logger.info("[onboarding] completed (boss) for chat_id=%s", chat_id)
 
 
-# ---- Member / Partner path -----------------------------------------------
-
-async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
-    query = text.strip()
-    if not query:
-        reply = await _ai_reply(
-            "Người dùng gửi tin rỗng. Hỏi lại tên sếp hoặc tên công ty để em tìm team."
-        )
-        await telegram.send(chat_id, reply)
-        return
-
-    all_bosses = await db.get_all_bosses()
-    if not all_bosses:
-        reply = await _ai_reply(
-            "Chưa có workspace nào trong hệ thống. "
-            "Giải thích sếp của bạn cần đăng ký trước, bạn quay lại sau nhé."
-        )
-        await telegram.send(chat_id, reply)
-        return
-
-    # If pending list from previous turn, use AI to parse selection
-    pending = state.get("pending_matches")
-    if pending:
-        boss_list = "\n".join(
-            f"{i}. {b['name']} — {b.get('company', '')}"
-            for i, b in enumerate(pending)
-        )
-        prompt = _CLASSIFY_BOSS_SEARCH_PROMPT.format(boss_list=boss_list, user_text=query)
-        result = await _ai_classify(prompt, query)
-        idx = result.get("index", -1)
-        if 0 <= idx < len(pending):
-            chosen = pending[idx]
-            state["boss"] = chosen
-            state.pop("pending_matches", None)
-            state["step"] = "member_name"
-            await db.save_onboarding_state(chat_id, state)
-            reply = await _ai_reply(
-                f"Người dùng chọn team {chosen['name']} — {chosen.get('company', '')}. "
-                "Xác nhận và hỏi tên bạn."
-            )
-            await telegram.send(chat_id, reply)
-            return
-
-    # Text match in boss name / company name
-    query_lower = query.lower()
-    matches = [
-        b for b in all_bosses
-        if query_lower in b["name"].lower() or query_lower in b.get("company", "").lower()
-    ]
-
-    # AI fallback search if text match fails
-    if not matches and len(all_bosses) > 0:
-        boss_list = "\n".join(
-            f"{i}. {b['name']} — {b.get('company', '')}"
-            for i, b in enumerate(all_bosses)
-        )
-        prompt = _CLASSIFY_BOSS_SEARCH_PROMPT.format(boss_list=boss_list, user_text=query)
-        result = await _ai_classify(prompt, query)
-        idx = result.get("index", -1)
-        if 0 <= idx < len(all_bosses):
-            matches = [all_bosses[idx]]
-
-    if len(matches) == 0:
-        reply = await _ai_reply(
-            "Không tìm thấy team nào phù hợp. "
-            "Hỏi lại tên sếp hoặc tên công ty."
-        )
-        await telegram.send(chat_id, reply)
-        return
-
-    if len(matches) > 1:
-        state["pending_matches"] = matches
-        await db.save_onboarding_state(chat_id, state)
-        lines = "\n".join(
-            f"{i + 1}. {b['name']} — {b.get('company', '')}"
-            for i, b in enumerate(matches)
-        )
-        # AI writes intro, list is appended verbatim to ensure accuracy
-        intro = await _ai_reply(
-            "Tìm thấy nhiều team phù hợp. "
-            "Viết một câu ngắn dẫn vào danh sách và hỏi bạn thuộc team nào."
-        )
-        await telegram.send(chat_id, f"{intro}\n\n{lines}")
-        return
-
-    # Exactly 1 match
-    state.pop("pending_matches", None)
-    boss = matches[0]
-    state["boss"] = boss
-    state["step"] = "member_name"
-    await db.save_onboarding_state(chat_id, state)
-    reply = await _ai_reply(
-        f"Tìm thấy team *{boss['name']}* — *{boss.get('company', '')}*. "
-        "Xác nhận team và hỏi tên bạn là gì."
-    )
-    await telegram.send(chat_id, reply)
-
-
-async def _step_member_name(text: str, chat_id: int, state: dict) -> None:
-    result = await _ai_classify(_EXTRACT_NAME_PROMPT, text)
-    name = result.get("name", "").strip()
-    if not name:
-        reply = await _ai_reply(
-            "Không trích xuất được tên. Hỏi lại tên bạn."
-        )
-        await telegram.send(chat_id, reply)
-        return
-
-    boss = state["boss"]
+async def _complete_member(chat_id: int, state: dict) -> None:
+    """Create pending membership and notify boss."""
+    name = state["name"]
     person_type = state["type"]
     language = state.get("language", "vi")
+    target_boss_id = state["target_boss_id"]
+
+    all_bosses = await db.get_all_bosses()
+    boss = next(
+        (b for b in all_bosses
+         if b["chat_id"] == target_boss_id or str(b["chat_id"]) == str(target_boss_id)),
+        None,
+    )
+    if not boss:
+        await telegram.send(chat_id, "Không tìm thấy workspace. Vui lòng thử lại.")
+        return
 
     try:
         _db = await db.get_db()
-        # Create pending membership — boss must approve before access is granted
         await db.upsert_membership(
             _db,
             chat_id=str(chat_id),
@@ -555,34 +252,34 @@ async def _step_member_name(text: str, chat_id: int, state: dict) -> None:
         )
         await _db.commit()
         logger.info(
-            "[onboarding] pending membership created: %s %s (chat_id=%s) → boss chat_id=%s",
+            "[onboarding] pending membership: %s %s (chat_id=%s) → boss chat_id=%s",
             person_type, name, chat_id, boss["chat_id"],
         )
 
-        # Notify boss
         type_label = "thành viên" if person_type == "member" else "đối tác"
         company = boss.get("company") or boss["name"]
         notify_msg = (
             f"Yêu cầu tham gia từ *{name}* (chat_id={chat_id}):\n"
             f"Vai trò: {type_label}\n\n"
-            f"Trả lời tự nhiên để duyệt hoặc từ chối (ví dụ: 'duyệt', 'ok partner', 'từ chối')."
+            f"Trả lời tự nhiên để duyệt hoặc từ chối."
         )
         await telegram.send(boss["chat_id"], notify_msg)
 
-        # Tell applicant to wait
-        reply = await _ai_reply(
-            f"Người dùng tên {name} vừa gửi yêu cầu tham gia *{company}* với vai trò {type_label}. "
-            "Nói rằng yêu cầu đã được gửi tới sếp và họ sẽ nhận thông báo khi được duyệt."
-        )
-        await telegram.send(chat_id, reply)
+        messages = [
+            {"role": "system", "content": _PERSONA},
+            {"role": "user", "content": (
+                f"{name} vừa gửi yêu cầu tham gia *{company}* với vai trò {type_label}. "
+                "Nói yêu cầu đã gửi tới sếp, sẽ nhận thông báo khi được duyệt."
+            )},
+        ]
+        resp, _ = await openai_client.chat_with_tools(messages, [])
+        await telegram.send(chat_id, (resp.content or "Đã gửi yêu cầu.").strip())
 
     except Exception:
-        logger.exception("[onboarding] failed to create pending membership for %s chat_id=%s",
-                         person_type, chat_id)
-        error_reply = await _ai_reply(
-            "Có lỗi khi gửi yêu cầu tham gia. Xin lỗi bạn và đề nghị thử lại sau."
+        logger.exception(
+            "[onboarding] failed to create membership for %s chat_id=%s", person_type, chat_id
         )
-        await telegram.send(chat_id, error_reply)
+        await telegram.send(chat_id, "Có lỗi khi gửi yêu cầu tham gia. Vui lòng thử lại sau.")
         return
 
     await db.clear_onboarding_state(chat_id)
@@ -590,8 +287,112 @@ async def _step_member_name(text: str, chat_id: int, state: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Join flow (discover companies and request to join)
+# Public API
 # ---------------------------------------------------------------------------
+
+async def is_onboarding(chat_id: int) -> bool:
+    """Return True if chat_id is currently in the onboarding flow."""
+    state = await db.get_onboarding_state(chat_id)
+    return bool(state)
+
+
+async def start_onboarding(chat_id: int) -> None:
+    """Begin onboarding for a new user."""
+    await db.save_onboarding_state(chat_id, {"first": True})
+    logger.info("[onboarding] started for chat_id=%s", chat_id)
+
+
+async def handle_onboard_message(text: str, chat_id: int) -> None:
+    """Route onboarding message through the LLM collector."""
+    state = await db.get_onboarding_state(chat_id) or {}
+    is_first = state.pop("first", False)
+
+    if is_first:
+        await db.save_onboarding_state(chat_id, state)
+        greeting = await _greeting()
+        await telegram.send(chat_id, greeting)
+        return
+
+    all_bosses = await db.get_all_bosses()
+    boss_list = "\n".join(
+        f"chat_id={b['chat_id']}: {b['name']} — {b.get('company', '')}"
+        for b in all_bosses
+    )
+
+    result = await _collector(state, text, boss_list)
+    extracted = result.get("extracted", {})
+    reply = result.get("reply", "")
+
+    # Merge non-null extracted fields
+    for key, val in extracted.items():
+        if val is not None:
+            state[key] = val
+
+    user_type = state.get("type")
+
+    # Boss path completion
+    if user_type == "boss" and _boss_fields_complete(state):
+        confirmed = state.get("confirmed")
+        if confirmed is True:
+            await telegram.send(chat_id, reply)
+            await _complete_boss(chat_id, state)
+            return
+        elif confirmed is False:
+            # User wants to restart — clear collected fields
+            await db.save_onboarding_state(chat_id, {
+                "type": None, "name": None, "company": None,
+                "language": None, "confirmed": None,
+            })
+            await telegram.send(chat_id, reply)
+            return
+        # confirmed is None — reply already contains confirmation prompt
+
+    # Member/partner path completion
+    if user_type in ("member", "partner") and _member_fields_complete(state):
+        await telegram.send(chat_id, reply)
+        await _complete_member(chat_id, state)
+        return
+
+    await db.save_onboarding_state(chat_id, state)
+    await telegram.send(chat_id, reply)
+
+
+# ---------------------------------------------------------------------------
+# Join flow (discover companies and request to join)
+# Keep unchanged — short-lived in-memory sessions
+# ---------------------------------------------------------------------------
+
+# Minimal classify helper for join flow only
+_CLASSIFY_BOSS_PICK_PROMPT = """
+Người dùng đang chọn công ty trong danh sách. Trả về JSON {{"index": N}} với N là index (0-based) của công ty được chọn, hoặc {{"index": -1}} nếu không rõ.
+Danh sách công ty: {boss_list}
+"""
+
+_EXTRACT_NAME_PROMPT = """\
+Trích xuất TÊN NGƯỜI từ tin nhắn. Loại bỏ mọi từ đệm, trợ từ.
+Trả về JSON duy nhất: {"name": "..."} hoặc {"name": ""} nếu không tìm thấy tên.\
+"""
+
+
+async def _ai_classify(system_prompt: str, user_text: str) -> dict:
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_text},
+    ]
+    response, _ = await openai_client.chat_with_tools(messages, [])
+    content = response.content or ""
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                return json.loads(content[start:end])
+            except json.JSONDecodeError:
+                pass
+    return {}
+
 
 async def handle_join_inquiry(chat_id: int) -> str:
     """Called when user wants to see available companies. Returns listing message."""
@@ -714,7 +515,6 @@ async def handle_boss_join_decision(text: str, boss_chat_id: str) -> str | None:
         elif "nhân viên" in adjustments or "member" in adjustments:
             person_type = "member"
 
-    # Add to Lark People table
     fields = {
         "Tên": membership["name"],
         "Chat ID": int(target_id),
