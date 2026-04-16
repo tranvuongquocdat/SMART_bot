@@ -209,7 +209,9 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         ("language", "TEXT DEFAULT 'en'"),
     ]:
         try:
+            # f-string safe: col/definition are hardcoded above, SQLite doesn't support parameterized DDL
             await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
+            await db.commit()
         except Exception as exc:
             if "duplicate column name" not in str(exc):
                 raise
@@ -217,6 +219,7 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
     # Add language to memberships
     try:
         await db.execute("ALTER TABLE memberships ADD COLUMN language TEXT DEFAULT NULL")
+        await db.commit()
     except Exception as exc:
         if "duplicate column name" not in str(exc):
             raise
