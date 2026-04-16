@@ -18,6 +18,7 @@ from src.tools import (
 )
 from src.tools import workspace as workspace_tools
 from src.tools import group as group_tools
+from src.tools import communication
 
 
 # ---------------------------------------------------------------------------
@@ -909,13 +910,83 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "switch_workspace",
-            "description": "Switch the active workspace context. Useful when the user has multiple workspaces and wants to work in a specific one. Preference lasts 30 minutes.",
+            "description": (
+                "Chuyển workspace đang hoạt động. Dùng khi user có nhiều workspace và muốn làm việc ở workspace cụ thể. "
+                "Truyền tên workspace (fuzzy match) hoặc boss_id. Lưu vào DB lâu dài."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "boss_id": {"type": "integer", "description": "boss_id of the workspace to switch to"},
+                    "workspace": {"type": "string", "description": "Tên workspace (tìm gần đúng)"},
+                    "boss_id": {"type": "integer", "description": "boss_id cụ thể (nếu biết)"},
                 },
-                "required": ["boss_id"],
+                "required": [],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Communication tools (3)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "send_dm",
+            "description": (
+                "Gửi tin nhắn riêng (DM) cho một người trong team theo tên. "
+                "Dùng khi sếp muốn nhắn riêng ai đó — kể cả khi đang ở group. "
+                "Tự động log vào lịch sử liên lạc. "
+                "Nếu đang ở group, ưu tiên tìm người thuộc workspace của group đó trước."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Tên người nhận"},
+                    "content": {"type": "string", "description": "Nội dung tin nhắn"},
+                    "context": {"type": "string", "description": "Ngữ cảnh tùy chọn (vd: tên task liên quan)"},
+                    "workspace_ids": {"type": "string", "description": "\"current\" (mặc định) hoặc \"all\""},
+                },
+                "required": ["to", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "broadcast",
+            "description": (
+                "Gửi thông báo hàng loạt cho nhiều người qua DM cá nhân. "
+                "targets: \"all_members\" | \"all_partners\" | \"all\" | tên cụ thể cách nhau dấu phẩy. "
+                "Hoạt động từ cả DM lẫn group. Dùng check_team_engagement trước để biết ai có Chat ID."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                    "targets": {"type": "string", "description": "\"all_members\" | \"all_partners\" | \"all\" | \"Tên A, Tên B\""},
+                    "workspace_ids": {"type": "string"},
+                },
+                "required": ["message"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_communication_log",
+            "description": (
+                "Tra lịch sử tất cả tin nhắn bot đã chủ động gửi cho ai đó. "
+                "GỌI TRƯỚC khi trả lời 'đã nhắn X chưa' hoặc 'đã push deadline chưa'. "
+                "Trả về timeline đầy đủ: DM thủ công, thông báo giao task, nhắc deadline, reminder."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "person": {"type": "string", "description": "Tên người cần tra (bỏ trống = xem tất cả)"},
+                    "since": {"type": "string", "description": "Từ ngày YYYY-MM-DD (tùy chọn)"},
+                    "log_type": {"type": "string", "description": "\"all\" | \"manual\" | \"task_assigned\" | \"deadline_push\" | \"reminder\""},
+                    "workspace_ids": {"type": "string"},
+                },
+                "required": [],
             },
         },
     },
@@ -1077,6 +1148,14 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
             return await group_tools.broadcast_to_group(ctx, **args)
         case "manage_group":
             return await group_tools.manage_group(ctx, **args)
+
+        # Communication tools
+        case "send_dm":
+            return await communication.send_dm(ctx, **args)
+        case "broadcast":
+            return await communication.broadcast(ctx, **args)
+        case "get_communication_log":
+            return await communication.get_communication_log(ctx, **args)
 
         # Workspace & language tools
         case "set_language":

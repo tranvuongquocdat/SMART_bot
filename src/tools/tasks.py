@@ -64,7 +64,7 @@ async def _find_assignee_chat_id(ctx: ChatContext, assignee_name: str) -> tuple[
 
 async def _notify_assignee_task(
     assignee_chat_id: str, task_name: str, deadline: str,
-    assigner_name: str,
+    assigner_name: str, boss_chat_id: int = 0,
 ):
     msg = (
         f"📋 Bạn vừa được giao task mới!\n\n"
@@ -74,6 +74,14 @@ async def _notify_assignee_task(
         f"Reply để xác nhận, hỏi thêm thông tin, hoặc đề xuất thay đổi nhé."
     )
     await telegram.send(int(assignee_chat_id), msg)
+    if boss_chat_id:
+        await db_mod.log_outbound_dm(
+            boss_chat_id=boss_chat_id,
+            to_chat_id=int(assignee_chat_id),
+            to_name="",
+            content=msg,
+            trigger_type="task_assigned",
+        )
 
 
 async def create_task(
@@ -133,7 +141,8 @@ async def create_task(
     # Notify assignee async
     if assignee_chat_id:
         asyncio.create_task(_notify_assignee_task(
-            assignee_chat_id, name, deadline, ctx.sender_name or ctx.boss_name
+            assignee_chat_id, name, deadline,
+            ctx.sender_name or ctx.boss_name, ctx.boss_chat_id,
         ))
 
     return f"Đã tạo task '{name}' (ID: {record_id}).{warning}"
