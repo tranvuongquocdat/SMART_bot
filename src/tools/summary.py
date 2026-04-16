@@ -2,6 +2,7 @@ from datetime import date, datetime
 
 from src.context import ChatContext
 from src.services import lark
+from src.tools._workspace import resolve_workspaces
 
 
 def _deadline_ts(record: dict) -> int | None:
@@ -18,8 +19,29 @@ def _deadline_str(record: dict) -> str:
     return "N/A"
 
 
-async def get_summary(ctx: ChatContext, summary_type: str = "today", assignee: str = "") -> str:
-    records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
+async def get_summary(
+    ctx: ChatContext,
+    summary_type: str = "today",
+    assignee: str = "",
+    workspace_ids: str = "current",
+) -> str:
+    # Multi-workspace path
+    if workspace_ids != "current":
+        workspaces = await resolve_workspaces(ctx, workspace_ids)
+        all_records = []
+        for ws in workspaces:
+            if not ws.get("lark_table_tasks"):
+                continue
+            try:
+                recs = await lark.search_records(ws["lark_base_token"], ws["lark_table_tasks"])
+                for r in recs:
+                    r["_workspace"] = ws["workspace_name"]
+                all_records.extend(recs)
+            except Exception:
+                continue
+        records = all_records
+    else:
+        records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
 
     if not records:
         return "Hiện chưa có task nào."
@@ -31,24 +53,29 @@ async def get_summary(ctx: ChatContext, summary_type: str = "today", assignee: s
     today_ms = int(datetime.combine(date.today(), datetime.min.time()).timestamp() * 1000)
 
     active = [r for r in records if r.get("Status") in ("Mới", "Đang làm")]
-    done = [r for r in records if r.get("Status") == "Xong"]
+    done = [r for r in records if r.get("Status") in ("Hoàn thành", "Huỷ")]
     overdue = [
         r for r in active
         if _deadline_ts(r) is not None and _deadline_ts(r) < today_ms
     ]
+
+    def _task_line(r: dict) -> str:
+        ws = r.get("_workspace", "")
+        tag = f"[{ws}] " if ws and workspace_ids != "current" else ""
+        return f"  {tag}- {r.get('Tên task', '?')} | {r.get('Assignee', 'N/A')} | DL: {_deadline_str(r)}"
 
     lines = []
 
     if summary_type == "week":
         lines.append("Báo cáo tuần:")
         lines.append(f"  Tổng task: {len(records)}")
-        lines.append(f"  Hoàn thành: {len(done)}")
+        lines.append(f"  Hoàn thành/Huỷ: {len(done)}")
         lines.append(f"  Đang làm: {len(active)}")
         lines.append(f"  Quá hạn: {len(overdue)}")
         if overdue:
             lines.append(f"\nTask quá hạn ({len(overdue)}):")
             for r in overdue[:5]:
-                lines.append(f"  - {r.get('Tên task', '?')} | Assignee: {r.get('Assignee', 'N/A')} | DL: {_deadline_str(r)}")
+                lines.append(_task_line(r))
     else:
         header = f"Tóm tắt hôm nay ({today_str})"
         if assignee:
@@ -58,11 +85,11 @@ async def get_summary(ctx: ChatContext, summary_type: str = "today", assignee: s
         if active:
             lines.append(f"\nTask cần xử lý ({len(active)}):")
             for r in active[:10]:
-                lines.append(f"  - {r.get('Tên task', '?')} | {r.get('Assignee', 'N/A')} | DL: {_deadline_str(r)}")
+                lines.append(_task_line(r))
         if overdue:
             lines.append(f"\nQuá hạn ({len(overdue)}):")
             for r in overdue[:5]:
-                lines.append(f"  - {r.get('Tên task', '?')} | DL: {_deadline_str(r)}")
+                lines.append(_task_line(r))
         if not active and not overdue:
             lines.append("Không có task nào cần xử lý.")
 
