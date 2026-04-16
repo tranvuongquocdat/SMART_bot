@@ -23,23 +23,27 @@ async def set_language(ctx: ChatContext, language_code: str) -> str:
     return f"Language set to '{language_code}'."
 
 
-async def switch_workspace(ctx: ChatContext, boss_id: int) -> str:
+async def switch_workspace(ctx: ChatContext, workspace: str = "", boss_id: int = 0) -> str:
     """
-    Switch active workspace. Preference persisted for 30 min.
-    Secretary will use this workspace for subsequent messages.
+    Switch active workspace. Persists active_workspace_id in memberships table.
+    Accepts workspace name (fuzzy match) or boss_id integer.
     """
-    # Verify user has access to this workspace
-    memberships = await db.get_memberships(str(ctx.sender_chat_id))
-    boss_self = await db.get_boss(ctx.sender_chat_id)
-    valid_ids = {m["boss_chat_id"] for m in memberships}
-    if boss_self:
-        valid_ids.add(str(ctx.sender_chat_id))
+    from src.tools._workspace import set_active_workspace_id, resolve_workspaces
+    all_ws = await resolve_workspaces(ctx, "all")
 
-    if str(boss_id) not in valid_ids:
-        return f"You don't have access to workspace {boss_id}."
+    if not all_ws:
+        return "Bạn chưa thuộc workspace nào."
 
-    await db.set_session(ctx.sender_chat_id, "preferred_workspace", str(boss_id), ttl_minutes=30)
+    # Match by name or by boss_id
+    match = None
+    if workspace:
+        match = next((w for w in all_ws if workspace.lower() in w["workspace_name"].lower()), None)
+    elif boss_id:
+        match = next((w for w in all_ws if w["boss_id"] == boss_id), None)
 
-    boss = await db.get_boss(boss_id)
-    company = boss.get("company", str(boss_id)) if boss else str(boss_id)
-    return f"Switched to workspace: {company}. This preference lasts 30 minutes."
+    if not match:
+        names = ", ".join(w["workspace_name"] for w in all_ws)
+        return f"Không tìm thấy workspace '{workspace or boss_id}'. Có: {names}"
+
+    await set_active_workspace_id(ctx.sender_chat_id, str(match["boss_id"]))
+    return f"Đã chuyển sang workspace: {match['workspace_name']}"
