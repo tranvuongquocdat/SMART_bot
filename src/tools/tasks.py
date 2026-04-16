@@ -288,3 +288,85 @@ async def search_tasks(ctx: ChatContext, query: str) -> str:
     for r in matched[:10]:
         lines.append(_format_task(r))
     return "\n".join(lines)
+
+
+async def approve_task_change(ctx: ChatContext, approval_id: int) -> str:
+    """Apply a pending task change and notify the requester."""
+    import json
+    from src import db
+    from src.services import lark, telegram
+
+    _db = await db.get_db()
+    async with _db.execute(
+        "SELECT * FROM pending_approvals WHERE id = ? AND boss_chat_id = ? AND status = 'pending'",
+        (approval_id, str(ctx.boss_chat_id)),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        return f"No pending approval found with id={approval_id}."
+
+    approval = dict(row)
+    payload = json.loads(approval["payload"]) if isinstance(approval["payload"], str) else approval["payload"]
+
+    changes = payload.get("changes", {})
+    record_id = payload.get("record_id", "")
+    task_name = payload.get("task_name", "?")
+
+    if changes and record_id:
+        try:
+            await lark.update_record(ctx.lark_base_token, ctx.lark_table_tasks, record_id, changes)
+        except Exception as e:
+            return f"Failed to apply changes to Lark: {e}"
+
+    await _db.execute(
+        "UPDATE pending_approvals SET status = 'approved' WHERE id = ?",
+        (approval_id,),
+    )
+    await _db.commit()
+
+    changes_str = ", ".join(f"{k}: {v}" for k, v in changes.items())
+    try:
+        await telegram.send(
+            int(approval["requester_id"]),
+            f"✅ Your update to task '{task_name}' was approved. Changes: {changes_str}",
+        )
+    except Exception:
+        pass
+
+    return f"Approved task change for '{task_name}'. Changes applied: {changes_str}"
+
+
+async def reject_task_change(ctx: ChatContext, approval_id: int) -> str:
+    """Reject a pending task change and notify the requester."""
+    import json
+    from src import db
+    from src.services import telegram
+
+    _db = await db.get_db()
+    async with _db.execute(
+        "SELECT * FROM pending_approvals WHERE id = ? AND boss_chat_id = ? AND status = 'pending'",
+        (approval_id, str(ctx.boss_chat_id)),
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        return f"No pending approval found with id={approval_id}."
+
+    approval = dict(row)
+    payload = json.loads(approval["payload"]) if isinstance(approval["payload"], str) else approval["payload"]
+    task_name = payload.get("task_name", "?")
+
+    await _db.execute(
+        "UPDATE pending_approvals SET status = 'rejected' WHERE id = ?",
+        (approval_id,),
+    )
+    await _db.commit()
+
+    try:
+        await telegram.send(
+            int(approval["requester_id"]),
+            f"Your requested update to task '{task_name}' was not approved.",
+        )
+    except Exception:
+        pass
+
+    return f"Rejected task change request for '{task_name}'."
