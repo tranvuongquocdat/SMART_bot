@@ -129,6 +129,112 @@ def _resolve_language(memberships: list, sender_id: int, primary: dict | None) -
     return "en"
 
 
+async def build_group_context(group_chat_id: int, boss_chat_id: int) -> dict:
+    """
+    Builds group-specific context dict:
+    {
+        "group_name": str,
+        "project": {"name": str, "status": str} | None,
+        "group_note": str | None,
+        "recent_participants": [str, ...],
+        "active_topic": str,
+    }
+    """
+    from src.services import lark as _lark
+
+    _db = await db.get_db()
+
+    # group_name + project_id from group_map
+    async with _db.execute(
+        "SELECT group_name, project_id FROM group_map WHERE group_chat_id = ?",
+        (group_chat_id,),
+    ) as cur:
+        row = await cur.fetchone()
+    group_name = row["group_name"] if row else ""
+    project_id = row["project_id"] if row else None
+
+    # Fetch project info from Lark if linked
+    project = None
+    if project_id:
+        boss = await db.get_boss(boss_chat_id)
+        if boss:
+            try:
+                table = boss.get("lark_table_projects", "")
+                if table:
+                    records = await _lark.search_records(boss["lark_base_token"], table)
+                    match = next((r for r in records if r.get("record_id") == project_id), None)
+                    if match:
+                        project = {
+                            "name": match.get("Tên dự án", match.get("Name", "")),
+                            "status": match.get("Trạng thái", match.get("Status", "")),
+                        }
+            except Exception:
+                pass
+
+    # Group note
+    note_row = await db.get_note(boss_chat_id, "group", str(group_chat_id))
+    group_note = note_row.get("content") if note_row else None
+
+    # Recent participants: get distinct sender_ids from last 15 messages, look up names
+    async with _db.execute(
+        "SELECT DISTINCT sender_id FROM messages WHERE chat_id = ? AND sender_id IS NOT NULL ORDER BY id DESC LIMIT 15",
+        (group_chat_id,),
+    ) as cur:
+        sender_rows = await cur.fetchall()
+
+    recent_participants = []
+    for sr in sender_rows:
+        sid = sr["sender_id"]
+        async with _db.execute(
+            "SELECT name FROM memberships WHERE chat_id = ?",
+            (str(sid),),
+        ) as cur2:
+            m = await cur2.fetchone()
+        if m and m["name"]:
+            recent_participants.append(m["name"])
+        else:
+            boss_row = await db.get_boss(sid)
+            if boss_row:
+                recent_participants.append(boss_row["name"])
+
+    # Active topic — LLM mini-call on last 10 messages
+    async with _db.execute(
+        "SELECT role, content FROM messages WHERE chat_id = ? ORDER BY id DESC LIMIT 10",
+        (group_chat_id,),
+    ) as cur:
+        msg_rows = await cur.fetchall()
+    active_topic = await _get_active_topic(list(reversed([dict(r) for r in msg_rows])))
+
+    return {
+        "group_name": group_name,
+        "project": project,
+        "group_note": group_note,
+        "recent_participants": recent_participants,
+        "active_topic": active_topic,
+    }
+
+
+async def _get_active_topic(messages: list[dict]) -> str:
+    """LLM mini-call: summarize what the group is currently discussing in 1 sentence."""
+    if not messages:
+        return ""
+    from src.services import openai_client as _oai
+    conversation = "\n".join(
+        f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
+    )
+    response, _ = await _oai.chat_with_tools(
+        [
+            {
+                "role": "system",
+                "content": "Tóm tắt trong 1 câu ngắn chủ đề mà nhóm đang bàn luận. Chỉ trả về câu tóm tắt, không giải thích thêm.",
+            },
+            {"role": "user", "content": conversation},
+        ],
+        [],
+    )
+    return (response.content or "").strip()
+
+
 def membership_summary(memberships: list) -> str:
     """Returns a short string like 'Company A (boss), Company B (partner)' for system prompt."""
     if not memberships:

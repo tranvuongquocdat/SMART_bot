@@ -8,6 +8,7 @@ _CONTENT_LABELS = {
     "morning_brief": "Briefing sáng",
     "evening_summary": "Tổng kết chiều",
     "custom": "Tuỳ chỉnh",
+    "group_brief": "Briefing nhóm",
 }
 
 
@@ -20,6 +21,7 @@ async def add_review_schedule(
     cron_time: str,
     content_type: str = "morning_brief",
     custom_prompt: str = "",
+    group_chat_id: int | None = None,
 ) -> str:
     if not _valid_time(cron_time):
         return f"Định dạng giờ không hợp lệ: '{cron_time}'. Dùng HH:MM (VD: 08:00)."
@@ -32,8 +34,18 @@ async def add_review_schedule(
         db_mod._db, str(ctx.boss_chat_id), cron_time, content_type,
         custom_prompt.strip() or None,
     )
+
+    # Set group_chat_id if provided (for group_brief routing)
+    if group_chat_id and content_type == "group_brief":
+        await db_mod._db.execute(
+            "UPDATE scheduled_reviews SET group_chat_id = ? WHERE id = ?",
+            (group_chat_id, review_id),
+        )
+        await db_mod._db.commit()
+
     label = _CONTENT_LABELS[content_type]
-    return f"Đã thêm lịch review #{review_id}: {label} lúc {cron_time}."
+    target = f" → nhóm {group_chat_id}" if group_chat_id else ""
+    return f"Đã thêm lịch review #{review_id}: {label} lúc {cron_time}{target}."
 
 
 async def list_review_schedules(ctx: ChatContext) -> str:

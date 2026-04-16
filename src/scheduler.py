@@ -241,10 +241,36 @@ async def _run_dynamic_reviews():
                 if not prompt:
                     continue
                 text = await run_daily_review(ctx, _settings, custom_prompt=prompt)
+            elif content_type == "group_brief":
+                from src.services import openai_client as _oai  # noqa: PLC0415
+                tasks_data = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
+                tasks_text = "\n".join(
+                    f"- {t.get('Tên task', '?')} | {t.get('Assignee', '?')} | deadline: {t.get('Deadline', '?')} | status: {t.get('Status', '?')}"
+                    for t in tasks_data
+                ) or "(không có task)"
+                response, _ = await _oai.chat_with_tools(
+                    [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Tạo briefing ngắn gọn cho nhóm (không phải cho sếp):\n"
+                                "1. Deadline hôm nay của team\n"
+                                "2. Ai đang có nhiều task nhất\n"
+                                "3. Task mới được giao từ hôm qua\n"
+                                "Tone tự nhiên, như thông báo nội bộ."
+                            ),
+                        },
+                        {"role": "user", "content": f"Danh sách task:\n{tasks_text}"},
+                    ],
+                    [],
+                )
+                text = response.content or "Không thể tạo briefing."
             else:
                 continue
 
-            await telegram.send(int(owner_id), text)
+            # Route: group chat or boss DM
+            target_chat_id = review.get("group_chat_id") or int(owner_id)
+            await telegram.send(int(target_chat_id), text)
             logger.info("[scheduler] Dynamic review '%s' sent to %s", content_type, boss["name"])
         except Exception:
             logger.exception("[scheduler] Dynamic review failed for review_id=%s", review.get("id"))

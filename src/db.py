@@ -235,6 +235,22 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         )
     """)
 
+    # Add project_id to group_map
+    try:
+        await db.execute("ALTER TABLE group_map ADD COLUMN project_id TEXT DEFAULT NULL")
+        await db.commit()
+    except Exception as exc:
+        if "duplicate column name" not in str(exc):
+            raise
+
+    # Add group_chat_id to scheduled_reviews
+    try:
+        await db.execute("ALTER TABLE scheduled_reviews ADD COLUMN group_chat_id INTEGER DEFAULT NULL")
+        await db.commit()
+    except Exception as exc:
+        if "duplicate column name" not in str(exc):
+            raise
+
 
 # ---------------------------------------------------------------------------
 # bosses
@@ -365,18 +381,19 @@ async def add_group(
     group_chat_id: int,
     boss_chat_id: int,
     group_name: str = "",
-    db_path: str = "data/history.db",
+    project_id: str | None = None,
 ) -> None:
-    db = await get_db(db_path)
+    db = await get_db()
     await db.execute(
         """
-        INSERT INTO group_map (group_chat_id, boss_chat_id, group_name)
-        VALUES (?, ?, ?)
+        INSERT INTO group_map (group_chat_id, boss_chat_id, group_name, project_id)
+        VALUES (?, ?, ?, ?)
         ON CONFLICT(group_chat_id) DO UPDATE SET
             boss_chat_id = excluded.boss_chat_id,
-            group_name   = excluded.group_name
+            group_name   = excluded.group_name,
+            project_id   = excluded.project_id
         """,
-        (group_chat_id, boss_chat_id, group_name),
+        (group_chat_id, boss_chat_id, group_name, project_id),
     )
     await db.commit()
 

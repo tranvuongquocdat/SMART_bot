@@ -214,6 +214,7 @@ async def update_task(
             "record_id": record["record_id"],
             "task_name": record.get("Tên task", ""),
             "changes": fields,
+            "group_chat_id": str(ctx.chat_id) if ctx.is_group else None,
         })
         await db_mod.create_approval(
             db_mod._db,
@@ -333,6 +334,17 @@ async def approve_task_change(ctx: ChatContext, approval_id: int) -> str:
     except Exception:
         pass
 
+    # Broadcast result to group if task was updated from group context
+    group_chat_id = payload.get("group_chat_id")
+    if group_chat_id:
+        try:
+            await telegram.send(
+                int(group_chat_id),
+                f"✅ Task *{task_name}* đã được duyệt cập nhật.",
+            )
+        except Exception:
+            pass
+
     return f"Approved task change for '{task_name}'. Changes applied: {changes_str}"
 
 
@@ -368,5 +380,16 @@ async def reject_task_change(ctx: ChatContext, approval_id: int) -> str:
         )
     except Exception:
         pass
+
+    # Broadcast result to group if task was updated from group context
+    group_chat_id = payload.get("group_chat_id")
+    if group_chat_id:
+        try:
+            await telegram.send(
+                int(group_chat_id),
+                f"Task *{task_name}*: yêu cầu cập nhật không được duyệt.",
+            )
+        except Exception:
+            pass
 
     return f"Rejected task change request for '{task_name}'."

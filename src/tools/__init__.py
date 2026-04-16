@@ -17,6 +17,7 @@ from src.tools import (
     reset,
 )
 from src.tools import workspace as workspace_tools
+from src.tools import group as group_tools
 
 
 # ---------------------------------------------------------------------------
@@ -576,8 +577,12 @@ TOOL_DEFINITIONS = [
                     "cron_time": {"type": "string", "description": "Giờ dạng HH:MM, ví dụ: 08:00, 17:30"},
                     "content_type": {
                         "type": "string",
-                        "enum": ["morning_brief", "evening_summary", "custom"],
-                        "description": "Loại nội dung: morning_brief = briefing sáng, evening_summary = tổng kết chiều, custom = tuỳ chỉnh theo prompt",
+                        "enum": ["morning_brief", "evening_summary", "custom", "group_brief"],
+                        "description": "Loại nội dung: morning_brief = briefing sáng, evening_summary = tổng kết chiều, custom = tuỳ chỉnh theo prompt, group_brief = briefing gửi vào nhóm",
+                    },
+                    "group_chat_id": {
+                        "type": "integer",
+                        "description": "ID nhóm Telegram để gửi group_brief (chỉ dùng khi content_type = group_brief). Để trống = gửi DM sếp.",
                     },
                     "custom_prompt": {
                         "type": "string",
@@ -817,6 +822,73 @@ TOOL_DEFINITIONS = [
         },
     },
     # ------------------------------------------------------------------
+    # Group tools
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "summarize_group_conversation",
+            "description": "Summarize recent group messages: main topic, decisions made, action items. Call when asked to recap a meeting or conversation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "n_messages": {"type": "integer", "description": "Number of recent messages to summarize (default 20)", "default": 20},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_group_note",
+            "description": "Write or append to the group's persistent note. Use to record decisions, group rules, or context that should be remembered across sessions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string"},
+                    "append": {"type": "boolean", "description": "True (default) = append; False = overwrite", "default": True},
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "broadcast_to_group",
+            "description": "Send a message to the group chat. Use for team announcements, deadline alerts, or approval results that the whole team should see.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                },
+                "required": ["message"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_group",
+            "description": "Manage the Telegram group: invite member, rename, pin/unpin messages, kick member, set description, or generate invite link. Requires bot to be admin.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["invite", "rename", "pin", "unpin", "kick", "set_description", "invite_link"],
+                    },
+                    "name": {"type": "string", "description": "Person name (for invite/kick)"},
+                    "title": {"type": "string", "description": "New group name (for rename)"},
+                    "message_id": {"type": "integer", "description": "Message ID to pin"},
+                    "text": {"type": "string", "description": "Description text (for set_description)"},
+                },
+                "required": ["action"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
     # Workspace & language tools
     # ------------------------------------------------------------------
     {
@@ -977,6 +1049,16 @@ async def execute_tool(name: str, arguments: str, ctx: ChatContext) -> str:
             return await reset.confirm_reset_step1(ctx, **args)
         case "execute_reset":
             return await reset.execute_reset(ctx, **args)
+
+        # Group tools
+        case "summarize_group_conversation":
+            return await group_tools.summarize_group_conversation(ctx, **args)
+        case "update_group_note":
+            return await group_tools.update_group_note(ctx, **args)
+        case "broadcast_to_group":
+            return await group_tools.broadcast_to_group(ctx, **args)
+        case "manage_group":
+            return await group_tools.manage_group(ctx, **args)
 
         # Workspace & language tools
         case "set_language":

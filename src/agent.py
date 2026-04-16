@@ -44,7 +44,7 @@ Active workspace: {boss_name}'s workspace
 
 ## Active sessions
 {active_sessions_summary}
-
+{group_section}
 ## Who you are
 You genuinely know this team. You care about their wellbeing, not just their output.
 When making decisions that affect someone, understand their situation before acting.
@@ -135,6 +135,25 @@ async def _build_people_summary(ctx: ChatContext) -> str:
 # Session summary helper
 # ---------------------------------------------------------------------------
 
+def _build_group_section(group_ctx: dict | None) -> str:
+    if not group_ctx:
+        return ""
+    project_str = ""
+    if group_ctx.get("project"):
+        p = group_ctx["project"]
+        project_str = f" | Project: {p['name']} ({p['status']})" if p.get("status") else f" | Project: {p['name']}"
+    participants = ", ".join(group_ctx.get("recent_participants", [])) or "chưa có"
+    note = group_ctx.get("group_note") or "chưa có"
+    topic = group_ctx.get("active_topic") or "chưa rõ"
+    return (
+        f"## Nhóm\n"
+        f"Tên: {group_ctx.get('group_name', '')}{project_str}\n"
+        f"Đang bàn: {topic}\n"
+        f"Tham gia gần đây: {participants}\n"
+        f"Ghi chú nhóm: {note}\n\n"
+    )
+
+
 def _build_sessions_summary(sessions: dict) -> str:
     parts = []
     if sessions.get("reset_pending"):
@@ -156,6 +175,7 @@ async def handle_message(
     sender_id: int,
     is_group: bool,
     bot_mentioned: bool,
+    group_name: str = "",
 ):
     start_time = time.time()
     log_prefix = f"[chat:{chat_id} sender:{sender_id}]"
@@ -164,27 +184,39 @@ async def handle_message(
 
     try:
         # ------------------------------------------------------------------
-        # Step 1: Group + not mentioned → only persist, no reply
+        # Step 1: Group messages
         # ------------------------------------------------------------------
-        if is_group and not bot_mentioned:
+        if is_group:
             group_info = await db.get_group(chat_id)
-            if not group_info:
-                return  # group chưa đăng ký → bỏ qua
-            boss_id = group_info["boss_chat_id"]
-            msg_id = await db.save_message(chat_id, "user", text, sender_id)
-            vector = await openai_client.embed(text)
-            asyncio.create_task(
-                qdrant.upsert(
-                    collection=f"messages_{boss_id}",
-                    point_id=msg_id,
-                    chat_id=chat_id,
-                    role="user",
-                    text=text,
-                    vector=vector,
+
+            if not bot_mentioned:
+                # Silent indexing only — persist message, no reply
+                if not group_info:
+                    return  # group chưa đăng ký → bỏ qua
+                boss_id = group_info["boss_chat_id"]
+                msg_id = await db.save_message(chat_id, "user", text, sender_id)
+                vector = await openai_client.embed(text)
+                asyncio.create_task(
+                    qdrant.upsert(
+                        collection=f"messages_{boss_id}",
+                        point_id=msg_id,
+                        chat_id=chat_id,
+                        role="user",
+                        text=text,
+                        vector=vector,
+                    )
                 )
-            )
-            logger.info("%s Group message saved (not mentioned, no reply)", log_prefix)
-            return
+                logger.info("%s Group message saved (not mentioned, no reply)", log_prefix)
+                return
+
+            # Bot mentioned — if group not registered, run group onboarding
+            if not group_info:
+                from src import group_onboarding  # noqa: PLC0415
+                if group_onboarding.is_group_onboarding(chat_id):
+                    await group_onboarding.handle(text, chat_id, group_name)
+                else:
+                    await group_onboarding.start(chat_id, sender_id)
+                return
 
         # ------------------------------------------------------------------
         # Step 2: Build rich context via context_builder
@@ -209,6 +241,17 @@ async def handle_message(
             return
 
         log_prefix = f"[chat:{chat_id} sender:{sender_id} boss:{ctx.boss_chat_id}]"
+
+        # ------------------------------------------------------------------
+        # Step 2c: Group context enrichment
+        # ------------------------------------------------------------------
+        group_ctx = None
+        if is_group:
+            from src.context_builder import build_group_context as _bgc  # noqa: PLC0415
+            try:
+                group_ctx = await _bgc(chat_id, ctx.boss_chat_id)
+            except Exception:
+                logger.exception("%s Failed to build group context", log_prefix)
 
         # ------------------------------------------------------------------
         # Step 3: Save user message to DB + Qdrant (async embed)
@@ -287,6 +330,7 @@ async def handle_message(
             language=built["language"],
             memberships_summary=_ms(built["memberships"]),
             active_sessions_summary=_build_sessions_summary(built["active_sessions"]),
+            group_section=_build_group_section(group_ctx),
         )
 
         messages = [{"role": "system", "content": system_content}]
