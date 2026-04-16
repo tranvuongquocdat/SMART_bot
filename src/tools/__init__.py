@@ -13,7 +13,10 @@ from src.tools import (
     reminder,
     review_config,
     web_search,
+    join,
+    reset,
 )
+from src.tools import workspace as workspace_tools
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +67,11 @@ TOOL_DEFINITIONS = [
                         "description": "Lọc theo trạng thái task",
                     },
                     "project": {"type": "string", "description": "Lọc theo tên dự án (tìm gần đúng)"},
+                    "workspace_ids": {
+                        "type": "string",
+                        "description": "Which workspaces to query. 'current' (default) = active workspace only. 'all' = all workspaces this user belongs to. Pass 'all' for personal queries like 'what are my tasks' that span workspaces.",
+                        "default": "current",
+                    },
                 },
                 "required": [],
             },
@@ -234,6 +242,11 @@ TOOL_DEFINITIONS = [
                     "deadline": {
                         "type": "string",
                         "description": "Deadline task mới dạng YYYY-MM-DD — nếu có, sẽ so sánh với các task hiện tại để phát hiện xung đột",
+                    },
+                    "workspace_ids": {
+                        "type": "string",
+                        "description": "Which workspaces to query. 'current' (default) = active workspace only. 'all' = all workspaces this user belongs to. Pass 'all' for personal queries like 'what are my tasks' that span workspaces.",
+                        "default": "current",
                     },
                 },
                 "required": ["assignee"],
@@ -650,6 +663,190 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    # ------------------------------------------------------------------
+    # Note tools — append_note (new)
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "append_note",
+            "description": "Add new information to an existing note without overwriting. Use this when you learn something new about a person, project, or group — it preserves existing knowledge. Use update_note only when reorganizing stale content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "note_type": {"type": "string", "enum": ["personal", "project", "group"]},
+                    "ref_id": {"type": "string", "description": "Reference key (person name, project name, or group id)"},
+                    "content": {"type": "string", "description": "New information to append"},
+                },
+                "required": ["note_type", "ref_id", "content"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Approval tools
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "list_pending_approvals",
+            "description": "Lists all pending approvals: task change requests from members and join requests to this workspace. Call this when someone asks about pending items or when you need to know what approval_id to use.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "approve_task_change",
+            "description": "Approve a pending task change request from a member. Use list_pending_approvals to get the approval_id first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "approval_id": {"type": "integer", "description": "ID from list_pending_approvals"},
+                },
+                "required": ["approval_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_task_change",
+            "description": "Reject a pending task change request from a member.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "approval_id": {"type": "integer"},
+                },
+                "required": ["approval_id"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Join flow tools
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "list_available_workspaces",
+            "description": "Returns workspaces this user can request to join (not already a member). Useful when someone wants to collaborate with another company.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "request_join",
+            "description": "Send a join request to another workspace. The target boss will be notified and can approve or reject.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target_boss_id": {"type": "integer", "description": "Boss ID from list_available_workspaces"},
+                    "role": {"type": "string", "enum": ["member", "partner"], "description": "Role being requested"},
+                    "intro": {"type": "string", "description": "Brief introduction / reason for joining"},
+                },
+                "required": ["target_boss_id", "role", "intro"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "approve_join",
+            "description": "Approve a join request to this workspace. The person will be added to the team and written to the People table.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "membership_chat_id": {"type": "string", "description": "chat_id of the person to approve (from list_pending_approvals)"},
+                    "role": {"type": "string", "enum": ["member", "partner"], "description": "Role to assign (overrides requested role if specified)"},
+                },
+                "required": ["membership_chat_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_join",
+            "description": "Reject a join request. The person will be notified.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "membership_chat_id": {"type": "string"},
+                },
+                "required": ["membership_chat_id"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Reset tools
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "initiate_reset",
+            "description": "Start the workspace reset flow. Only call when the boss clearly wants to delete all workspace data and start fresh. This begins a 3-step confirmation.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "confirm_reset_step1",
+            "description": "Second step of reset: validate the company name the boss typed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_input": {"type": "string", "description": "Exact text the user typed"},
+                },
+                "required": ["user_input"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "execute_reset",
+            "description": "Final step of reset: execute nuclear deletion after boss types confirmation phrase.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "confirmation": {"type": "string", "description": "The confirmation phrase typed by boss"},
+                },
+                "required": ["confirmation"],
+            },
+        },
+    },
+    # ------------------------------------------------------------------
+    # Workspace & language tools
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "set_language",
+            "description": "Persist the language preference for this user. Call when the user requests a specific language or switches mid-conversation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "language_code": {"type": "string", "description": "BCP-47 language code, e.g. 'en', 'vi', 'ja'"},
+                },
+                "required": ["language_code"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "switch_workspace",
+            "description": "Switch the active workspace context. Useful when the user has multiple workspaces and wants to work in a specific one. Preference lasts 30 minutes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "boss_id": {"type": "integer", "description": "boss_id of the workspace to switch to"},
+                },
+                "required": ["boss_id"],
+            },
+        },
+    },
 ]
 
 
@@ -750,6 +947,42 @@ async def execute_tool(name: str, arguments: str, ctx: ChatContext) -> str:
         # Advisor escalation
         case "escalate_to_advisor":
             return "__ESCALATE__"
+
+        # Note — append
+        case "append_note":
+            return await note.append_note(ctx, **args)
+
+        # Approval tools
+        case "list_pending_approvals":
+            return await memory.list_pending_approvals(ctx)
+        case "approve_task_change":
+            return await tasks.approve_task_change(ctx, **args)
+        case "reject_task_change":
+            return await tasks.reject_task_change(ctx, **args)
+
+        # Join flow tools
+        case "list_available_workspaces":
+            return await join.list_available_workspaces(ctx)
+        case "request_join":
+            return await join.request_join(ctx, **args)
+        case "approve_join":
+            return await join.approve_join(ctx, **args)
+        case "reject_join":
+            return await join.reject_join(ctx, **args)
+
+        # Reset tools
+        case "initiate_reset":
+            return await reset.initiate_reset(ctx)
+        case "confirm_reset_step1":
+            return await reset.confirm_reset_step1(ctx, **args)
+        case "execute_reset":
+            return await reset.execute_reset(ctx, **args)
+
+        # Workspace & language tools
+        case "set_language":
+            return await workspace_tools.set_language(ctx, **args)
+        case "switch_workspace":
+            return await workspace_tools.switch_workspace(ctx, **args)
 
         case _:
             return f"Tool '{name}' không tồn tại."
