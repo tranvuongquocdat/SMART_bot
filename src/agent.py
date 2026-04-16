@@ -24,45 +24,43 @@ MAX_TOOL_ROUNDS = 10
 # System prompt template
 # ---------------------------------------------------------------------------
 
-SECRETARY_PROMPT = """Bạn là thư ký AI của {boss_name}{company_info}. Giao tiếp tiếng Việt, thân thiện, ngắn gọn, chuyên nghiệp.
+SECRETARY_PROMPT = """You are the AI secretary of {boss_name}{company_info}.
 
-## Personal Note:
-{personal_note}
+## Context
+Time: {current_time}
+Language: respond in {language}
+Talking to: {sender_name} ({sender_type})
+Their workspaces: {memberships_summary}
+Active workspace: {boss_name}'s workspace
 
-## Thời gian: {current_time}
-
-## Nhân sự:
+## Team
 {people_summary}
 
-## Đang nói chuyện với:
-Chat: {chat_type}
-Người: {sender_name} ({sender_type})
+## Your notes
+{personal_note}
+
+## Current conversation context
 {context_note}
 
-## Quy tắc phân quyền:
-- Nếu đang nói với SẾP ({boss_name}):
-  → Toàn quyền. Xưng hô theo personal note.
-  → Khi giao task → check_effort trước → cảnh báo nếu xung đột → gợi ý giải pháp.
-  → Khi sếp hỏi chiến lược / sắp xếp tổng thể → gọi escalate_to_advisor.
-  → Mọi thao tác xóa → confirm trước.
-  → Khi sếp bảo nhắn ai → gọi send_message.
+## Active sessions
+{active_sessions_summary}
 
-- Nếu đang nói với MEMBER/PARTNER:
-  → Xưng "em là trợ lý của {boss_name}".
-  → Chỉ cho xem/cập nhật task của họ.
-  → Được sửa: status, nội dung, tên task, đẩy lại assignee.
-  → Khi đẩy lại assignee → ghi nhận, báo sếp qua send_message.
-  → KHÔNG cho xem task người khác, giao task, xem tổng quan.
-  → Không tự quyết thay sếp. "Em ghi nhận, báo lại {boss_name} nhé."
+## Who you are
+You genuinely know this team. You care about their wellbeing, not just their output.
+When making decisions that affect someone, understand their situation before acting.
 
-- Trong GROUP: chỉ phản hồi khi được tag. Quyền tùy người tag.
+You remember everything shared with you. Your notes are your extended memory —
+when context feels incomplete about a person or project, check them.
 
-## Hướng dẫn:
-- Trả lời ngắn gọn, đi thẳng vấn đề.
-- Gọi nhiều tool liên tiếp nếu cần.
-- Biết thêm thông tin → update_note.
-- Cần context cũ → search_history.
-- Nhận diện người bằng tên + context nhân sự. Không chắc → hỏi lại.
+You have access to multiple workspaces. When a question spans workspaces or
+doesn't specify one, use your judgment about where to look.
+
+You use tools to understand context before acting, not just to execute commands.
+
+## Permissions
+- Boss ({boss_name}): full access. Confirm before deleting anything.
+- Member/Partner: can view and update their own tasks. Significant changes need boss approval.
+- Group: respond only when tagged. Permissions follow the person who tagged you.
 """
 
 # ---------------------------------------------------------------------------
@@ -134,57 +132,18 @@ async def _build_people_summary(ctx: ChatContext) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Task approval handler
+# Session summary helper
 # ---------------------------------------------------------------------------
 
-async def _handle_task_approval(text: str, ctx) -> str | None:
-    """
-    Check if boss is approving a pending task update request via natural language.
-    Simple heuristic: if there are pending approvals, AI intent detection is used in the
-    main loop. Here we only handle explicit 'ok task <name>' or 'approve task <name>' patterns.
-    Returns response string if handled, None otherwise.
-    """
-    import json as _json
-    import re
-    lower = text.lower().strip()
-    # Match patterns like "ok task Fix bug", "approve task X", "từ chối task X"
-    m = re.match(r'(ok|approve|từ chối|reject|duyệt)\s+task\s+(.+)', lower)
-    if not m:
-        return None
-
-    action = m.group(1)
-    task_keyword = m.group(2).strip()
-    approved = action in ("ok", "approve", "duyệt")
-
-    pending = await db.get_pending_approvals(db._db, str(ctx.boss_chat_id))
-    matched = [
-        a for a in pending
-        if task_keyword.lower() in _json.loads(a["payload"]).get("task_name", "").lower()
-    ]
-    if not matched:
-        return None
-
-    approval = matched[0]
-    payload = _json.loads(approval["payload"])
-    requester_id = approval["requester_id"]
-
-    if not approved:
-        await db.update_approval_status(db._db, approval["id"], "rejected")
-        await telegram.send(int(requester_id),
-            f"Yêu cầu cập nhật task '{payload['task_name']}' của bạn đã bị từ chối.")
-        return f"Đã từ chối yêu cầu cập nhật '{payload['task_name']}'."
-
-    # Apply changes
-    changes = payload["changes"]
-    await lark.update_record(ctx.lark_base_token, ctx.lark_table_tasks,
-                              payload["record_id"], changes)
-    await db.update_approval_status(db._db, approval["id"], "approved")
-
-    changes_str = ", ".join(f"{k}: {v}" for k, v in changes.items())
-    await telegram.send(int(requester_id),
-        f"✅ Yêu cầu cập nhật task '{payload['task_name']}' đã được sếp chấp nhận. "
-        f"Thay đổi: {changes_str}")
-    return f"Đã approve và áp dụng thay đổi cho task '{payload['task_name']}'."
+def _build_sessions_summary(sessions: dict) -> str:
+    parts = []
+    if sessions.get("reset_pending"):
+        parts.append(f"Reset flow active (step {sessions['reset_pending'].get('step', '?')})")
+    if sessions.get("join_pending"):
+        parts.append(f"{len(sessions['join_pending'])} join request(s) you sent pending approval")
+    if sessions.get("approvals_pending"):
+        parts.append(f"{len(sessions['approvals_pending'])} item(s) awaiting your approval")
+    return "; ".join(parts) if parts else "none"
 
 
 # ---------------------------------------------------------------------------
@@ -228,30 +187,19 @@ async def handle_message(
             return
 
         # ------------------------------------------------------------------
-        # Step 1b: Join flow (active session or join inquiry intent)
+        # Step 2: Build rich context via context_builder
         # ------------------------------------------------------------------
-        if not is_group:
-            from src import onboarding as _onb  # noqa: PLC0415
-            if _onb.is_join_session(sender_id):
-                reply = await _onb.handle_join_message(text, sender_id)
-                if reply:
-                    await telegram.send(chat_id, reply)
-                return
-
-            join_keywords = [
-                "xem danh sách công ty", "muốn join", "muốn đăng ký vào",
-                "danh sách tổ chức", "các công ty đang hỗ trợ",
-                "có những công ty nào",
-            ]
-            if any(k in text.lower() for k in join_keywords):
-                reply = await _onb.handle_join_inquiry(sender_id)
-                await telegram.send(chat_id, reply)
-                return
+        from src import context_builder as _cb  # noqa: PLC0415
+        from src.context_builder import membership_summary as _ms  # noqa: PLC0415
+        built = await _cb.build(sender_id, chat_id)
 
         # ------------------------------------------------------------------
-        # Step 2: Resolve context
+        # Step 2b: Resolve context (using preferred workspace from context_builder)
         # ------------------------------------------------------------------
-        ctx = await context.resolve(chat_id, sender_id, is_group)
+        ctx = await context.resolve(
+            chat_id, sender_id, is_group,
+            preferred_boss_id=built["primary_workspace_id"],
+        )
         if ctx is None:
             # Unknown user — trigger onboarding state machine
             from src import onboarding  # noqa: PLC0415
@@ -261,37 +209,6 @@ async def handle_message(
             return
 
         log_prefix = f"[chat:{chat_id} sender:{sender_id} boss:{ctx.boss_chat_id}]"
-
-        # ------------------------------------------------------------------
-        # Step 2b: Boss approving/rejecting a join request or task update
-        # ------------------------------------------------------------------
-        if not is_group and ctx.sender_type == "boss":
-            from src import onboarding as _onb  # noqa: PLC0415
-            from src.tools import reset as _reset  # noqa: PLC0415
-
-            # Active reset confirmation flow
-            if _reset.is_reset_session(ctx.boss_chat_id):
-                reply = await _reset.handle_reset_message(text, ctx)
-                if reply is not None:
-                    await telegram.send(chat_id, reply)
-                    return
-
-            # Reset trigger keyword
-            if _reset.is_reset_trigger(text):
-                reply = await _reset.start_reset(ctx)
-                await telegram.send(chat_id, reply)
-                return
-
-            decision = await _onb.handle_boss_join_decision(text, str(ctx.boss_chat_id))
-            if decision:
-                await telegram.send(chat_id, decision)
-                return
-
-            # Check pending task approvals
-            approval_reply = await _handle_task_approval(text, ctx)
-            if approval_reply:
-                await telegram.send(chat_id, approval_reply)
-                return
 
         # ------------------------------------------------------------------
         # Step 3: Save user message to DB + Qdrant (async embed)
@@ -358,18 +275,18 @@ async def handle_message(
         company = boss.get("company", "") if boss else ""
         company_info = f" — {company}" if company else ""
 
-        chat_type = "Nhóm" if is_group else "Riêng tư"
-
         system_content = SECRETARY_PROMPT.format(
             boss_name=ctx.boss_name,
             company_info=company_info,
             personal_note=personal_note,
             current_time=current_time,
             people_summary=people_summary,
-            chat_type=chat_type,
             sender_name=ctx.sender_name,
             sender_type=ctx.sender_type,
             context_note=context_note,
+            language=built["language"],
+            memberships_summary=_ms(built["memberships"]),
+            active_sessions_summary=_build_sessions_summary(built["active_sessions"]),
         )
 
         messages = [{"role": "system", "content": system_content}]
