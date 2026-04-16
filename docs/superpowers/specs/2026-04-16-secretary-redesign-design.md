@@ -242,21 +242,40 @@ ALTER TABLE memberships ADD COLUMN language TEXT DEFAULT NULL;
 | `request_join(target_boss_id, role, intro)` | Creates pending membership, notifies target boss |
 | `approve_join(membership_id, role)` | Approves join, writes to Lark People of target workspace |
 | `reject_join(membership_id)` | Rejects join, notifies requester |
-| `approve_task_change(approval_id)` | Applies pending task change |
+| `approve_task_change(approval_id)` | Applies pending task change, notifies member |
 | `reject_task_change(approval_id)` | Rejects pending task change, notifies member |
 | `initiate_reset()` | Starts reset flow, returns step-1 confirmation prompt |
-| `confirm_reset_step1(input)` | Validates company name input; if match → returns step-2 prompt; else cancels |
+| `confirm_reset_step1(input)` | Validates company name; if match → returns step-2 prompt; else cancels |
 | `execute_reset()` | Executes nuclear reset after 2-step confirmation |
 | `set_language(language_code)` | Persists language preference for current user |
-| `switch_workspace(boss_id)` | Explicitly switches active workspace context |
+| `switch_workspace(boss_id)` | Switches active workspace context; persisted for 30 min in session table |
+| `append_note(note_type, ref_id, content)` | Appends new information to an existing note without overwriting. Prefer over update_note to preserve knowledge. |
+
+### `append_note` vs `update_note`
+
+Both tools exist. Agent chooses:
+- `append_note` — when adding new information to what's already known (default choice)
+- `update_note` — when reorganizing or cleaning up a note that's grown stale
+
+No instruction in the prompt about which to use when — the agent reasons based on context.
+
+### `switch_workspace` session persistence
+
+When called, `switch_workspace(boss_id)` writes `preferred_workspace_id` to a SQLite `sessions` table with a 30-minute TTL. Router reads this before classifying — if a preference is active, it uses it directly without routing logic. Preference expires after 30 min of inactivity or when user explicitly references a different workspace.
+
+### Cross-workspace permission model
+
+When a user operates in workspace B (as partner/member), their permissions are governed by their `person_type` in workspace B's membership — not their role in their home workspace. Boss-of-A operating as partner-of-B has partner-level permissions in B. This is enforced in code, not prompt.
 
 ### Tools updated (add `workspace_ids` param)
 
-| Tool | New param |
-|---|---|
-| `search_person(name)` | `workspace_ids="current"` |
-| `list_tasks(...)` | `workspace_ids="current"` |
-| `check_effort(assignee)` | `workspace_ids="current"` |
+| Tool | New param | Default |
+|---|---|---|
+| `search_person(name)` | `workspace_ids` | `"current"` |
+| `list_tasks(...)` | `workspace_ids` | `"current"` |
+| `check_effort(assignee)` | `workspace_ids` | `"current"` |
+
+Pass `"all"` to query across all workspaces the user belongs to. Returns results with workspace labels — agent reasons about disambiguation naturally.
 
 ---
 
@@ -299,6 +318,29 @@ Option 3 fallback: LLM detects language from the reply and saves it.
 
 No if/else blocks for join keywords, reset triggers, or approval regex. Zero business logic outside the tool loop.
 
+### System prompt philosophy — principle-based, not procedure-based
+
+The system prompt does NOT list step-by-step procedures. It gives the agent values and context, then trusts the model to reason.
+
+**What to avoid:**
+> ❌ "Before responding about any person, always call get_note() first, then list_tasks(), then check_effort()"
+
+**What to write instead:**
+> ✅ "You genuinely know this team. You care about their wellbeing, not just their output. When making decisions that affect someone — assigning tasks, setting deadlines, sending messages — take a moment to understand their current situation before acting."
+
+> ✅ "You remember everything the boss has told you. If they've shared preferences, habits, or standing instructions in the past, those live in the personal note. Draw on them naturally — don't ask the boss to repeat themselves."
+
+> ✅ "You use your tools to understand context before acting, not just to execute commands."
+
+The agent is smart enough to decide: does understanding this situation require checking notes? Checking workload? Both? Neither? It makes that call based on the principle, not a rigid checklist.
+
+**Tool descriptions follow the same philosophy.** Each tool description says *when it's useful*, not *when it's mandatory*:
+- `get_note`: "Use when you want to recall what you know about a person, project, or group — their history, preferences, context."
+- `append_note`: "Use when you learn something worth remembering — a preference, a concern, a piece of context. Prefer this over update_note to preserve existing knowledge."
+- `check_effort`: "Useful before assigning tasks — helps you understand if someone is already stretched."
+
+This approach maximizes agent reasoning freedom. The model decides the right tool sequence for each situation rather than following a script.
+
 ---
 
 ## What Is NOT Changing
@@ -319,3 +361,4 @@ No if/else blocks for join keywords, reset triggers, or approval regex. Zero bus
 - Telegram chat history cannot be deleted (API limitation). The visual separator message is the workaround.
 - Cross-workspace `workspace_ids="all"` queries will be slower (N parallel Lark API calls). Acceptable for demo scale.
 - If router misclassifies workspace, Secretary will detect via tool results and can call `switch_workspace()` — costs 1 extra round but no data loss.
+- Session table for workspace preference needs to be added to SQLite schema (minimal: `user_id`, `preferred_workspace_id`, `expires_at`).
