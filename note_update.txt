@@ -21,4 +21,66 @@ hay có thêm phần nào cần quan tâm???
 
 
 Note update:
-- 
+- Chưa có tool phù hợp để handle các case:
+    - Check đã nhắn với người đó hay chưa
+    - VD bị hỏi: đã nhắn @ai đó về deadline ngày mai chưa, cũng chưa thể follow được tốt
+    - Khi giao việc thì cần nhắn riêng cho người đó 
+    - Chuyển đổi linh hoạt giữa nhóm và personal 
+    - Bot nó cứ bảo là đã thêm dự án, đã sửa dự án nma chỉ sửa trong db thì phải, còn chưa đồng bộ với lark
+    - check kỹ lại xem phần nào chưa đồng bộ lark được hoàn thiện
+
+    - Phần onboard đang chưa được tự nhiên lắm, phần dự án vd bảo tạo dự án mới tên ABC, nó cứ bắt phải chọn có hoặc không, phần này bị cứng nhắc nhé
+    -> Cần linh hoạt hơn phần này, maybe là quản lý bằng 1 note và 1 con agent chuyên onboard, chứ ko hardcode đi từng step như hiện tại, có nên như vậy không?
+
+
+Note:
+- Cần liệt kê các usecase và check theo code xem đã có đủ tool để handle Chưa
+- Lưu ý nhất, và có thể sẽ cần brain storm lại đó là cách thiết kế tool đã thực sự cho phép Agent có thể xem xét một cách linh động hay đang giới hạn trong các usecase được thiết kế, flow được thiết kế sẵn, như vậy sẽ rất tù, VD:
+    - Hỏi mọi người trong nhóm có ai chưa nhắn tin với bot không -> cung cấp tin phù hợp, ko cần guide quá chi tiết bot cần làm gì, bot sẽ tự tư duy cần làm gì
+    - Đã tự nhắc người được tạo task chưa
+    - Bug liên quan tới tạo remind, note, tạo sửa xoá dự án đồng bộ lark khi chat ở trong group
+    - Đã có khả năng tự check lại 
+    - Nếu gần đến giờ thì nhớ chủ động check lại cá nhân xem người đó xong chưa, nếu xong rồi thì báo trong nhóm hoặc báo sếp, nếu chưa thì push hợp lý
+    - Có khả năng biết được ai mình đã nhắc nhở rồi ai chưa -> nhưng thiết kế tool đừng có kiểu giới hạn là 1 tool chỉ làm 1 việc này, mà tool return linh động lên, sau đó AI sẽ tự đọc và hiểu là đang tới đâu hay đã check chưa
+    - Cũng xem các tool khác và brainstorm thật kỹ về các usecase tới việc quản lý trong nhóm và hoạt động mượt để điều phối, push, check lịch, ... như một trợ lý thực thụ
+
+Note tính năng cần làm tốt và ổn định (ngang production) để có thể chốt được tiền và dự án, không chỉ là PoC hay demo:
+Ngắn gọn để chị show:
+- Task
+. - tạo / sửa / xóa / đổi người / đổi deadline / đổi trạng thái
+- People
+. - thêm người, sửa info, xem nhân sự
+- Workload
+..- check effort trước khi giao
+. - xem ai đang quá tải
+- Project
+. - tạo, sửa, theo dõi dự án
+- Reminder
+. - tạo nhắc việc, sửa, xóa
+- Message
+. - gửi tin nhắn thay chị
+- Search
+. = tìm task
+_.= tìm lịch sử chat
+- Summary
+..- tổng hợp ngày / tuần
+- Approval
+. - duyệt các yêu cầu cập nhật task
+- Note / Idea
+| - lưu ghi chú, lưu ý tưởng
+
+-> những tính năng này cần linh hoạt giữa group và personal
+
+
+Quan tâm cả các lúc cần xử lý chéo nữa:
+ví dụ:
+- giao task ở group, nhắn riêng để xác nhận với người được giao
+- Chủ động biết lịch trình và độ quan trọng của task để có thể push và xem cách phản hồi
+- nếu xin hoãn task, thì báo có sếp để confirm
+- User có thể update task cá nhân trong nhóm chưa, vẫn có báo sếp confirm chưa
+- Task được giao ở group khi xong thì báo lên group chưa
+
+Quan tâm tới multi workspace:
+- vd bảo check xem Bách làm xong việc chưa, nếu có nhiều Bách ở nhiều workspace, cần check được và hỏi confirm lại
+- bảo là check tôi còn những task nào, nêu tôi ở nhiều workspace thì có thể xử lý được
+- vd hỏi trong group kiểm tra task của mọi người, đã có đủ tool để lấy được task phù hợp và tự filter theo ý muốn của agent chưa

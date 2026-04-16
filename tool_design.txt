@@ -1,0 +1,87 @@
+Design Section 2: Tool Set (~36 tools, 11 domains)
+
+Domain 1 — Tasks (5 tools)
+
+Tool	Params	Return thêm so với hiện tại
+create_task	name, assignees (list), deadline, priority, project, note	assignee workload snapshot + DM notification status
+list_tasks	assignee?, status?, project?, scope?, due_within_days?	mỗi task có urgency_flag, days_until_deadline, overdue
+update_task	keyword, *fields	task sau update + ai được notify
+delete_task	keyword	—
+search_tasks	query	semantic, trả về ranked với relevance reason
+Description hint: "Trước khi create_task, gọi get_person để check effort_score. Nếu > 0.8, cân nhắc hỏi sếp."
+
+Domain 2 — People (5 tools)
+
+Tool	Params	Return
+add_person	name, role, type, contact?	person record
+get_person	name	fat: info + active tasks + effort_score + last_dm_from_bot + has_dmd_bot
+list_people	type?	lightweight list + task_count + type
+update_person	name, *fields	updated record
+check_team_engagement	—	fat: mỗi member có has_dmd_bot, last_interaction, task_count, overload_flag
+Description hint: "Dùng check_team_engagement khi hỏi 'ai chưa nhắn bot', 'ai đang bận', hoặc trước khi broadcast để biết ai có thể không nhận được."
+
+Domain 3 — Projects (5 tools)
+
+Tool	Params	Return
+create_project	name, description, deadline, members?	project + Lark record_id (sync thật)
+get_project	name	fat: project info + all tasks + progress % + team + recent activity
+list_projects	status?	list + task_count + deadline
+update_project	name, *fields	updated + synced Lark
+delete_project	name	confirmation + Lark deleted
+Tất cả write ops sync Lark ngay — không chỉ SQLite.
+
+Domain 4 — Communication (3 tools) ← PHẦN MỚI HOÀN TOÀN
+
+Tool	Params	Return
+send_dm	to, content, context?	confirmation + logged (to: outbound_messages table)
+broadcast	message, targets?	sent count + ai nhận được / ai không có Chat ID
+get_communication_log	person?, since?, type?	fat: DMs gửi, task notifications, reminders — timeline đầy đủ
+Description hint: "Dùng get_communication_log trước khi hỏi 'đã nhắn X chưa' hoặc 'đã push deadline chưa'. Return sẽ có full timeline bot đã liên lạc với người đó."
+
+Domain 5 — Reminders (4 tools)
+
+Tool	Params	Return
+create_reminder	content, time, target?, project?	reminder + Lark sync
+list_reminders	target?, status?	list với status + time_until
+update_reminder	id, *fields	updated
+delete_reminder	id	—
+Domain 6 — Notes (2 tools)
+
+Tool	Params	Return
+get_note	type, ref?	content (type: personal / group / project)
+update_note	type, content, ref?, mode?	confirmed (mode: overwrite | append)
+type="project" là mới — hiện chỉ có personal + group.
+
+Domain 7 — Summary & Workload (3 tools)
+
+Tool	Params	Return
+get_summary	period, scope?	daily/weekly — tasks done/pending/overdue
+get_workload	person?	effort score, task list theo priority, deadline pressure
+get_project_report	project	fat: progress %, tasks by status, who's blocking, upcoming deadlines
+Domain 8 — Workspace & Access (4 tools)
+
+Tool	Params	Return
+list_workspaces	—	available + membership status
+request_join	workspace	confirmation
+manage_join	requester, action	approve/reject + notify
+switch_workspace	workspace	new active workspace
+Domain 9 — Approvals (2 tools)
+
+Tool	Params	Return
+list_approvals	—	pending requests + context của từng request
+manage_approval	id, action	approve/reject + notify requester
+Domain 10 — Utilities (4 tools)
+
+Tool	Params	Return
+search_history	query	semantic message history
+save_idea	content, category?	saved
+web_search	query	results
+escalate_to_advisor	reason	strategic analysis
+Domain 11 — Admin (2 tools)
+
+Tool	Params	Return
+manage_group	action, *params	invite/kick/rename/pin — chỉ tool này cần group context
+reset_workspace	confirmed	hard reset toàn bộ — no state machine
+Tổng: 36 tools vs 42 hiện tại — nhưng coverage rộng hơn nhiều, fat returns, bỏ hardcode flows.
+
+Bỏ hoàn toàn: state machine onboarding, broadcast_to_group (merge vào broadcast), update_group_note (merge vào update_note), summarize_group_conversation (merge vào get_summary), 3 reset steps → 1 tool.
