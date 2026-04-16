@@ -451,6 +451,11 @@ TOOL_DEFINITIONS = [
                         "description": "Loại tóm tắt",
                     },
                     "assignee": {"type": "string", "description": "Lọc theo người (để trống = tất cả)"},
+                    "workspace_ids": {
+                        "type": "string",
+                        "description": "\"current\" (default) | \"all\" = aggregate across all workspaces this user belongs to.",
+                        "default": "current",
+                    },
                 },
                 "required": ["summary_type"],
             },
@@ -815,7 +820,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "request_join",
-            "description": "Send a join request to another workspace. The target boss will be notified and can approve or reject.",
+            "description": "Send a join request to another workspace. Always call list_available_workspaces first to get the target_boss_id. The target boss will be notified and can approve or reject.",
             "parameters": {
                 "type": "object",
                 "properties": {
