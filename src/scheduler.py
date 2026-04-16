@@ -181,27 +181,118 @@ async def _check_deadline_push():
             logger.exception("[scheduler] Deadline push failed for %s", boss.get("name"))
 
 
-async def _sync_lark_to_sqlite():
-    """Moi 30s: sync Lark Reminders table -> SQLite (2-way sync)."""
+async def _after_deadline_check():
+    """Every 30min: DM assignees of overdue tasks, report to boss."""
+    from datetime import datetime, timezone
+
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     bosses = await db.get_all_bosses()
+
     for boss in bosses:
         try:
-            tbl = boss.get("lark_table_reminders", "")
-            if not tbl:
+            tasks = await lark.search_records(boss["lark_base_token"], boss["lark_table_tasks"])
+            open_status = ("Mới", "Đang làm")
+            overdue = [
+                t for t in tasks
+                if t.get("Status") in open_status
+                and isinstance(t.get("Deadline"), (int, float))
+                and t["Deadline"] < now_ms
+            ]
+            if not overdue:
                 continue
-            records = await lark.search_records(boss["lark_base_token"], tbl)
-            for rec in records:
-                sqlite_id = rec.get("SQLite ID")
-                if not isinstance(sqlite_id, (int, float)):
+
+            unnotified = await db.get_unnotified_overdue_tasks(db._db, str(boss["chat_id"]))
+            unnotified_ids = {n["task_record_id"] for n in unnotified}
+
+            report_lines = []
+            for task in overdue:
+                record_id = task["record_id"]
+                if record_id not in unnotified_ids:
                     continue
-                await db.sync_reminder_from_lark(
-                    db._db,
-                    int(sqlite_id),
-                    content=rec.get("Nội dung", ""),
-                    status=rec.get("Trạng thái", "pending"),
+
+                assignee_name = task.get("Assignee", "")
+                people = await lark.search_records(boss["lark_base_token"], boss["lark_table_people"])
+                person = next(
+                    (p for p in people if assignee_name.lower() in p.get("Tên", "").lower()),
+                    None,
+                )
+                assignee_chat_id = int(person["Chat ID"]) if (person and person.get("Chat ID")) else None
+
+                task_name = task.get("Tên task", "?")
+                if assignee_chat_id:
+                    msg = (
+                        f"Task '{task_name}' đã quá hạn rồi!\n"
+                        f"Bạn có thể update tiến độ cho {boss['name']} biết không?"
+                    )
+                    await telegram.send(assignee_chat_id, msg)
+                    await db.log_outbound_dm(
+                        boss_chat_id=boss["chat_id"],
+                        to_chat_id=assignee_chat_id,
+                        to_name=assignee_name,
+                        content=msg,
+                        trigger_type="deadline_push",
+                        task_id=record_id,
+                    )
+                    report_lines.append(f"Đã nhắc {assignee_name}: '{task_name}'")
+                else:
+                    report_lines.append(f"'{task_name}' — {assignee_name} chưa có Chat ID")
+
+                await db.mark_overdue_notified(db._db, record_id, str(boss["chat_id"]))
+
+            if report_lines:
+                await telegram.send(
+                    boss["chat_id"],
+                    "Báo cáo task quá hạn:\n" + "\n".join(report_lines),
                 )
         except Exception:
-            logger.exception("[scheduler] Lark sync failed for %s", boss.get("name"))
+            logger.exception("[scheduler] _after_deadline_check failed for %s", boss.get("name"))
+
+
+async def _sync_lark_to_sqlite():
+    """Every 30s: Lark → SQLite sync for Reminders. Every 5 min: Tasks, Projects."""
+    from datetime import datetime
+
+    bosses = await db.get_all_bosses()
+    now = datetime.utcnow()
+    do_full_sync = (now.minute % 5 == 0 and now.second < 35)
+
+    for boss in bosses:
+        try:
+            # Reminders sync (always runs)
+            tbl = boss.get("lark_table_reminders", "")
+            if tbl:
+                records = await lark.search_records(boss["lark_base_token"], tbl)
+                for rec in records:
+                    sqlite_id = rec.get("SQLite ID")
+                    if not isinstance(sqlite_id, (int, float)):
+                        continue
+                    await db.sync_reminder_from_lark(
+                        db._db,
+                        int(sqlite_id),
+                        content=rec.get("Nội dung", ""),
+                        status=rec.get("Trạng thái", "pending"),
+                    )
+
+            if not do_full_sync:
+                continue
+
+            # Task status sync — if done/cancelled in Lark, stop future overdue pushes
+            task_tbl = boss.get("lark_table_tasks", "")
+            if task_tbl:
+                tasks = await lark.search_records(boss["lark_base_token"], task_tbl)
+                for t in tasks:
+                    record_id = t.get("record_id")
+                    status = t.get("Status", "")
+                    if status in ("Hoàn thành", "Huỷ", "Done", "Cancelled") and record_id:
+                        await db._db.execute(
+                            """UPDATE task_notifications SET notified_overdue=1
+                               WHERE task_record_id=? AND boss_chat_id=?""",
+                            (record_id, str(boss["chat_id"])),
+                        )
+                await db._db.commit()
+
+        except Exception:
+            logger.exception("[scheduler] sync failed for %s", boss.get("name"))
 
 
 async def _run_dynamic_reviews():
@@ -270,6 +361,25 @@ async def _run_dynamic_reviews():
 
             # Route: group chat or boss DM
             target_chat_id = review.get("group_chat_id") or int(owner_id)
+
+            # Build group context if sending to a group
+            group_context_str = ""
+            if review.get("group_chat_id"):
+                try:
+                    from src.context_builder import build_group_context as _bgc  # noqa: PLC0415
+                    grp = await _bgc(int(review["group_chat_id"]), int(owner_id))
+                    if grp:
+                        group_context_str = (
+                            f"\nNhóm: {grp.get('group_name', '')} | "
+                            f"Đang bàn: {grp.get('active_topic', '')} | "
+                            f"Ghi chú: {grp.get('group_note', '')}"
+                        )
+                except Exception:
+                    pass
+
+            if group_context_str and text:
+                text = group_context_str + "\n\n" + text
+
             await telegram.send(int(target_chat_id), text)
             logger.info("[scheduler] Dynamic review '%s' sent to %s", content_type, boss["name"])
         except Exception:
@@ -306,6 +416,7 @@ async def start(settings: Settings):
                                                       timezone=settings.timezone))
     _scheduler.add_job(_check_reminders, IntervalTrigger(minutes=1))
     _scheduler.add_job(_check_deadline_push, IntervalTrigger(minutes=30))
+    _scheduler.add_job(_after_deadline_check, IntervalTrigger(minutes=30))
     _scheduler.add_job(_sync_lark_to_sqlite, IntervalTrigger(seconds=30))
     _scheduler.start()
     logger.info("Scheduler started")
