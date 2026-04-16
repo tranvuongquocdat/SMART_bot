@@ -16,12 +16,10 @@ from src.services import lark, openai_client, telegram
 
 logger = logging.getLogger("group_onboarding")
 
-# In-memory state: {group_chat_id: {"step": str, ...}}
-_sessions: dict[int, dict] = {}
 
-
-def is_group_onboarding(group_chat_id: int) -> bool:
-    return group_chat_id in _sessions
+async def is_group_onboarding(group_chat_id: int) -> bool:
+    state = await db.get_onboarding_state(group_chat_id)
+    return bool(state)
 
 
 async def start(group_chat_id: int, sender_id: int) -> None:
@@ -52,11 +50,16 @@ async def start(group_chat_id: int, sender_id: int) -> None:
     for i, b in enumerate(bosses, 1):
         lines.append(f"{i}. {b['company']} (sếp: {b['name']})")
     await telegram.send(group_chat_id, "\n".join(lines))
-    _sessions[group_chat_id] = {"step": "pick_workspace", "bosses": bosses, "sender_id": sender_id}
+
+    await db.save_onboarding_state(group_chat_id, {
+        "step": "pick_workspace",
+        "bosses": bosses,
+        "sender_id": sender_id,
+    })
 
 
 async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
-    session = _sessions.get(group_chat_id)
+    session = await db.get_onboarding_state(group_chat_id)
     if not session:
         return
 
@@ -106,6 +109,7 @@ async def _step_pick_workspace(text: str, group_chat_id: int, group_name: str, s
     if not projects:
         session["step"] = "confirm"
         session["project_id"] = None
+        await db.save_onboarding_state(group_chat_id, session)
         await telegram.send(
             group_chat_id,
             f"Đã chọn workspace *{boss['company']}*.\n"
@@ -113,12 +117,14 @@ async def _step_pick_workspace(text: str, group_chat_id: int, group_name: str, s
         )
         return
 
+    session["step"] = "pick_project"
+    await db.save_onboarding_state(group_chat_id, session)
+
     lines = [f"Đã chọn *{boss['company']}*. Nhóm này phục vụ dự án nào?\n"]
     for i, p in enumerate(projects, 1):
         lines.append(f"{i}. {p['name']}")
     lines.append(f"{len(projects) + 1}. Không thuộc dự án cụ thể")
     await telegram.send(group_chat_id, "\n".join(lines))
-    session["step"] = "pick_project"
 
 
 async def _step_pick_project(text: str, group_chat_id: int, session: dict) -> None:
@@ -145,6 +151,7 @@ async def _step_pick_project(text: str, group_chat_id: int, session: dict) -> No
 
     boss = session["boss"]
     session["step"] = "confirm"
+    await db.save_onboarding_state(group_chat_id, session)
     await telegram.send(
         group_chat_id,
         f"Sẽ link nhóm này vào:\n"
@@ -160,7 +167,7 @@ async def _step_confirm(text: str, group_chat_id: int, session: dict) -> None:
         text,
     )
     if not result.get("confirmed"):
-        _sessions.pop(group_chat_id, None)
+        await db.clear_onboarding_state(group_chat_id)
         await telegram.send(group_chat_id, "Đã huỷ. Tag em lại khi muốn setup nhé.")
         return
 
@@ -178,7 +185,7 @@ async def _step_confirm(text: str, group_chat_id: int, session: dict) -> None:
     )
     await db.update_note(boss["chat_id"], "group", str(group_chat_id), initial_note)
 
-    _sessions.pop(group_chat_id, None)
+    await db.clear_onboarding_state(group_chat_id)
 
     await telegram.send(
         group_chat_id,

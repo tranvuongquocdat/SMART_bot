@@ -218,7 +218,7 @@ async def handle_message(
             # Bot mentioned — if group not registered, run group onboarding
             if not group_info:
                 from src import group_onboarding  # noqa: PLC0415
-                if group_onboarding.is_group_onboarding(chat_id):
+                if await group_onboarding.is_group_onboarding(chat_id):
                     await group_onboarding.handle(text, chat_id, group_name)
                 else:
                     await group_onboarding.start(chat_id, sender_id)
