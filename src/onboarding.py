@@ -526,54 +526,58 @@ async def _step_member_name(text: str, chat_id: int, state: dict) -> None:
 
     boss = state["boss"]
     person_type = state["type"]
+    language = state.get("language", "vi")
 
     try:
-        # Add to people_map
-        await db.add_person(chat_id, boss["chat_id"], person_type, name)
-        logger.info(
-            "[onboarding] %s %s (chat_id=%s) joined boss chat_id=%s",
-            person_type, name, chat_id, boss["chat_id"],
-        )
-
-        # Persist language preference to memberships
-        language = state.get("language", "vi")
         _db = await db.get_db()
+        # Create pending membership — boss must approve before access is granted
+        await db.upsert_membership(
+            _db,
+            chat_id=str(chat_id),
+            boss_chat_id=str(boss["chat_id"]),
+            person_type=person_type,
+            name=name,
+            status="pending",
+            request_info=f"Đăng ký qua onboarding. Ngôn ngữ: {language}",
+        )
         await _db.execute(
             "UPDATE memberships SET language = ? WHERE chat_id = ? AND boss_chat_id = ?",
             (language, str(chat_id), str(boss["chat_id"])),
         )
         await _db.commit()
         logger.info(
-            "[onboarding] member language='%s' saved for chat_id=%s", language, chat_id
+            "[onboarding] pending membership created: %s %s (chat_id=%s) → boss chat_id=%s",
+            person_type, name, chat_id, boss["chat_id"],
         )
 
-        # Add to Lark People table
-        await lark.create_record(
-            boss["lark_base_token"],
-            boss["lark_table_people"],
-            {"Tên": name, "Chat ID": chat_id, "Type": person_type},
-        )
-        logger.info("[onboarding] Lark People record created for chat_id=%s", chat_id)
-
+        # Notify boss
         type_label = "thành viên" if person_type == "member" else "đối tác"
         company = boss.get("company") or boss["name"]
+        notify_msg = (
+            f"Yêu cầu tham gia từ *{name}* (chat_id={chat_id}):\n"
+            f"Vai trò: {type_label}\n\n"
+            f"Trả lời tự nhiên để duyệt hoặc từ chối (ví dụ: 'duyệt', 'ok partner', 'từ chối')."
+        )
+        await telegram.send(boss["chat_id"], notify_msg)
+
+        # Tell applicant to wait
         reply = await _ai_reply(
-            f"Bạn tên {name} đã tham gia team *{company}* với vai trò {type_label}. "
-            "Chào mừng và nói từ giờ bạn nhắn tin để em hỗ trợ nhé."
+            f"Người dùng tên {name} vừa gửi yêu cầu tham gia *{company}* với vai trò {type_label}. "
+            "Nói rằng yêu cầu đã được gửi tới sếp và họ sẽ nhận thông báo khi được duyệt."
         )
         await telegram.send(chat_id, reply)
 
     except Exception:
-        logger.exception("[onboarding] failed to add %s chat_id=%s to boss chat_id=%s",
-                         person_type, chat_id, boss["chat_id"])
+        logger.exception("[onboarding] failed to create pending membership for %s chat_id=%s",
+                         person_type, chat_id)
         error_reply = await _ai_reply(
-            "Có lỗi khi tham gia team. Xin lỗi bạn và đề nghị thử lại sau."
+            "Có lỗi khi gửi yêu cầu tham gia. Xin lỗi bạn và đề nghị thử lại sau."
         )
         await telegram.send(chat_id, error_reply)
         return
 
     _onboarding.pop(chat_id, None)
-    logger.info("[onboarding] completed (%s) for chat_id=%s", person_type, chat_id)
+    logger.info("[onboarding] join request sent (%s) for chat_id=%s", person_type, chat_id)
 
 
 # ---------------------------------------------------------------------------
