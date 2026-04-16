@@ -1,11 +1,33 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import date, datetime
 
 from src import db as db_mod
 from src.context import ChatContext
 from src.services import lark, qdrant, telegram
 from src.services import openai_client
+
+# Canonical enum values — must match Lark field options exactly
+TASK_STATUS_VALUES = ("Mới", "Đang làm", "Hoàn thành", "Huỷ")
+TASK_PRIORITY_VALUES = ("Cao", "Trung bình", "Thấp")
+
+
+def _validate_status(status: str) -> str:
+    for v in TASK_STATUS_VALUES:
+        if status.lower() == v.lower():
+            return v
+    raise ValueError(
+        f"Status '{status}' không hợp lệ. Chỉ dùng: {', '.join(TASK_STATUS_VALUES)}"
+    )
+
+
+def _validate_priority(priority: str) -> str:
+    for v in TASK_PRIORITY_VALUES:
+        if priority.lower() == v.lower():
+            return v
+    raise ValueError(
+        f"Priority '{priority}' không hợp lệ. Chỉ dùng: {', '.join(TASK_PRIORITY_VALUES)}"
+    )
 
 
 def _date_to_ms(date_str: str) -> int:
@@ -19,13 +41,25 @@ def _ms_to_date(ms: int) -> str:
     return datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d")
 
 
-def _format_task(r: dict) -> str:
+def _format_task(r: dict, workspace_label: str = "") -> str:
     deadline = r.get("Deadline")
-    dl_str = _ms_to_date(int(deadline)) if isinstance(deadline, (int, float)) else "N/A"
+    dl_str = "N/A"
+    urgency = ""
+    if isinstance(deadline, (int, float)):
+        dl_date = datetime.fromtimestamp(deadline / 1000).date()
+        dl_str = str(dl_date)
+        today = date.today()
+        days_left = (dl_date - today).days
+        if days_left < 0:
+            urgency = " 🔴QUÁHẠN"
+        elif days_left == 0:
+            urgency = " 🟠HÔM NAY"
+        elif days_left <= 2:
+            urgency = f" 🟡{days_left}ngày"
+    ws = f"[{workspace_label}] " if workspace_label else ""
     return (
-        f"- {r.get('Tên task', '?')} | Assignee: {r.get('Assignee', 'N/A')} "
-        f"| Status: {r.get('Status', '?')} | DL: {dl_str} "
-        f"| Priority: {r.get('Priority', 'N/A')}"
+        f"{ws}- {r.get('Tên task', '?')} | {r.get('Assignee', 'N/A')} "
+        f"| {r.get('Status', '?')} | DL: {dl_str}{urgency} | {r.get('Priority', '')}"
     )
 
 
@@ -87,22 +121,36 @@ async def _notify_assignee_task(
 async def create_task(
     ctx: ChatContext,
     name: str,
-    assignee: str = "",
+    assignee: str = "",       # kept for backward compat — single assignee string
+    assignees: str | list = "",  # new: comma-sep string or list
     deadline: str = "",
     priority: str = "Trung bình",
     project: str = "",
     start_time: str = "",
     location: str = "",
     original_message: str = "",
+    note: str = "",
 ) -> str:
+    # Normalize assignees: merge old `assignee` + new `assignees`
+    raw = assignees if assignees else assignee
+    if isinstance(raw, list):
+        assignee_list = [a.strip() for a in raw if a.strip()]
+    else:
+        assignee_list = [a.strip() for a in raw.split(",") if a.strip()]
+    assignee_display = ", ".join(assignee_list)
+
+    # Validate priority
+    if priority:
+        priority = _validate_priority(priority)
+
     fields: dict = {
         "Tên task": name,
         "Priority": priority,
         "Status": "Mới",
         "Giao bởi": ctx.sender_name or ctx.boss_name,
     }
-    if assignee:
-        fields["Assignee"] = assignee
+    if assignee_display:
+        fields["Assignee"] = assignee_display
     if deadline:
         fields["Deadline"] = _date_to_ms(deadline)
     if start_time:
@@ -113,6 +161,8 @@ async def create_task(
         fields["Project"] = project
     if original_message:
         fields["Tin nhắn gốc"] = original_message
+    if note:
+        fields["Ghi chú"] = note
     if ctx.is_group:
         fields["Group ID"] = ctx.chat_id
 
@@ -121,31 +171,33 @@ async def create_task(
 
     asyncio.create_task(_embed_and_upsert(ctx, record_id, fields))
 
-    # Validate assignee & notify
-    warning = ""
-    assignee_chat_id = None
-    if assignee:
-        assignee_chat_id, found = await _find_assignee_chat_id(ctx, assignee)
+    # Notify each assignee
+    notification_statuses = []
+    first_assignee_chat_id = None
+    for aname in assignee_list:
+        achat_id, found = await _find_assignee_chat_id(ctx, aname)
         if not found:
-            warning = (f"\n\n⚠️ Không tìm thấy '{assignee}' trong danh sách nhân sự — "
-                       f"task vẫn được tạo nhưng không tự động thông báo.")
-        elif not assignee_chat_id:
-            warning = (f"\n\n⚠️ '{assignee}' có trong danh sách nhưng chưa có tài khoản liên kết — "
-                       f"sẽ không tự động nhận thông báo.")
+            notification_statuses.append(f"⚠️ '{aname}' không có trong danh sách nhân sự")
+        elif not achat_id:
+            notification_statuses.append(f"⚠️ '{aname}' chưa có tài khoản liên kết")
+        else:
+            if first_assignee_chat_id is None:
+                first_assignee_chat_id = achat_id
+            asyncio.create_task(_notify_assignee_task(
+                achat_id, name, deadline,
+                ctx.sender_name or ctx.boss_name, ctx.boss_chat_id,
+            ))
+            notification_statuses.append(f"✓ Đã thông báo {aname}")
 
-    # Track notification in DB
+    # Track notification in DB (first assignee for deadline push)
     await db_mod.upsert_task_notification(
-        db_mod._db, record_id, str(ctx.boss_chat_id), assignee_chat_id
+        db_mod._db, record_id, str(ctx.boss_chat_id), first_assignee_chat_id
     )
 
-    # Notify assignee async
-    if assignee_chat_id:
-        asyncio.create_task(_notify_assignee_task(
-            assignee_chat_id, name, deadline,
-            ctx.sender_name or ctx.boss_name, ctx.boss_chat_id,
-        ))
-
-    return f"Đã tạo task '{name}' (ID: {record_id}).{warning}"
+    result = f"Đã tạo task '{name}' (ID: {record_id})."
+    if notification_statuses:
+        result += "\n" + "\n".join(notification_statuses)
+    return result
 
 
 async def list_tasks(
@@ -180,8 +232,8 @@ async def list_tasks(
 
     lines = [f"Danh sách task ({len(all_tasks)}):"]
     for r in all_tasks[:20]:
-        ws_label = f"[{r['_workspace']}] " if workspace_ids != "current" else ""
-        lines.append(ws_label + _format_task(r))
+        ws_label = r.get("_workspace", "") if workspace_ids != "current" else ""
+        lines.append(_format_task(r, ws_label))
     return "\n".join(lines)
 
 
@@ -203,11 +255,11 @@ async def update_task(
 
     fields: dict = {}
     if status:
-        fields["Status"] = status
+        fields["Status"] = _validate_status(status)
     if deadline:
         fields["Deadline"] = _date_to_ms(deadline)
     if priority:
-        fields["Priority"] = priority
+        fields["Priority"] = _validate_priority(priority)
     if assignee:
         fields["Assignee"] = assignee
     if name:
@@ -253,10 +305,30 @@ async def update_task(
     updated = []
     for r in matched:
         rid = r["record_id"]
+        task_name = r.get("Tên task", "?")
         await lark.update_record(ctx.lark_base_token, ctx.lark_table_tasks, rid, fields)
         merged = {**r, **fields}
         asyncio.create_task(_embed_and_upsert(ctx, rid, merged))
-        updated.append(r.get("Tên task", "?"))
+        updated.append(task_name)
+
+        # Notify new assignee if assignee changed
+        new_assignee = fields.get("Assignee")
+        if new_assignee:
+            achat_id, found = await _find_assignee_chat_id(ctx, new_assignee)
+            if found and achat_id:
+                msg = (
+                    f"📋 Task '{task_name}' vừa được giao lại cho bạn.\n"
+                    f"Giao bởi: {ctx.sender_name or ctx.boss_name}\n"
+                    f"Vui lòng xác nhận nhé."
+                )
+                asyncio.create_task(telegram.send(int(achat_id), msg))
+                asyncio.create_task(db_mod.log_outbound_dm(
+                    boss_chat_id=ctx.boss_chat_id,
+                    to_chat_id=int(achat_id),
+                    to_name=new_assignee,
+                    content=msg,
+                    trigger_type="task_assigned",
+                ))
 
     return f"Đã cập nhật {len(updated)} task: {', '.join(updated)}"
 
