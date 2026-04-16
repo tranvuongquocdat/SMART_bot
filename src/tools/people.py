@@ -96,12 +96,86 @@ async def add_people(
 
 
 async def get_people(ctx: ChatContext, search_name: str) -> str:
-    records = await _find_person(ctx, search_name)
-    if not records:
-        return f"Không tìm thấy ai tên '{search_name}'."
-    lines = [f"Tìm thấy {len(records)} người:"]
-    for r in records:
-        lines.append(f"- {_fmt_person(r)}")
+    """Alias for backward compat — prefer get_person for fat return."""
+    return await get_person(ctx, name=search_name)
+
+
+async def get_person(
+    ctx: ChatContext,
+    name: str = "",
+    search_name: str = "",  # backward compat alias
+    workspace_ids: str = "current",
+) -> str:
+    """
+    Fat return: person info + active tasks + effort_score + last DM from bot + has_dmd_bot.
+    Call before assigning a task: effort_score > 0.8 means near overloaded.
+    If multiple people share the same name across workspaces, returns all with workspace tag.
+    """
+    from src.tools._workspace import resolve_workspaces
+    from src import db as _db_mod
+
+    query = name or search_name
+    if not query:
+        return "Cần truyền tên người cần tra."
+
+    workspaces = await resolve_workspaces(ctx, workspace_ids)
+    all_matches: list[tuple[dict, dict]] = []
+
+    for ws in workspaces:
+        if not ws.get("lark_table_people"):
+            continue
+        try:
+            records = await lark.search_records(ws["lark_base_token"], ws["lark_table_people"])
+        except Exception:
+            continue
+        for r in records:
+            full = r.get("Tên", "")
+            nick = r.get("Tên gọi", "")
+            if query.lower() in full.lower() or (nick and query.lower() in nick.lower()):
+                all_matches.append((r, ws))
+
+    if not all_matches:
+        return f"Không tìm thấy ai tên '{query}'."
+
+    lines = []
+    for r, ws in all_matches:
+        ws_label = f" [{ws['workspace_name']}]" if workspace_ids != "current" else ""
+        person_name = r.get("Tên", "")
+        lines.append(f"=== {person_name}{ws_label} ===")
+        lines.append(_fmt_person(r))
+
+        # Active tasks
+        try:
+            tasks = await lark.search_records(ws["lark_base_token"], ws["lark_table_tasks"])
+            active = [
+                t for t in tasks
+                if person_name.lower() in str(t.get("Assignee", "")).lower()
+                and t.get("Status") not in ("Hoàn thành", "Huỷ", "Done", "Cancelled")
+            ]
+            effort_score = round(min(len(active) / 5.0, 1.0), 2)
+            lines.append(f"Tasks đang mở: {len(active)} | effort_score: {effort_score}")
+            for t in active[:5]:
+                dl = t.get("Deadline")
+                dl_str = datetime.fromtimestamp(dl / 1000).strftime("%Y-%m-%d") if isinstance(dl, (int, float)) else "N/A"
+                lines.append(f"  - {t.get('Tên task', '?')} | {t.get('Status')} | DL: {dl_str}")
+        except Exception:
+            lines.append("Tasks: (không tải được)")
+
+        # Last DM from bot
+        raw_id = r.get("Chat ID")
+        if raw_id:
+            chat_id_val = int(raw_id)
+            outbound = await _db_mod.get_outbound_log(ctx.boss_chat_id, to_chat_id=chat_id_val, limit=1)
+            if outbound:
+                last = outbound[0]
+                lines.append(f"Lần cuối bot nhắn: {last['created_at'][:16]} — {last['content'][:60]}")
+                lines.append("has_dmd_bot: true")
+            else:
+                lines.append("Lần cuối bot nhắn: (chưa từng)")
+                lines.append("has_dmd_bot: true (có Chat ID nhưng chưa nhắn)")
+        else:
+            lines.append("has_dmd_bot: false (chưa có Chat ID)")
+
     return "\n".join(lines)
 
 
@@ -231,6 +305,62 @@ async def search_person(ctx: ChatContext, search_name: str, workspace_ids: str =
         name = f"{r['name']} ({r['nickname']})" if r.get("nickname") else r["name"]
         parts = [label + name, r["type"], r["role"], r["group"]]
         lines.append(" | ".join(p for p in parts if p))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Team engagement check
+# ---------------------------------------------------------------------------
+
+async def check_team_engagement(
+    ctx: ChatContext,
+    workspace_ids: str = "current",
+) -> str:
+    """
+    Returns engagement status for every team member:
+    has_dmd_bot, last_interaction, active task count, overload_flag.
+    Use when asked 'ai chưa nhắn bot', 'ai đang bận', or before broadcast.
+    """
+    from src.tools._workspace import resolve_workspaces
+    from src import db as _db_mod
+
+    workspaces = await resolve_workspaces(ctx, workspace_ids)
+    lines = ["=== Team Engagement ==="]
+
+    for ws in workspaces:
+        ws_label = f"[{ws['workspace_name']}] " if workspace_ids != "current" else ""
+        if not ws.get("lark_table_people") or not ws.get("lark_table_tasks"):
+            continue
+        try:
+            people_list = await lark.search_records(ws["lark_base_token"], ws["lark_table_people"])
+            tasks = await lark.search_records(ws["lark_base_token"], ws["lark_table_tasks"])
+        except Exception:
+            continue
+
+        for p in people_list:
+            pname = p.get("Tên", "?")
+            raw_id = p.get("Chat ID")
+            active_tasks = [
+                t for t in tasks
+                if pname.lower() in str(t.get("Assignee", "")).lower()
+                and t.get("Status") not in ("Hoàn thành", "Huỷ", "Done", "Cancelled")
+            ]
+            task_count = len(active_tasks)
+            overload = " ⚠️OVERLOAD" if task_count >= 5 else ""
+
+            if raw_id:
+                chat_id_val = int(raw_id)
+                outbound = await _db_mod.get_outbound_log(ctx.boss_chat_id, to_chat_id=chat_id_val, limit=1)
+                if outbound:
+                    last_dt = outbound[0]["created_at"][:16]
+                    dmd = f"✓ last: {last_dt}"
+                else:
+                    dmd = "✓ có Chat ID, chưa nhắn"
+            else:
+                dmd = "✗ chưa có Chat ID"
+
+            lines.append(f"  {ws_label}{pname} | {dmd} | tasks: {task_count}{overload}")
+
     return "\n".join(lines)
 
 

@@ -1055,8 +1055,8 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
         # People tools
         case "add_people":
             return await people.add_people(ctx, **args)
-        case "get_people":
-            return await people.get_people(ctx, **args)
+        case "get_people" | "get_person":
+            return await people.get_person(ctx, **args)
         case "list_people":
             return await people.list_people(ctx, **args)
         case "update_people":
@@ -1065,6 +1065,8 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
             return await people.delete_people(ctx, **args)
         case "check_effort":
             return await people.check_effort(ctx, **args)
+        case "check_team_engagement":
+            return await people.check_team_engagement(ctx, **args)
 
         # Project tools
         case "create_project":
