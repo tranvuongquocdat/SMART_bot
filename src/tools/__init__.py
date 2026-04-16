@@ -870,6 +870,20 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "confirm_reset_step1",
+            "description": "Step 2 of workspace reset: validate the company name the boss typed. Call after initiate_reset once the boss has typed the company name.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "user_input": {"type": "string", "description": "Exact text the user typed"},
+                },
+                "required": ["user_input"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "execute_reset",
             "description": "Final step of reset: execute nuclear deletion after boss types confirmation phrase.",
             "parameters": {
@@ -1156,6 +1170,8 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
         # Reset tools
         case "initiate_reset":
             return await reset.initiate_reset(ctx)
+        case "confirm_reset_step1":
+            return await reset.confirm_reset_step1(ctx, **args)
         case "execute_reset":
             return await reset.execute_reset(ctx, **args)
 
