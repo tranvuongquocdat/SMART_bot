@@ -34,7 +34,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_task",
-            "description": "Tạo task mới. Dùng khi sếp giao việc, ví dụ: 'giao Bách thiết kế logo deadline thứ 6'.",
+            "description": "Tạo task mới. Dùng khi sếp giao việc, ví dụ: 'giao Bách thiết kế logo deadline thứ 6'. Gọi get_person trước để check effort_score. Nếu effort_score > 0.8 (gần overload), hỏi sếp xác nhận trước khi giao thêm.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -59,7 +59,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "list_tasks",
-            "description": "Liệt kê task có lọc. Dùng khi: 'hôm nay có gì?', 'task của Bách', 'task dự án X'. Gọi không tham số = tất cả task.",
+            "description": "Liệt kê task có lọc. Dùng khi: 'hôm nay có gì?', 'task của Bách', 'task dự án X'. Gọi không tham số = tất cả task. Khi gọi từ group, mặc định lọc theo project gắn với group đó.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -84,15 +84,15 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_task",
-            "description": "Cập nhật task. Dùng khi: 'done task X', 'dời deadline', 'chuyển task cho Y'. Tìm task theo tên rồi cập nhật.",
+            "description": "Cập nhật task. Dùng khi: 'done task X', 'dời deadline', 'chuyển task cho Y'. Tìm task theo tên rồi cập nhật. Status phải là một trong: Mới, Đang làm, Hoàn thành, Huỷ.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "search_keyword": {"type": "string", "description": "Từ khóa tìm trong TÊN task (ví dụ: 'thiết kế logo')"},
                     "status": {
                         "type": "string",
-                        "enum": ["Mới", "Đang làm", "Xong", "Quá hạn"],
-                        "description": "Trạng thái mới",
+                        "enum": ["Mới", "Đang làm", "Hoàn thành", "Huỷ"],
+                        "description": "Trạng thái mới. Phải là chính xác một trong các giá trị enum.",
                     },
                     "deadline": {"type": "string", "description": "Deadline mới dạng YYYY-MM-DD"},
                     "priority": {
@@ -167,11 +167,22 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_people",
-            "description": "Xem thông tin chi tiết của một người. Dùng khi: 'Bách là ai?', 'thông tin của Linh'.",
+            "description": (
+                "Xem thông tin chi tiết của một người — trả fat return gồm: "
+                "profile, tasks đang làm (tối đa 5), effort_score (0-1, > 0.8 = gần overload), "
+                "lịch sử DM bot gần nhất, has_dmd_bot flag. "
+                "Dùng khi: 'Bách là ai?', 'Bách đang bận không?', trước khi giao task cho ai. "
+                "Nếu nhiều người cùng tên, trả tất cả kèm workspace tag."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "search_name": {"type": "string", "description": "Tên hoặc tên gọi (tìm gần đúng trong cả Tên và Tên gọi)"},
+                    "workspace_ids": {
+                        "type": "string",
+                        "description": "\"current\" (mặc định) hoặc \"all\" để tìm across workspaces.",
+                        "default": "current",
+                    },
                 },
                 "required": ["search_name"],
             },
@@ -263,7 +274,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_project",
-            "description": "Tạo dự án mới trong hệ thống.",
+            "description": "Tạo dự án mới trong hệ thống. Status mặc định là 'Chưa bắt đầu'. Các giá trị hợp lệ: Chưa bắt đầu, Đang thực hiện, Hoàn thành, Tạm dừng, Huỷ.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -272,6 +283,7 @@ TOOL_DEFINITIONS = [
                     "lead": {"type": "string", "description": "Người phụ trách"},
                     "members": {"type": "string", "description": "Danh sách thành viên"},
                     "deadline": {"type": "string", "description": "Deadline dạng YYYY-MM-DD"},
+                    "workspace_ids": {"type": "string", "description": "\"current\" (mặc định)", "default": "current"},
                 },
                 "required": ["name"],
             },
@@ -448,13 +460,53 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_workload",
-            "description": "Xem workload (khối lượng task đang làm) theo người. Dùng khi sếp hỏi 'ai đang bận?', 'X ôm bao nhiêu task?'",
+            "description": "Xem workload (khối lượng task đang làm) theo người. Dùng khi sếp hỏi 'ai đang bận?', 'X ôm bao nhiêu task?'. Mặc định workspace_ids='all' để thấy tổng workload thật sự.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "assignee": {"type": "string", "description": "Tên người cần xem. Để trống = xem tất cả."},
+                    "workspace_ids": {
+                        "type": "string",
+                        "description": "\"all\" (mặc định) = toàn bộ workspaces. \"current\" = workspace hiện tại.",
+                        "default": "all",
+                    },
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_team_engagement",
+            "description": (
+                "Kiểm tra mức độ tương tác của từng thành viên với bot: ai đã nhắn, ai chưa, "
+                "ai đang overload. Gọi khi hỏi 'ai chưa nhắn bot', 'ai đang bận', trước broadcast."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "workspace_ids": {"type": "string", "description": "\"current\" (mặc định) hoặc \"all\"", "default": "current"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_project_report",
+            "description": (
+                "Tạo báo cáo tổng quan dự án bằng LLM: % tiến độ, tasks theo status, "
+                "ai đang chặn, deadline sắp tới. Dùng khi sếp hỏi 'báo cáo dự án X', 'tiến độ X thế nào?'."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "project": {"type": "string", "description": "Tên dự án cần báo cáo"},
+                    "workspace_ids": {"type": "string", "description": "\"current\" (mặc định) hoặc \"all\"", "default": "current"},
+                },
+                "required": ["project"],
             },
         },
     },
@@ -818,20 +870,6 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "confirm_reset_step1",
-            "description": "Second step of reset: validate the company name the boss typed.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "user_input": {"type": "string", "description": "Exact text the user typed"},
-                },
-                "required": ["user_input"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "execute_reset",
             "description": "Final step of reset: execute nuclear deletion after boss types confirmation phrase.",
             "parameters": {
@@ -846,49 +884,6 @@ TOOL_DEFINITIONS = [
     # ------------------------------------------------------------------
     # Group tools
     # ------------------------------------------------------------------
-    {
-        "type": "function",
-        "function": {
-            "name": "summarize_group_conversation",
-            "description": "Summarize recent group messages: main topic, decisions made, action items. Call when asked to recap a meeting or conversation.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "n_messages": {"type": "integer", "description": "Number of recent messages to summarize (default 20)", "default": 20},
-                },
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_group_note",
-            "description": "Write or append to the group's persistent note. Use to record decisions, group rules, or context that should be remembered across sessions.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {"type": "string"},
-                    "append": {"type": "boolean", "description": "True (default) = append; False = overwrite", "default": True},
-                },
-                "required": ["content"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "broadcast_to_group",
-            "description": "Send a message to the group chat. Use for team announcements, deadline alerts, or approval results that the whole team should see.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "message": {"type": "string"},
-                },
-                "required": ["message"],
-            },
-        },
-    },
     {
         "type": "function",
         "function": {
@@ -1161,18 +1156,10 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
         # Reset tools
         case "initiate_reset":
             return await reset.initiate_reset(ctx)
-        case "confirm_reset_step1":
-            return await reset.confirm_reset_step1(ctx, **args)
         case "execute_reset":
             return await reset.execute_reset(ctx, **args)
 
         # Group tools
-        case "summarize_group_conversation":
-            return await group_tools.summarize_group_conversation(ctx, **args)
-        case "update_group_note":
-            return await group_tools.update_group_note(ctx, **args)
-        case "broadcast_to_group":
-            return await group_tools.broadcast_to_group(ctx, **args)
         case "manage_group":
             return await group_tools.manage_group(ctx, **args)
 
