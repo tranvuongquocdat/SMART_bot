@@ -89,6 +89,26 @@ async def upsert_task(collection: str, record_id: str, text: str, vector: list[f
     await _qdrant.upsert(collection_name=collection, points=[point])
 
 
+async def upsert_note(
+    collection: str, point_id: int, boss_chat_id: int,
+    text: str, vector: list[float], note_type: str = "", ref: str = "",
+):
+    """Upsert note/idea point with type and ref metadata."""
+    sparse = _tokenize_bm25(text)
+    point = PointStruct(
+        id=point_id,
+        vector={"dense": vector, "bm25": sparse},
+        payload={
+            "chat_id": boss_chat_id,
+            "role": "note",
+            "text": text,
+            "type": note_type,
+            "ref": ref,
+        },
+    )
+    await _qdrant.upsert(collection_name=collection, points=[point])
+
+
 async def delete_task(collection: str, record_id: str):
     """Delete task point by record_id hash."""
     point_id = int(hashlib.md5(record_id.encode()).hexdigest()[:15], 16)
@@ -126,6 +146,7 @@ async def search(collection: str, query: str, chat_id: int | None = None, top_n:
             "role": p.payload.get("role", ""),
             "content": p.payload.get("text", ""),
             "record_id": p.payload.get("record_id", ""),
+            **{k: v for k, v in p.payload.items() if k not in ("role", "text", "record_id")},
         }
         for p in results.points
     ]

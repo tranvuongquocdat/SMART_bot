@@ -19,6 +19,7 @@ from src.tools import (
 from src.tools import workspace as workspace_tools
 from src.tools import group as group_tools
 from src.tools import communication
+from src.tools import search as search_tools
 
 
 # ---------------------------------------------------------------------------
@@ -381,21 +382,41 @@ TOOL_DEFINITIONS = [
         },
     },
     # ------------------------------------------------------------------
-    # Memory tools (1)
+    # Search tools (2)
     # ------------------------------------------------------------------
     {
         "type": "function",
         "function": {
             "name": "search_history",
-            "description": "Tìm trong lịch sử chat bằng semantic search. Dùng khi: 'hôm trước nói gì về X?', 'ai nhắc đến khách hàng Y?'.",
+            "description": (
+                "Tìm trong lịch sử chat bằng semantic search. Dùng khi: 'hôm trước nói gì về X?', 'ai nhắc đến khách hàng Y?'. "
+                "scope: \"current_chat\" (mặc định) | \"all\" (tìm toàn bộ chat thuộc workspace)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Từ khóa hoặc nội dung cần tìm"},
-                    "target_chat_id": {
-                        "type": "integer",
-                        "description": "Chat ID cụ thể cần tìm (để trống = dùng chat hiện tại)",
-                    },
+                    "scope": {"type": "string", "description": "\"current_chat\" (mặc định) hoặc \"all\""},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_notes",
+            "description": (
+                "Tìm kiếm ngữ nghĩa trong ghi chú và ý tưởng đã lưu. "
+                "Dùng khi cần tìm lại thông tin đã lưu trong notes hoặc ideas. "
+                "note_type: \"personal\" | \"group\" | \"project\" | \"idea\" | \"all\""
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "note_type": {"type": "string", "description": "\"all\" mặc định"},
+                    "workspace_ids": {"type": "string"},
                 },
                 "required": ["query"],
             },
@@ -1063,9 +1084,11 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
         case "get_note":
             return await note.get_note(ctx, **args)
 
-        # Memory tools
+        # Search tools
         case "search_history":
-            return await memory.search_history(ctx, **args)
+            return await search_tools.search_history(ctx, **args)
+        case "search_notes":
+            return await search_tools.search_notes(ctx, **args)
 
         # Summary tools
         case "get_summary":
