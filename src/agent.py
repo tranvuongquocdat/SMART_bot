@@ -519,7 +519,8 @@ async def handle_message(
 # Scheduler-driven reminder delivery via LLM
 # ---------------------------------------------------------------------------
 
-REMINDER_PROMPT = """Bạn là thư ký AI của {boss_name}{company_info}. Giao tiếp tiếng Việt, thân thiện, ngắn gọn.
+REMINDER_PROMPT = """Bạn là thư ký AI của {boss_name}{company_info}.
+Language: {language}. Respond entirely in that language. Thân thiện, ngắn gọn.
 
 ## Personal Note:
 {personal_note}
@@ -580,6 +581,7 @@ async def send_reminder(reminder: dict, settings: Settings):
         boss = await db.get_boss(boss_chat_id)
         company = boss.get("company", "") if boss else ""
         company_info = f" — {company}" if company else ""
+        language = boss.get("language", "vi") if boss else "vi"
 
         tz = ZoneInfo(settings.timezone)
         current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M (%A)")
@@ -589,6 +591,7 @@ async def send_reminder(reminder: dict, settings: Settings):
             company_info=company_info,
             personal_note=personal_note,
             current_time=current_time,
+            language=language,
         )
 
         if target_id:
