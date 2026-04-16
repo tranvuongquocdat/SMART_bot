@@ -1,0 +1,105 @@
+BẢNG BÁO GIÁ — AI Secretary (Thư ký giám đốc ảo)
+=======================================================
+
+
+MÔ HÌNH BÁN HÀNG
+-----------------
+- Custom development: build/deploy theo yêu cầu từng khách
+- API keys (OpenAI, Cohere, Lark) do khách tự cấp, không tính vào giá
+- Sau deploy: thu phí maintain hàng tháng (server cost thực tế + 15% buffer)
+
+
+GÓI CƠ BẢN — AI Secretary Core
+--------------------------------
+Bao gồm toàn bộ tính năng nền:
+  - Task management: tạo/sửa/xóa, giao việc, approval flow, deadline push, tìm kiếm ngữ nghĩa
+  - People management: nhân sự, workload check
+  - Reminders: CRUD + sync Lark 2 chiều
+  - Multi-workspace: join request, boss approve/reject, workspace isolation
+  - Scheduled reviews: briefing sáng + tổng kết chiều (standard)
+  - Group chat: lưu tin nhắn, phản hồi khi @tag
+  - Deploy + setup: config Lark Base, Telegram bot, onboarding khách
+
+Giá: 18–22 triệu VND (one-time)
+
+
+ADD-ONS (tính thêm, one-time)
+------------------------------
+  Advisor module          +5 triệu
+    Cố vấn chiến lược: phân tích workload, xử lý xung đột deadline,
+    đề xuất phân bổ nhân sự
+
+  Custom review schedule  +4 triệu
+    Prompt tuỳ chỉnh cho lịch review theo quy trình riêng của công ty
+
+  White-label             +3–5 triệu
+    Đổi tên bot, avatar, lời chào theo thương hiệu khách
+
+  Standard integration    +4–7 triệu / integration
+    Google Sheets, Notion, Google Calendar, Google Drive
+
+  Complex integration     +10–20 triệu (estimate sau khi xem spec)
+    CRM, ERP, hệ thống nội bộ riêng
+
+
+COMBO GỢI Ý
+-----------
+  Director Starter  18–22 triệu   Core
+  Director Pro      25–30 triệu   Core + Advisor + Custom review
+
+  Hầu hết khách dùng 1–2 tuần rồi muốn thêm Advisor —
+  combo Pro tiết kiệm hơn mua lẻ.
+
+
+PHÍ MAINTAIN HÀNG THÁNG
+------------------------
+  Server cost thực tế (VPS + Qdrant + services): 1.5 triệu
+  Buffer 15% trên server cost
+  Tổng ước tính: 2 triệu/tháng
+
+  Bao gồm: monitor uptime, bug fix nhỏ, update minor
+
+
+CÁCH PITCH TỰ NHIÊN
+--------------------
+1. Mở bằng pain:
+   "Anh/chị đang track công việc team qua Zalo thủ công không?
+    Mỗi ngày mất bao nhiêu thời gian nhớ ai đang làm gì?"
+
+2. Demo trước, giá sau
+
+3. Framing ROI:
+   "Bot thay được 1 assistant part-time 4–5 triệu/tháng, làm 24/7,
+    không nghỉ phép — setup một lần, dùng dài hạn"
+
+Upsell theo pain point:
+  "Hay cần phân tích nhân sự phức tạp?"      → Advisor
+  "Muốn review theo quy trình riêng?"         → Custom review
+  "Team đang dùng Google Sheets?"             → Sheets integration
+  "Muốn bot mang thương hiệu công ty?"        → White-label
+
+
+HƯỚNG MỞ RỘNG
+--------------
+Gần (3–6 tháng) — bán add-on được ngay:
+  Google Calendar sync       3–5 ngày dev   bán: 4–7 triệu/khách
+  Google Sheets integration  2–3 ngày dev   bán: 4–6 triệu/khách
+  Notion sync                3–4 ngày dev   bán: 4–6 triệu/khách
+  Voice memo → task          4–6 ngày dev   bán: 5–8 triệu/khách
+
+Trung hạn (6–12 tháng):
+  Web dashboard (xem task/workload trên browser)    2–4 tuần
+  Email assistant (Gmail: tóm tắt, draft reply)     1–2 tuần
+  Document analysis (PDF/DOCX → tạo task)           1–2 tuần
+  Slack/Discord thay Telegram                        1 tuần
+
+Dài hạn (12 tháng+):
+  Self-serve SaaS: khách tự đăng ký, trả subscription, không deploy tay
+  Marketplace template: bán template Lark + prompt pack theo ngành
+  Multi-language: mở rộng ra khách quốc tế
+
+
+LƯU Ý TRƯỚC KHI MỞ RỘNG
+-------------------------
+- Cần 2–3 khách đang dùng thật để có feedback trước khi build thêm
+- Ưu tiên nhóm gần (integrations + voice): thời gian ngắn, ROI rõ, bán được ngay

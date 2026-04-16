@@ -33,6 +33,10 @@ async def send(chat_id: int, text: str, parse_mode: str = "Markdown") -> int | N
     return None
 
 
+# Alias for compatibility
+send_message = send
+
+
 async def edit_message(chat_id: int, message_id: int, text: str, parse_mode: str = "Markdown"):
     """Edit existing message via editMessageText API."""
     resp = await _client.post(

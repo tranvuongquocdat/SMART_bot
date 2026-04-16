@@ -32,3 +32,19 @@ NEXT:
 - [ ] Code webhook + AI + Lark API
 - [ ] Scheduler nhắc nhở
 - [ ] Test 30 tin nhắn demo
+
+
+Update:
+- Phần thêm hoặc bớt người vào tổ chức chưa được hoàn thiện:
+    - VD tôi là sếp của công ty này nhưng có thể đăng ký làm nhân viên/ đối tác của bên khác
+    - Luồng thêm nhân dự luôn phải đi qua xác nhận lại với sếp của bên muốn vào
+    - Người bên ngoài có thể xem được là đang có các công ty/ doanh nghiệp nào được hỗ trợ (với base tương ứng) và sau đó request vào các bên đó với thông tin phù hợp
+    - Check lại luồng giao việc cho người có liên quan đã hoạt động ổn chưa, phải là người đó có thông tin ở bảng people của công ty đó mới giao được việc đúng không
+    - Bảng reminder muốn là 1 bảng ở trong base để dễ kiểm soát, cách hoạt động thì như hiện tại nhưng muốn là update vào bảng ở trong base thay vì db, có thể vẫn sẽ duy trì 1 bản ghi ở db như hiện tại để dễ dàng hoạt động.
+    - Luồng là khi nhân sự liên quan muốn thay đổi update task được giao thì cần phải confirm lại với sếp có chưa
+    - Tự nhắn tin cho người được giao task chưa, tự động push người được giao task khi gần deadline chưa
+    - Bug:
+        - chạy một thời gian hoặc nhiều người truy cập vào cùng 1 lúc thì bị lỗi qdrant
+        - Cần thiết kế folder test chứa các unit test phù hợp để kiểm soát toàn hệ thống
+
+    - Phần hẹn giờ review hằng ngày, hiện đang fix cứng hay sếp có thể chat để tắt bật hợp lý, hoặc set time hoặc thay đổi được nội dung cần review hằng ngày vào x giờ nào đó

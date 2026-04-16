@@ -1,0 +1,24 @@
+Update:
+- Logic support hiện tại vẫn chưa được mượt, thông minh và tối ưu
+- VD tôi ở group A, bảo là muốn đăng ký làm cộng tác ở công ty B thì luồng đó vẫn chưa cho phép tôi ghi tên là 1 người ở bảng people của công ty bảng công ty B 
+- skip qua phần test code cho phần build lần này, tôi muốn test thực tế nhanh luôn
+- phần reset tôi muốn là kiểu làm lại mới từ đầu, và xoá base chứ không chỉ là xoá thông tin của bảng
+- check kỹ các phần khác, tối ưu để tinh gọn và đủ để demo, hiện các prompt và tool base tôi thấy phức tạp quá, nhất là hiện vẫn đang có một số phần dùng hardcode if else chứ không thực sự có flow AI tự nhiên
+- Cân nhắc phân tầng LLM để handle tốt hơn, dạng multi-agent chẳng hạn
+- Phân tích rõ kiến trúc và flow hiện tại cho các phần chính như là:
+    - flow join các công ty/ dự án khác nhau
+    - flow để nhắc nhở push deadline cho đúng người
+    - flow để nhận việc và xác thực
+    - flow quản lý resource
+- Phiên bản hiện tại tập trung tối ưu full cho personal trợ lý giám đốc có thể trao đổi riêng với giám đốc và có thể hỗ trợ được tốt việc quản lý nhóm và những người liên quan
+- Trao đổi tiếng Anh hoặc tiếng Việt hoặc theo thứ tiếng gì dựa vào set up với user đó khi mới onboard, mặc định là tiếng Anh (nhớ là ko dùng hardcode, cần dùng LLM phân tích ngữ cảnh)
+
+
+Update bảng báo giá:
+Tôi cần thiết lập bảng báo giá phù hợp cho dự án này, tôi đang ko rõ là nên phân theo cái gì
+thiết lập báo giá ntn, mở rộng thì có thể mở rộng theo hướng nào và thời gian + chi phí ước lượng các phần mở rộng ntn
+hay có thêm phần nào cần quan tâm???
+
+
+Note update:
+- 
