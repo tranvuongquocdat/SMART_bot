@@ -118,6 +118,50 @@ async def _notify_assignee_task(
         )
 
 
+async def _notify_group_completion(
+    ctx: ChatContext,
+    task_name: str,
+    verb: str,
+    task_record: dict,
+) -> None:
+    """Find the group linked to the task's project and post a completion update."""
+    import logging as _logging
+    project_name = task_record.get("Project", "")
+    if not project_name:
+        return
+    try:
+        all_projects = await lark.search_records(ctx.lark_base_token, ctx.lark_table_projects)
+        proj = next(
+            (p for p in all_projects if project_name.lower() in p.get("Tên dự án", "").lower()),
+            None,
+        )
+        if not proj:
+            return
+        _db = await db_mod.get_db()
+        async with _db.execute(
+            "SELECT group_chat_id FROM group_map WHERE project_id = ?",
+            (proj["record_id"],),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row:
+            return
+        group_chat_id = row["group_chat_id"]
+        group_msg = f"Update: task '{task_name}' đã {verb} bởi {ctx.sender_name} ✓"
+        await telegram.send(group_chat_id, group_msg)
+        await db_mod.log_outbound_dm(
+            boss_chat_id=ctx.boss_chat_id,
+            to_chat_id=int(group_chat_id),
+            to_name="(group)",
+            content=group_msg,
+            trigger_type="task_completed",
+            task_id=proj["record_id"],
+        )
+    except Exception:
+        _logging.getLogger("tasks").warning(
+            "Failed to notify group for task '%s'", task_name, exc_info=True
+        )
+
+
 async def create_task(
     ctx: ChatContext,
     name: str,
@@ -268,40 +312,45 @@ async def update_task(
     if not fields:
         return "Không có gì để cập nhật."
 
-    # Non-boss: create pending approval request
+    # Non-boss: completion/cancellation bypasses approval — direct update + notify boss
+    new_status = fields.get("Status", "")
     if ctx.sender_type in ("member", "partner"):
-        record = matched[0]
-        payload = json.dumps({
-            "record_id": record["record_id"],
-            "task_name": record.get("Tên task", ""),
-            "changes": fields,
-            "group_chat_id": str(ctx.chat_id) if ctx.is_group else None,
-        })
-        await db_mod.create_approval(
-            db_mod._db,
-            str(ctx.boss_chat_id),
-            str(ctx.sender_chat_id),
-            record["record_id"],
-            payload,
-        )
-        # Notify boss
-        changes_str = ", ".join(
-            f"{k}: {_ms_to_date(v) if k == 'Deadline' else v}"
-            for k, v in fields.items()
-        )
-        boss = await db_mod.get_boss(str(ctx.boss_chat_id))
-        if boss:
-            await telegram.send(
-                ctx.boss_chat_id,
-                f"📝 Yêu cầu cập nhật task từ {ctx.sender_name}:\n\n"
-                f"Task: {record.get('Tên task')}\n"
-                f"Thay đổi: {changes_str}\n\n"
-                f"Reply 'ok task {record.get('Tên task', '')}' để approve.",
+        if new_status in ("Hoàn thành", "Huỷ") and len(fields) == 1:
+            pass  # fall through to direct update path below
+        else:
+            record = matched[0]
+            payload = json.dumps({
+                "record_id": record["record_id"],
+                "task_name": record.get("Tên task", ""),
+                "changes": fields,
+                "group_chat_id": str(ctx.chat_id) if ctx.is_group else None,
+            })
+            await db_mod.create_approval(
+                db_mod._db,
+                str(ctx.boss_chat_id),
+                str(ctx.sender_chat_id),
+                record["record_id"],
+                payload,
             )
-        return (f"Yêu cầu cập nhật '{record.get('Tên task')}' đã gửi đến sếp. "
-                f"Bạn sẽ được thông báo khi được xử lý.")
+            changes_str = ", ".join(
+                f"{k}: {_ms_to_date(v) if k == 'Deadline' else v}"
+                for k, v in fields.items()
+            )
+            boss = await db_mod.get_boss(str(ctx.boss_chat_id))
+            if boss:
+                await telegram.send(
+                    ctx.boss_chat_id,
+                    f"📝 Yêu cầu cập nhật task từ {ctx.sender_name}:\n\n"
+                    f"Task: {record.get('Tên task')}\n"
+                    f"Thay đổi: {changes_str}\n\n"
+                    f"Reply 'ok task {record.get('Tên task', '')}' để approve.",
+                )
+            return (f"Yêu cầu cập nhật '{record.get('Tên task')}' đã gửi đến sếp. "
+                    f"Bạn sẽ được thông báo khi được xử lý.")
 
-    # Boss: apply directly
+    # Direct update (boss, or non-boss completing/cancelling their task)
+    is_completion = new_status in ("Hoàn thành", "Huỷ")
+    actor_is_boss = ctx.sender_type == "boss"
     updated = []
     for r in matched:
         rid = r["record_id"]
@@ -310,6 +359,21 @@ async def update_task(
         merged = {**r, **fields}
         asyncio.create_task(_embed_and_upsert(ctx, rid, merged))
         updated.append(task_name)
+
+        # Cross-chat completion notifications (non-boss marking task done/cancelled)
+        if is_completion and not actor_is_boss:
+            verb = "hoàn thành" if new_status == "Hoàn thành" else "huỷ"
+            boss_msg = f"{ctx.sender_name} vừa {verb} task '{task_name}'."
+            await telegram.send(ctx.boss_chat_id, boss_msg)
+            asyncio.create_task(db_mod.log_outbound_dm(
+                boss_chat_id=ctx.boss_chat_id,
+                to_chat_id=ctx.boss_chat_id,
+                to_name=ctx.boss_name,
+                content=boss_msg,
+                trigger_type="task_completed",
+                task_id=rid,
+            ))
+            asyncio.create_task(_notify_group_completion(ctx, task_name, verb, r))
 
         # Notify new assignee if assignee changed
         new_assignee = fields.get("Assignee")
