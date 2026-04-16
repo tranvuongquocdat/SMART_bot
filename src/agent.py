@@ -67,6 +67,11 @@ If a tool returns [TOOL_ERROR:lark] — Lark is unreachable. Retry once. If it f
 If a tool returns [TOOL_ERROR:not_found] — Ask the user to clarify (different name? different workspace?).
 If a tool returns [TOOL_ERROR:unknown] — Surface the error message directly to the user. Do not claim the action succeeded.
 Never ignore a [TOOL_ERROR] response.
+
+## Cross-chat rules
+- Before answering "have you messaged X" or "did you remind X about Y": always call get_communication_log first.
+- When the user asks about tasks/projects/workload across all their workspaces: pass workspace_ids="all".
+- After a non-boss member marks a task complete (status → Hoàn thành or Huỷ): the update_task tool will auto-notify the boss and group. You do not need to do this manually.
 """
 
 # ---------------------------------------------------------------------------
@@ -93,6 +98,27 @@ THINKING_MAP = {
     "list_reminders": "Đang xem nhắc nhở...",
     "update_reminder": "Đang cập nhật nhắc nhở...",
     "delete_reminder": "Đang xóa nhắc nhở...",
+    # Tools added after initial release
+    "send_dm": "Đang gửi tin nhắn...",
+    "broadcast": "Đang gửi thông báo hàng loạt...",
+    "get_communication_log": "Đang tra lịch sử liên lạc...",
+    "check_team_engagement": "Đang kiểm tra tương tác team...",
+    "search_notes": "Đang tìm ghi chú...",
+    "get_project_report": "Đang tạo báo cáo dự án...",
+    "get_project": "Đang xem dự án...",
+    "list_projects": "Đang xem danh sách dự án...",
+    "create_project": "Đang tạo dự án...",
+    "update_project": "Đang cập nhật dự án...",
+    "delete_project": "Đang xóa dự án...",
+    "append_note": "Đang thêm ghi chú...",
+    "update_note": "Đang cập nhật ghi chú...",
+    "create_idea": "Đang lưu ý tưởng...",
+    "switch_workspace": "Đang chuyển workspace...",
+    "approve_join": "Đang duyệt tham gia...",
+    "reject_join": "Đang từ chối...",
+    "list_pending_approvals": "Đang xem yêu cầu chờ...",
+    "approve_task_change": "Đang duyệt thay đổi...",
+    "reject_task_change": "Đang từ chối thay đổi...",
 }
 
 
