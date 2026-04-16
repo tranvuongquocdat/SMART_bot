@@ -116,6 +116,8 @@ async def _get_active_sessions(sender_id: int) -> dict:
 
 
 def _resolve_language(memberships: list, sender_id: int, primary: dict | None) -> str:
+    # memberships is the raw DB rows list — each row has chat_id = sender_id by query design.
+    # The synthetic boss entry also has chat_id = sender_id. So sender_m always finds a row.
     sender_m = next(
         (m for m in memberships if str(m.get("chat_id", "")) == str(sender_id)),
         None,
