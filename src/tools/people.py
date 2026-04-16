@@ -192,31 +192,86 @@ async def delete_people(ctx: ChatContext, search_name: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Cross-workspace search
+# ---------------------------------------------------------------------------
+
+async def search_person(ctx: ChatContext, search_name: str, workspace_ids: str = "current") -> str:
+    from src.tools._workspace import resolve_workspaces
+
+    workspaces = await resolve_workspaces(ctx, workspace_ids)
+    all_results = []
+
+    for ws in workspaces:
+        try:
+            records = await lark.search_records(ws["lark_base_token"], ws["lark_table_people"])
+            matches = [
+                r for r in records
+                if search_name.lower() in str(r.get("Tên", "")).lower()
+                or search_name.lower() in str(r.get("Tên gọi", "")).lower()
+            ]
+            for r in matches:
+                all_results.append({
+                    "workspace": ws["workspace_name"],
+                    "name": r.get("Tên", ""),
+                    "nickname": r.get("Tên gọi", ""),
+                    "type": r.get("Type", ""),
+                    "role": r.get("Vai trò", ""),
+                    "group": r.get("Nhóm", ""),
+                    "record_id": r.get("record_id", ""),
+                })
+        except Exception:
+            continue
+
+    if not all_results:
+        return f"No one found matching '{search_name}'."
+
+    lines = []
+    for r in all_results:
+        label = f"[{r['workspace']}] " if workspace_ids != "current" else ""
+        name = f"{r['name']} ({r['nickname']})" if r.get("nickname") else r["name"]
+        parts = [label + name, r["type"], r["role"], r["group"]]
+        lines.append(" | ".join(p for p in parts if p))
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
 # Effort / workload check
 # ---------------------------------------------------------------------------
 
-async def check_effort(ctx: ChatContext, assignee: str, deadline: str = "") -> str:
-    all_tasks = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
+async def check_effort(ctx: ChatContext, assignee: str, deadline: str = "", workspace_ids: str = "current") -> str:
+    from src.tools._workspace import resolve_workspaces
 
-    person_tasks = [
-        t for t in all_tasks
-        if assignee.lower() in str(t.get("Assignee", "")).lower()
-        and str(t.get("Status", "")).lower() not in ("done", "hoàn thành", "cancelled")
-    ]
+    workspaces = await resolve_workspaces(ctx, workspace_ids)
+    all_tasks = []
 
-    if not person_tasks:
+    for ws in workspaces:
+        try:
+            records = await lark.search_records(ws["lark_base_token"], ws["lark_table_tasks"])
+            tasks = [
+                t for t in records
+                if assignee.lower() in str(t.get("Assignee", "")).lower()
+                and str(t.get("Status", "")).lower() not in ("done", "hoàn thành", "cancelled")
+            ]
+            for t in tasks:
+                t["_workspace"] = ws["workspace_name"]
+            all_tasks.extend(tasks)
+        except Exception:
+            continue
+
+    if not all_tasks:
         return f"{assignee} hiện không có task nào đang mở."
 
-    lines = [f"{assignee} đang có {len(person_tasks)} task:"]
+    lines = [f"{assignee} đang có {len(all_tasks)} task:"]
     conflicts = []
 
     deadline_ms = _date_to_ms(deadline) if deadline else None
 
-    for t in person_tasks:
+    for t in all_tasks:
         task_name = t.get("Tên task", "?")
         task_deadline = t.get("Deadline")
         status = t.get("Status", "")
-        line = f"  - {task_name} | Status: {status}"
+        ws_label = f"[{t['_workspace']}] " if workspace_ids != "current" else ""
+        line = f"  - {ws_label}{task_name} | Status: {status}"
         if task_deadline:
             try:
                 task_dt = datetime.fromtimestamp(int(task_deadline) / 1000)

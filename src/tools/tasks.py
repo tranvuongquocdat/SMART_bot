@@ -144,22 +144,35 @@ async def list_tasks(
     assignee: str = "",
     status: str = "",
     project: str = "",
+    workspace_ids: str = "current",
 ) -> str:
-    records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
+    from src.tools._workspace import resolve_workspaces
 
-    if assignee:
-        records = [r for r in records if assignee.lower() in r.get("Assignee", "").lower()]
-    if status:
-        records = [r for r in records if r.get("Status", "").lower() == status.lower()]
-    if project:
-        records = [r for r in records if project.lower() in r.get("Project", "").lower()]
+    workspaces = await resolve_workspaces(ctx, workspace_ids)
+    all_tasks = []
 
-    if not records:
+    for ws in workspaces:
+        try:
+            records = await lark.search_records(ws["lark_base_token"], ws["lark_table_tasks"])
+            for r in records:
+                if assignee and assignee.lower() not in r.get("Assignee", "").lower():
+                    continue
+                if status and r.get("Status", "").lower() != status.lower():
+                    continue
+                if project and project.lower() not in r.get("Project", "").lower():
+                    continue
+                r["_workspace"] = ws["workspace_name"]
+                all_tasks.append(r)
+        except Exception:
+            continue
+
+    if not all_tasks:
         return "Không tìm thấy task nào."
 
-    lines = [f"Danh sách task ({len(records)}):"]
-    for r in records[:20]:
-        lines.append(_format_task(r))
+    lines = [f"Danh sách task ({len(all_tasks)}):"]
+    for r in all_tasks[:20]:
+        ws_label = f"[{r['_workspace']}] " if workspace_ids != "current" else ""
+        lines.append(ws_label + _format_task(r))
     return "\n".join(lines)
 
 
