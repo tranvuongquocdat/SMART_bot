@@ -204,6 +204,34 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         if "no such table" not in str(exc).lower():
             raise
 
+    # Add language to bosses
+    for col, definition in [
+        ("language", "TEXT DEFAULT 'en'"),
+    ]:
+        try:
+            await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
+        except Exception as exc:
+            if "duplicate column name" not in str(exc):
+                raise
+
+    # Add language to memberships
+    try:
+        await db.execute("ALTER TABLE memberships ADD COLUMN language TEXT DEFAULT NULL")
+    except Exception as exc:
+        if "duplicate column name" not in str(exc):
+            raise
+
+    # Sessions table (workspace preference + reset flow state)
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            user_id     INTEGER NOT NULL,
+            key         TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            expires_at  TEXT NOT NULL,
+            PRIMARY KEY (user_id, key)
+        )
+    """)
+
 
 # ---------------------------------------------------------------------------
 # bosses
@@ -581,15 +609,67 @@ async def log_token_usage(
 
 
 # ---------------------------------------------------------------------------
+# sessions
+# ---------------------------------------------------------------------------
+
+async def set_session(user_id: int, key: str, value: str, ttl_minutes: int = 30) -> None:
+    from datetime import datetime, timedelta, timezone
+    expires = (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).isoformat()
+    db = await get_db()
+    await db.execute(
+        "INSERT OR REPLACE INTO sessions (user_id, key, value, expires_at) VALUES (?, ?, ?, ?)",
+        (user_id, key, value, expires),
+    )
+    await db.commit()
+
+
+async def get_session(user_id: int, key: str) -> str | None:
+    from datetime import datetime, timezone
+    db = await get_db()
+    now = datetime.now(timezone.utc).isoformat()
+    async with db.execute(
+        "SELECT value FROM sessions WHERE user_id = ? AND key = ? AND expires_at > ?",
+        (user_id, key, now),
+    ) as cur:
+        row = await cur.fetchone()
+    return row["value"] if row else None
+
+
+async def delete_session(user_id: int, key: str) -> None:
+    db = await get_db()
+    await db.execute("DELETE FROM sessions WHERE user_id = ? AND key = ?", (user_id, key))
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
 # memberships
 # ---------------------------------------------------------------------------
 
-async def get_memberships(db, chat_id: str) -> list[dict]:
+async def get_memberships(user_id_or_db, user_id_str=None) -> list[dict]:
+    """get_memberships(user_id_str) or get_memberships(db, user_id_str)."""
+    import aiosqlite as _aiosqlite
+    if isinstance(user_id_or_db, _aiosqlite.Connection):
+        db = user_id_or_db
+        uid = user_id_str
+    else:
+        db = await get_db()
+        uid = user_id_or_db
     async with db.execute(
         "SELECT * FROM memberships WHERE chat_id = ? AND status = 'active'",
-        (str(chat_id),)
+        (str(uid),),
     ) as cur:
-        return [dict(r) for r in await cur.fetchall()]
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_all_memberships_for_boss(boss_chat_id: str) -> list[dict]:
+    db = await get_db()
+    async with db.execute(
+        "SELECT * FROM memberships WHERE boss_chat_id = ?",
+        (str(boss_chat_id),),
+    ) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
 
 
 async def get_membership(db, chat_id: str, boss_chat_id: str) -> dict | None:
