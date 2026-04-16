@@ -19,10 +19,7 @@ from src.services import telegram as tg
 
 logger = logging.getLogger("onboarding")
 
-# in-memory state: {chat_id: {"step": str, ...}}
-_onboarding: dict[int, dict] = {}
-
-# join flow state: {chat_id: {"step": str, ...}}
+# join flow state: {chat_id: {"step": str, ...}} — short-lived, in-memory is fine
 _join_sessions: dict[int, dict] = {}
 
 # ---------------------------------------------------------------------------
@@ -144,20 +141,21 @@ Danh sách công ty: {boss_list}
 # ---------------------------------------------------------------------------
 
 
-def is_onboarding(chat_id: int) -> bool:
+async def is_onboarding(chat_id: int) -> bool:
     """Return True if chat_id is currently in the onboarding flow."""
-    return chat_id in _onboarding
+    state = await db.get_onboarding_state(chat_id)
+    return bool(state)
 
 
-def start_onboarding(chat_id: int) -> None:
+async def start_onboarding(chat_id: int) -> None:
     """Begin onboarding for a new user."""
-    _onboarding[chat_id] = {"step": "ask_type", "first": True}
+    await db.save_onboarding_state(chat_id, {"step": "ask_type", "first": True})
     logger.info("[onboarding] started for chat_id=%s", chat_id)
 
 
 async def handle_onboard_message(text: str, chat_id: int) -> None:
     """Route message to the correct handler based on current step."""
-    state = _onboarding.get(chat_id)
+    state = await db.get_onboarding_state(chat_id)
     if state is None:
         return
 
@@ -189,6 +187,7 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
 async def _step_ask_type(text: str, chat_id: int, state: dict) -> None:
     # First contact → greet and ask role
     if state.pop("first", False):
+        await db.save_onboarding_state(chat_id, state)
         reply = await _ai_reply(
             "Người dùng mới vừa nhắn tin lần đầu. "
             "Chào họ, giới thiệu ngắn gọn em là trợ lý thư ký AI giúp quản lý công việc. "
@@ -206,6 +205,7 @@ async def _step_ask_type(text: str, chat_id: int, state: dict) -> None:
     if user_type == "boss":
         state["step"] = "ask_language"
         state["type"] = "boss"
+        await db.save_onboarding_state(chat_id, state)
         reply = await _ai_reply(
             "Người dùng cho biết họ là sếp/giám đốc. Phản hồi tích cực ngắn gọn. "
             "Sau đó hỏi ngôn ngữ ưa thích: (1) English, (2) Tiếng Việt — "
@@ -216,6 +216,7 @@ async def _step_ask_type(text: str, chat_id: int, state: dict) -> None:
     elif user_type in ("member", "partner"):
         state["step"] = "ask_language"
         state["type"] = user_type
+        await db.save_onboarding_state(chat_id, state)
         label = "thành viên" if user_type == "member" else "đối tác"
         reply = await _ai_reply(
             f"Người dùng cho biết họ là {label}. Phản hồi tích cực ngắn gọn. "
@@ -256,12 +257,14 @@ async def _step_ask_language(text: str, chat_id: int, state: dict) -> None:
     user_type = state.get("type", "boss")
     if user_type == "boss":
         state["step"] = "boss_name"
+        await db.save_onboarding_state(chat_id, state)
         reply = await _ai_reply(
             f"Người dùng chọn ngôn ngữ '{language}'. "
             "Xác nhận ngắn gọn và hỏi tên anh/chị."
         )
     else:
         state["step"] = "member_boss"
+        await db.save_onboarding_state(chat_id, state)
         label = "thành viên" if user_type == "member" else "đối tác"
         reply = await _ai_reply(
             f"Người dùng ({label}) chọn ngôn ngữ '{language}'. "
@@ -285,6 +288,7 @@ async def _step_boss_name(text: str, chat_id: int, state: dict) -> None:
         return
     state["name"] = name
     state["step"] = "boss_company"
+    await db.save_onboarding_state(chat_id, state)
     reply = await _ai_reply(
         f"Sếp tên là {name}. Chào bằng tên và hỏi tên công ty/tổ chức của anh/chị."
     )
@@ -302,6 +306,7 @@ async def _step_boss_company(text: str, chat_id: int, state: dict) -> None:
         return
     state["company"] = company
     state["step"] = "boss_confirm"
+    await db.save_onboarding_state(chat_id, state)
     name = state["name"]
     reply = await _ai_reply(
         f"Sếp tên {name}, công ty {company}. "
@@ -328,6 +333,7 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
 
     if not confirm:
         state["step"] = "boss_name"
+        await db.save_onboarding_state(chat_id, state)
         reply = await _ai_reply(
             "Người dùng muốn sửa thông tin. "
             "Nói dạ, em bắt đầu lại nhé, và hỏi lại tên."
@@ -414,8 +420,8 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
         await telegram.send(chat_id, error_reply)
         return
 
-    # 7. Remove from onboarding state
-    _onboarding.pop(chat_id, None)
+    # 7. Clear onboarding state from DB
+    await db.clear_onboarding_state(chat_id)
     logger.info("[onboarding] completed (boss) for chat_id=%s", chat_id)
 
 
@@ -454,6 +460,7 @@ async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
             state["boss"] = chosen
             state.pop("pending_matches", None)
             state["step"] = "member_name"
+            await db.save_onboarding_state(chat_id, state)
             reply = await _ai_reply(
                 f"Người dùng chọn team {chosen['name']} — {chosen.get('company', '')}. "
                 "Xác nhận và hỏi tên bạn."
@@ -490,6 +497,7 @@ async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
 
     if len(matches) > 1:
         state["pending_matches"] = matches
+        await db.save_onboarding_state(chat_id, state)
         lines = "\n".join(
             f"{i + 1}. {b['name']} — {b.get('company', '')}"
             for i, b in enumerate(matches)
@@ -507,6 +515,7 @@ async def _step_member_boss(text: str, chat_id: int, state: dict) -> None:
     boss = matches[0]
     state["boss"] = boss
     state["step"] = "member_name"
+    await db.save_onboarding_state(chat_id, state)
     reply = await _ai_reply(
         f"Tìm thấy team *{boss['name']}* — *{boss.get('company', '')}*. "
         "Xác nhận team và hỏi tên bạn là gì."
@@ -576,7 +585,7 @@ async def _step_member_name(text: str, chat_id: int, state: dict) -> None:
         await telegram.send(chat_id, error_reply)
         return
 
-    _onboarding.pop(chat_id, None)
+    await db.clear_onboarding_state(chat_id)
     logger.info("[onboarding] join request sent (%s) for chat_id=%s", person_type, chat_id)
 
 

@@ -241,8 +241,8 @@ async def handle_message(
         if ctx is None:
             # Unknown user — trigger onboarding state machine
             from src import onboarding  # noqa: PLC0415
-            if not onboarding.is_onboarding(chat_id):
-                onboarding.start_onboarding(chat_id)
+            if not await onboarding.is_onboarding(chat_id):
+                await onboarding.start_onboarding(chat_id)
             await onboarding.handle_onboard_message(text, chat_id)
             return
 
