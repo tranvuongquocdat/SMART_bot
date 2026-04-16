@@ -165,6 +165,8 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
 
     if step == "ask_type":
         await _step_ask_type(text, chat_id, state)
+    elif step == "ask_language":
+        await _step_ask_language(text, chat_id, state)
     elif step == "boss_name":
         await _step_boss_name(text, chat_id, state)
     elif step == "boss_company":
@@ -202,21 +204,23 @@ async def _step_ask_type(text: str, chat_id: int, state: dict) -> None:
     user_type = result.get("type", "unclear")
 
     if user_type == "boss":
-        state["step"] = "boss_name"
+        state["step"] = "ask_language"
         state["type"] = "boss"
         reply = await _ai_reply(
-            "Người dùng cho biết họ là sếp/giám đốc. "
-            "Phản hồi tích cực và hỏi tên anh/chị."
+            "Người dùng cho biết họ là sếp/giám đốc. Phản hồi tích cực ngắn gọn. "
+            "Sau đó hỏi ngôn ngữ ưa thích: (1) English, (2) Tiếng Việt — "
+            "hoặc nhập mã ngôn ngữ khác (ví dụ: fr, ja)."
         )
         await telegram.send(chat_id, reply)
 
     elif user_type in ("member", "partner"):
-        state["step"] = "member_boss"
+        state["step"] = "ask_language"
         state["type"] = user_type
         label = "thành viên" if user_type == "member" else "đối tác"
         reply = await _ai_reply(
-            f"Người dùng cho biết họ là {label}. "
-            "Hỏi họ thuộc team của ai — cho biết tên sếp hoặc tên công ty để em tìm."
+            f"Người dùng cho biết họ là {label}. Phản hồi tích cực ngắn gọn. "
+            "Sau đó hỏi ngôn ngữ ưa thích: (1) English, (2) Tiếng Việt — "
+            "hoặc nhập mã ngôn ngữ khác (ví dụ: fr, ja)."
         )
         await telegram.send(chat_id, reply)
 
@@ -227,6 +231,44 @@ async def _step_ask_type(text: str, chat_id: int, state: dict) -> None:
             "hay thành viên/đối tác muốn tham gia team có sẵn?"
         )
         await telegram.send(chat_id, reply)
+
+
+# ---- Language step -------------------------------------------------------
+
+_CLASSIFY_LANGUAGE_PROMPT = """\
+Người dùng đang chọn ngôn ngữ ưa thích.
+
+Quy tắc:
+- "1" hoặc "english" hoặc "tiếng anh" → trả về "en"
+- "2" hoặc "tiếng việt" hoặc "vietnamese" hoặc "viet" → trả về "vi"
+- Mã BCP-47 hợp lệ khác (ví dụ: "fr", "ja", "zh") → trả về nguyên mã đó (chữ thường)
+- Nếu không nhận ra → trả về "vi" (mặc định)
+
+Trả về JSON duy nhất, không giải thích: {"language": "vi"}\
+"""
+
+
+async def _step_ask_language(text: str, chat_id: int, state: dict) -> None:
+    result = await _ai_classify(_CLASSIFY_LANGUAGE_PROMPT, text)
+    language = result.get("language", "vi").strip().lower() or "vi"
+    state["language"] = language
+
+    user_type = state.get("type", "boss")
+    if user_type == "boss":
+        state["step"] = "boss_name"
+        reply = await _ai_reply(
+            f"Người dùng chọn ngôn ngữ '{language}'. "
+            "Xác nhận ngắn gọn và hỏi tên anh/chị."
+        )
+    else:
+        state["step"] = "member_boss"
+        label = "thành viên" if user_type == "member" else "đối tác"
+        reply = await _ai_reply(
+            f"Người dùng ({label}) chọn ngôn ngữ '{language}'. "
+            "Xác nhận ngắn gọn và hỏi họ thuộc team của ai — "
+            "cho biết tên sếp hoặc tên công ty để em tìm."
+        )
+    await telegram.send(chat_id, reply)
 
 
 # ---- Boss path -----------------------------------------------------------
@@ -319,6 +361,16 @@ async def _step_boss_confirm(text: str, chat_id: int, state: dict) -> None:
             lark_table_notes=table_notes,
         )
         logger.info("[onboarding] boss created in DB for chat_id=%s", chat_id)
+
+        # 2b. Persist language preference (create_boss doesn't accept language param)
+        language = state.get("language", "vi")
+        _db = await db.get_db()
+        await _db.execute(
+            "UPDATE bosses SET language = ? WHERE chat_id = ?",
+            (language, chat_id),
+        )
+        await _db.commit()
+        logger.info("[onboarding] boss language='%s' saved for chat_id=%s", language, chat_id)
 
         # 3. Add boss to people_map
         await db.add_person(chat_id, chat_id, "boss", name)
@@ -481,6 +533,18 @@ async def _step_member_name(text: str, chat_id: int, state: dict) -> None:
         logger.info(
             "[onboarding] %s %s (chat_id=%s) joined boss chat_id=%s",
             person_type, name, chat_id, boss["chat_id"],
+        )
+
+        # Persist language preference to memberships
+        language = state.get("language", "vi")
+        _db = await db.get_db()
+        await _db.execute(
+            "UPDATE memberships SET language = ? WHERE chat_id = ? AND boss_chat_id = ?",
+            (language, str(chat_id), str(boss["chat_id"])),
+        )
+        await _db.commit()
+        logger.info(
+            "[onboarding] member language='%s' saved for chat_id=%s", language, chat_id
         )
 
         # Add to Lark People table
