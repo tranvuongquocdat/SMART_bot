@@ -1097,6 +1097,8 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
             return await summary.get_summary(ctx, **args)
         case "get_workload":
             return await summary.get_workload(ctx, **args)
+        case "get_project_report":
+            return await summary.get_project_report(ctx, **args)
 
         # Idea tools
         case "create_idea":
