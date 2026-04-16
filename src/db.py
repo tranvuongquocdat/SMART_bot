@@ -251,6 +251,55 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         if "duplicate column name" not in str(exc):
             raise
 
+    # outbound_messages — log all bot-initiated DMs
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS outbound_messages (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            boss_chat_id  INTEGER NOT NULL,
+            workspace_id  TEXT,
+            to_chat_id    INTEGER NOT NULL,
+            to_name       TEXT,
+            content       TEXT NOT NULL,
+            trigger_type  TEXT DEFAULT 'manual',
+            task_id       TEXT,
+            project       TEXT,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_outbound_boss_to
+            ON outbound_messages (boss_chat_id, to_chat_id, created_at DESC)
+    """)
+
+    # onboarding_state — replaces in-memory _onboarding dict
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS onboarding_state (
+            chat_id    INTEGER PRIMARY KEY,
+            state_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # notified_overdue columns on task_notifications
+    for col, definition in [
+        ("notified_overdue",    "INTEGER DEFAULT 0"),
+        ("notified_overdue_at", "TIMESTAMP"),
+    ]:
+        try:
+            await db.execute(f"ALTER TABLE task_notifications ADD COLUMN {col} {definition}")
+            await db.commit()
+        except Exception as exc:
+            if "duplicate column name" not in str(exc):
+                raise
+
+    # active_workspace_id on memberships
+    try:
+        await db.execute("ALTER TABLE memberships ADD COLUMN active_workspace_id TEXT DEFAULT NULL")
+        await db.commit()
+    except Exception as exc:
+        if "duplicate column name" not in str(exc):
+            raise
+
 
 # ---------------------------------------------------------------------------
 # bosses
@@ -860,6 +909,115 @@ async def sync_reminder_from_lark(db, sqlite_id: int, content: str, status: str)
         (content, status, sqlite_id)
     )
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# outbound_messages
+# ---------------------------------------------------------------------------
+
+async def log_outbound_dm(
+    boss_chat_id: int,
+    to_chat_id: int,
+    to_name: str,
+    content: str,
+    trigger_type: str = "manual",
+    task_id: str = "",
+    project: str = "",
+    workspace_id: str = "",
+) -> None:
+    _db = await get_db()
+    await _db.execute(
+        """INSERT INTO outbound_messages
+           (boss_chat_id, workspace_id, to_chat_id, to_name, content, trigger_type, task_id, project)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (boss_chat_id, workspace_id, to_chat_id, to_name, content, trigger_type, task_id or "", project or ""),
+    )
+    await _db.commit()
+
+
+async def get_outbound_log(
+    boss_chat_id: int,
+    to_chat_id: int | None = None,
+    trigger_type: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    _db = await get_db()
+    conditions = ["boss_chat_id = ?"]
+    params: list = [boss_chat_id]
+    if to_chat_id:
+        conditions.append("to_chat_id = ?")
+        params.append(to_chat_id)
+    if trigger_type:
+        conditions.append("trigger_type = ?")
+        params.append(trigger_type)
+    where = " AND ".join(conditions)
+    async with _db.execute(
+        f"SELECT * FROM outbound_messages WHERE {where} ORDER BY created_at DESC LIMIT ?",
+        params + [limit],
+    ) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# onboarding_state
+# ---------------------------------------------------------------------------
+
+async def get_onboarding_state(chat_id: int) -> dict:
+    import json as _json
+    _db = await get_db()
+    async with _db.execute(
+        "SELECT state_json FROM onboarding_state WHERE chat_id = ?", (chat_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    if not row:
+        return {}
+    try:
+        return _json.loads(row["state_json"])
+    except Exception:
+        return {}
+
+
+async def save_onboarding_state(chat_id: int, state: dict) -> None:
+    import json as _json
+    _db = await get_db()
+    await _db.execute(
+        """INSERT INTO onboarding_state (chat_id, state_json, updated_at)
+           VALUES (?, ?, CURRENT_TIMESTAMP)
+           ON CONFLICT(chat_id) DO UPDATE SET state_json=excluded.state_json, updated_at=CURRENT_TIMESTAMP""",
+        (chat_id, _json.dumps(state, ensure_ascii=False)),
+    )
+    await _db.commit()
+
+
+async def clear_onboarding_state(chat_id: int) -> None:
+    _db = await get_db()
+    await _db.execute("DELETE FROM onboarding_state WHERE chat_id = ?", (chat_id,))
+    await _db.commit()
+
+
+# ---------------------------------------------------------------------------
+# task_notifications — overdue
+# ---------------------------------------------------------------------------
+
+async def get_unnotified_overdue_tasks(db_conn, boss_chat_id: str) -> list[dict]:
+    async with db_conn.execute(
+        """SELECT * FROM task_notifications
+           WHERE boss_chat_id = ? AND notified_overdue = 0""",
+        (boss_chat_id,),
+    ) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def mark_overdue_notified(db_conn, task_record_id: str, boss_chat_id: str) -> None:
+    await db_conn.execute(
+        """UPDATE task_notifications
+           SET notified_overdue = 1, notified_overdue_at = CURRENT_TIMESTAMP
+           WHERE task_record_id = ? AND boss_chat_id = ?""",
+        (task_record_id, boss_chat_id),
+    )
+    await db_conn.commit()
 
 
 # ---------------------------------------------------------------------------
