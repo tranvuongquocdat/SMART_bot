@@ -7,6 +7,18 @@ from datetime import datetime
 from src.context import ChatContext
 from src.services import lark
 
+# Canonical enum values — must match Lark field options exactly
+PROJECT_STATUS_VALUES = ("Chưa bắt đầu", "Đang thực hiện", "Hoàn thành", "Tạm dừng", "Huỷ")
+
+
+def _validate_project_status(status: str) -> str:
+    for v in PROJECT_STATUS_VALUES:
+        if status.lower() == v.lower():
+            return v
+    raise ValueError(
+        f"Status '{status}' không hợp lệ. Dùng: {', '.join(PROJECT_STATUS_VALUES)}"
+    )
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -56,10 +68,11 @@ async def create_project(
     lead: str = "",
     members: str = "",
     deadline: str = "",
+    workspace_ids: str = "current",
 ) -> str:
     fields: dict = {
         "Tên dự án": name,
-        "Trạng thái": "Planning",
+        "Trạng thái": "Chưa bắt đầu",
     }
     if description:
         fields["Mô tả"] = description
@@ -74,48 +87,82 @@ async def create_project(
     return f"Đã tạo dự án: {name}"
 
 
-async def get_project(ctx: ChatContext, search_name: str) -> str:
-    records = await _find_project(ctx, search_name)
-    if not records:
-        return f"Không tìm thấy dự án '{search_name}'."
-
+async def get_project(
+    ctx: ChatContext,
+    search_name: str,
+    workspace_ids: str = "current",
+) -> str:
+    """
+    Fat return: project info + tasks by status + progress %.
+    workspace_ids: "current" | "all" | specific boss_id
+    """
+    from src.tools._workspace import resolve_workspaces
+    workspaces = await resolve_workspaces(ctx, workspace_ids)
     lines = []
-    for proj in records:
-        lines.append(_fmt_project(proj))
 
-        # List related tasks
-        all_tasks = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
-        proj_name = proj.get("Tên dự án", "")
-        related = [
-            t for t in all_tasks
-            if proj_name.lower() in str(t.get("Project", "")).lower()
-        ]
-        if related:
-            lines.append(f"  Tasks ({len(related)}):")
-            for t in related:
-                task_name = t.get("Tên task", "?")
-                status = t.get("Status", "")
-                assignee = t.get("Assignee", "")
-                lines.append(f"    - {task_name} | {status} | {assignee}")
-        else:
-            lines.append("  Tasks: (chưa có)")
+    for ws in workspaces:
+        if not ws.get("lark_table_projects"):
+            continue
+        try:
+            records = await lark.search_records(ws["lark_base_token"], ws["lark_table_projects"])
+        except Exception:
+            continue
+        matches = [r for r in records if search_name.lower() in str(r.get("Tên dự án", "")).lower()]
+        for proj in matches:
+            ws_label = f" [{ws['workspace_name']}]" if workspace_ids != "current" else ""
+            lines.append(f"=== {proj.get('Tên dự án', '?')}{ws_label} ===")
+            lines.append(_fmt_project(proj))
 
+            # Tasks with progress %
+            try:
+                all_tasks = await lark.search_records(ws["lark_base_token"], ws["lark_table_tasks"])
+                proj_name = proj.get("Tên dự án", "")
+                related = [t for t in all_tasks if proj_name.lower() in str(t.get("Project", "")).lower()]
+                total = len(related)
+                done = sum(1 for t in related if t.get("Status") in ("Hoàn thành", "Done"))
+                progress = f"{done}/{total} ({int(done / total * 100)}%)" if total else "0/0"
+                lines.append(f"Tiến độ: {progress} task hoàn thành")
+                for t in related:
+                    lines.append(
+                        f"  - {t.get('Tên task', '?')} | {t.get('Assignee', '?')} | {t.get('Status', '?')}"
+                    )
+            except Exception:
+                lines.append("Tasks: (không tải được)")
+
+    if not lines:
+        return f"Không tìm thấy dự án '{search_name}'."
     return "\n".join(lines)
 
 
-async def list_projects(ctx: ChatContext, status: str = "") -> str:
-    all_records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_projects)
+async def list_projects(
+    ctx: ChatContext,
+    status: str = "",
+    workspace_ids: str = "current",
+) -> str:
+    from src.tools._workspace import resolve_workspaces
+    workspaces = await resolve_workspaces(ctx, workspace_ids)
+    all_results = []
 
-    filtered = all_records
-    if status:
-        filtered = [r for r in filtered if status.lower() in str(r.get("Trạng thái", "")).lower()]
+    for ws in workspaces:
+        if not ws.get("lark_table_projects"):
+            continue
+        try:
+            records = await lark.search_records(ws["lark_base_token"], ws["lark_table_projects"])
+        except Exception:
+            continue
+        for r in records:
+            if status and status.lower() not in str(r.get("Trạng thái", "")).lower():
+                continue
+            r["_workspace"] = ws["workspace_name"]
+            all_results.append(r)
 
-    if not filtered:
+    if not all_results:
         return "Không có dự án nào."
 
-    lines = [f"Danh sách dự án ({len(filtered)}):"]
-    for r in filtered:
-        lines.append(f"- {_fmt_project(r)}")
+    lines = [f"Danh sách dự án ({len(all_results)}):"]
+    for r in all_results:
+        ws_label = f"[{r['_workspace']}] " if workspace_ids != "current" else ""
+        lines.append(f"- {ws_label}{_fmt_project(r)}")
     return "\n".join(lines)
 
 
@@ -128,6 +175,7 @@ async def update_project(
     members: str = "",
     deadline: str = "",
     status: str = "",
+    workspace_ids: str = "current",
 ) -> str:
     records = await _find_project(ctx, search_name)
     if not records:
@@ -145,7 +193,7 @@ async def update_project(
     if deadline:
         updates["Deadline"] = _date_to_ms(deadline)
     if status:
-        updates["Trạng thái"] = status
+        updates["Trạng thái"] = _validate_project_status(status)
 
     if not updates:
         return "Không có trường nào được cập nhật."
@@ -158,7 +206,11 @@ async def update_project(
     return f"Đã cập nhật {updated} dự án tên '{search_name}'."
 
 
-async def delete_project(ctx: ChatContext, search_name: str) -> str:
+async def delete_project(
+    ctx: ChatContext,
+    search_name: str,
+    workspace_ids: str = "current",
+) -> str:
     records = await _find_project(ctx, search_name)
     if not records:
         return f"Không tìm thấy dự án '{search_name}'."
