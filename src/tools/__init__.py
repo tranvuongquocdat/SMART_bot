@@ -926,9 +926,27 @@ TOOL_DEFINITIONS = [
 # Tool router
 # ---------------------------------------------------------------------------
 
-async def execute_tool(name: str, arguments: str, ctx: ChatContext) -> str:
-    args = json.loads(arguments) if isinstance(arguments, str) else arguments
+async def execute_tool(name: str, arguments: str | dict, ctx: ChatContext) -> str:
+    try:
+        args_dict = json.loads(arguments) if isinstance(arguments, str) else arguments
+        return await _dispatch_tool(name, args_dict, ctx)
+    except Exception as e:
+        err_type = type(e).__name__
+        msg = str(e)
+        if any(kw in msg.lower() for kw in ("lark", "base_token", "table", "record")):
+            return (
+                f"[TOOL_ERROR:lark] {name} — Lark không phản hồi hoặc cấu hình sai: {msg}. "
+                f"Thử lại hoặc báo người dùng."
+            )
+        if any(kw in msg.lower() for kw in ("not found", "không tìm thấy", "no such")):
+            return (
+                f"[TOOL_ERROR:not_found] {name} — {msg}. "
+                f"Hãy hỏi lại người dùng tên chính xác."
+            )
+        return f"[TOOL_ERROR:unknown] {name} thất bại ({err_type}): {msg}"
 
+
+async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
     match name:
         # Task tools
         case "create_task":
