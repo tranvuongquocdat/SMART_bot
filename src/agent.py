@@ -515,6 +515,31 @@ async def send_reminder(reminder: dict, settings: Settings):
     target_name = reminder.get("target_name", "")
     content = reminder["content"]
 
+    # Parse [task:keyword] and [project:name] prefixes from stored content
+    task_status_note = ""
+    while content.startswith("[task:") or content.startswith("[project:"):
+        if content.startswith("[task:"):
+            end = content.index("]")
+            task_kw = content[6:end]
+            content = content[end + 2:] if len(content) > end + 2 else content[end + 1:]
+            # Fetch live task status
+            try:
+                ctx_temp = await context.resolve(boss_chat_id, boss_chat_id, False)
+                if ctx_temp:
+                    tasks = await lark.search_records(ctx_temp.lark_base_token, ctx_temp.lark_table_tasks)
+                    matched = [t for t in tasks if task_kw.lower() in t.get("Tên task", "").lower()]
+                    if matched:
+                        t = matched[0]
+                        task_status_note = f"\n(Task '{t.get('Tên task')}' hiện: {t.get('Status', '?')})"
+            except Exception:
+                pass
+        elif content.startswith("[project:"):
+            end = content.index("]")
+            content = content[end + 2:] if len(content) > end + 2 else content[end + 1:]
+
+    if task_status_note:
+        content = content + task_status_note
+
     log_prefix = f"[reminder:{reminder['id']}]"
 
     try:
@@ -580,6 +605,13 @@ async def send_reminder(reminder: dict, settings: Settings):
 
     if target_id:
         await telegram.send(target_id, reply)
+        await db.log_outbound_dm(
+            boss_chat_id=boss_chat_id,
+            to_chat_id=int(target_id),
+            to_name=target_name or "",
+            content=reply,
+            trigger_type="reminder",
+        )
         # Báo sếp biết đã nhắc (raw, không cần LLM cho dòng này)
         await telegram.send(boss_chat_id, f"✓ Đã nhắc {target_name or 'người nhận'}: {content}")
     else:

@@ -49,7 +49,19 @@ async def _resolve_target(ctx: ChatContext, target: str) -> tuple[Optional[int],
     return None, name
 
 
-async def create_reminder(ctx: ChatContext, content: str, remind_at: str, target: str = "") -> str:
+async def create_reminder(
+    ctx: ChatContext,
+    content: str,
+    remind_at: str,
+    target: str = "",
+    task_keyword: str = "",
+    project: str = "",
+    workspace_ids: str = "current",
+) -> str:
+    """
+    Create a reminder. task_keyword links to a task — scheduler will fetch live task
+    status when the reminder fires. project is optional context for the message.
+    """
     try:
         remind_dt = _local_remind_string_to_utc_naive(remind_at)
     except ValueError:
@@ -62,9 +74,16 @@ async def create_reminder(ctx: ChatContext, content: str, remind_at: str, target
         if not target_name:
             target_name = target
 
+    # Encode task_keyword and project as structured prefix in content
+    stored_content = content
+    if project:
+        stored_content = f"[project:{project}] {stored_content}"
+    if task_keyword:
+        stored_content = f"[task:{task_keyword}] {stored_content}"
+
     reminder_id = await db.create_reminder(
         boss_chat_id=ctx.boss_chat_id,
-        content=content,
+        content=stored_content,
         remind_at=remind_dt,
         target_chat_id=target_chat_id,
         target_name=target_name,
@@ -78,7 +97,7 @@ async def create_reminder(ctx: ChatContext, content: str, remind_at: str, target
                 ctx.lark_base_token,
                 ctx.lark_table_reminders,
                 {
-                    "content": content,
+                    "content": stored_content,
                     "remind_at_local": remind_at,
                     "target_name": target_name,
                     "status": "pending",
