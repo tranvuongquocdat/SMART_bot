@@ -390,7 +390,7 @@ async def handle_message(
                     else:
                         parts = [THINKING_MAP.get(n, n) for n in tool_names]
                         thinking_text = " | ".join(parts)
-                    await telegram.edit_message(chat_id, thinking_msg_id, f"_{thinking_text}_")
+                    await telegram.edit_message(chat_id, thinking_msg_id, f"_{thinking_text}_", parse_mode="")
 
                 for tc in response.tool_calls:
                     logger.info("%s TOOL: %s(%s)", log_prefix, tc.function.name, tc.function.arguments[:200])
