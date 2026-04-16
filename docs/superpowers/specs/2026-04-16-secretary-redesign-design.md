@@ -2,23 +2,36 @@
 
 **Date:** 2026-04-16  
 **Status:** Approved  
-**Scope:** Architecture cleanup, join flow fix, nuclear reset, multi-workspace routing, language preference
+**Scope:** Tool capability expansion, join flow fix, nuclear reset, multi-workspace, language preference
 
 ---
 
-## Context & Goals
+## Design Philosophy
 
-The current system is a Telegram-based AI secretary bot with 2 agents (Secretary + Advisor), SQLite for internal state, Lark Base for visual data, and Qdrant for semantic search.
+**The agent is smart. Trust it.**
 
-**Problems to fix:**
-1. Join flow bug — when a boss of workspace A joins workspace B as partner, they are not written into Lark People table of workspace B
-2. Hardcoded if/else patterns in `agent.py` (keyword lists, regex approval matching, reset trigger phrases) make the flow feel unnatural
-3. Reset only clears Lark records, not SQLite or Qdrant
-4. No multi-workspace context routing — context always defaults to the user's own workspace
-5. No language preference — always responds in Vietnamese (hardcoded in prompts)
-6. No cross-workspace person lookup — tools only query the active workspace
+The primary lever for quality is **tool capability**, not flow architecture. Give the Secretary powerful tools that return rich, structured data — then get out of the way. A few lines of principle in the system prompt handle any custom flow better than hardcoded routing logic.
 
-**Demo scenario:** A user who is a member of Company A and a partner of Company B. They interact with both workspaces via a single bot. "Bách" may exist in both workspaces as different people.
+**What this means in practice:**
+- No router LLM call. No mode classification. No pre-filtering.
+- Secretary receives full context and reasons about what to do.
+- Tools do the heavy lifting — credential resolution, cross-workspace queries, compound lookups.
+- System prompt gives principles, not procedures.
+
+---
+
+## Problems Being Fixed
+
+1. **Join flow bug** — user joining workspace B is not written to Lark People table of B
+2. **Hardcoded patterns** in `agent.py` — keyword lists, regex approval, reset trigger phrases
+3. **Reset is partial** — only clears Lark records, not SQLite or Qdrant
+4. **No multi-workspace routing** — context always defaults to user's own workspace
+5. **No language preference** — Vietnamese hardcoded in prompts
+6. **Tools too weak** — only query active workspace, can't reason across workspaces
+7. **`update_note` overwrites** — agent loses previous knowledge when updating notes
+8. **Approval flow** — boss has no tool to see pending approvals; regex matching is fragile
+
+**Demo scenario:** User is a member of Company A and a partner of Company B. "Tôi đang có task gì?" should aggregate tasks from both workspaces.
 
 ---
 
@@ -30,335 +43,300 @@ The current system is a Telegram-based AI secretary bot with 2 agents (Secretary
 Telegram message
         │
         ▼
-  [router.py]  ← lightweight LLM call
-  Context: sender memberships + active sessions + last 5 messages
-  Output:
-    - workspace_id: which workspace to activate
-    - mode: "onboarding" | "admin" | "work" | "strategic"
-    - admin_type: "join" | "join_approval" | "task_approval" | "reset" | null
+  context_builder.py  ← pure Python, no LLM call
+  Queries: memberships, active sessions, last 5 messages
+  Output: structured context dict
         │
-        ├─ mode=onboarding → onboarding.py (state machine, new users only)
-        ├─ mode=admin → secretary.py (correct workspace context pre-loaded)
-        ├─ mode=work → secretary.py (correct workspace context pre-loaded)
-        └─ mode=strategic → secretary.py → escalates to advisor.py
+        ▼
+  secretary.py  ← single LLM agent, full tool set
+  Receives: all memberships, active sessions, workspace options, language
+  Reasons: which workspace, what to do, which tools to call
+        │
+        └── escalates to advisor.py when needed (via tool)
 ```
 
-### Router design
+No router. No mode pre-classification. Secretary gets enough context to reason everything itself.
 
-Router is a focused LLM call with a small system prompt (~200 tokens). It receives:
-- Sender's workspace memberships (name + role per workspace)
-- Any active sessions (join pending, reset pending, task approval pending)
-- Last 5 messages for follow-up context
-- Current message
+### context_builder.py (new, pure Python)
 
-Router returns structured JSON:
-```json
+Runs before Secretary. No LLM. Queries DB and returns:
+
+```python
 {
-  "workspace_id": "<boss_chat_id or null>",
-  "mode": "work",
-  "admin_type": null,
-  "ambiguous_person": false
+    "sender_id": 123,
+    "memberships": [
+        {"workspace": "Company A", "boss_id": 111, "role": "member", "language": "vi"},
+        {"workspace": "Company B", "boss_id": 222, "role": "partner", "language": "en"},
+    ],
+    "active_sessions": {
+        "reset_pending": None,            # or {"boss_id": X, "step": 1}
+        "join_pending": [...],            # pending join requests this user sent
+        "approvals_pending": [...],       # pending approvals this user (as boss) needs to handle
+    },
+    "last_5_messages": [...],
+    "primary_workspace_id": 111,          # boss workspace if exists, else first active membership
 }
 ```
 
-If `workspace_id` is null (cannot determine from context), Secretary defaults to the user's primary workspace — defined as: their own boss workspace if they have one, otherwise the first active membership. Secretary can call `switch_workspace()` mid-conversation if it detects a mismatch.
+Secretary receives this, builds its own reasoning about which workspace is active.
 
 ### Files changed
 
 | File | Change |
 |---|---|
-| `router.py` | **New** — lightweight classifier, ~100 lines |
-| `agent.py` → `secretary.py` | Remove all pre-checks (keyword lists, regex, reset triggers). Pure tool loop only. |
-| `onboarding.py` | Add language selection step. Minor changes only. |
-| `src/tools/join.py` | **New** — join flow as stateful tools |
+| `context_builder.py` | **New** — pure Python context assembly, ~80 lines |
+| `agent.py` → `secretary.py` | Remove ALL pre-checks. Pure tool loop + context_builder integration. |
+| `onboarding.py` | Add language selection step |
+| `src/tools/join.py` | **New** — join flow as tools |
 | `src/tools/reset.py` | Upgrade to nuclear reset |
-| `src/tools/__init__.py` | Register new tools, add `workspace_ids` param to relevant tools |
-| `src/db.py` | Add `language` field to `bosses` and `memberships` tables |
-| `src/context.py` | Support multi-workspace context resolution |
+| `src/tools/__init__.py` | Register new tools, update tool descriptions |
+| `src/db.py` | Add `language` to `bosses` + `memberships`; add `sessions` table |
+| `src/context.py` | Support resolving context for any workspace_id |
+
+---
+
+## Secretary System Prompt — Principle-Based
+
+Short. No procedures. Gives the agent values and situational awareness.
+
+**Injected context (structured, not prose):**
+```
+You are the AI secretary of {boss_name} — {company}.
+Current time: {time}
+Language: {language}
+Talking to: {sender_name} ({role})
+This user is active in: Company A (member), Company B (partner)  ← membership summary
+Active workspace: Company A  ← primary, but agent can reason otherwise
+
+People in active workspace:
+- Bách | Designer | Team Media
+- Linh | Content | Team Media
+
+Your notes about this workspace: {personal_note}
+```
+
+**Principles (not rules):**
+```
+You genuinely know this team. You care about their wellbeing, not just their output.
+When making decisions that affect someone, understand their situation first.
+
+You remember everything shared with you. Draw on your notes naturally.
+Your notes are your extended memory — when context feels incomplete, check them.
+
+You have access to multiple workspaces. When a question spans workspaces or
+doesn't specify one, use your judgment about where to look. You can always check.
+
+You use tools to understand context before acting, not just to execute commands.
+```
+
+No step-by-step instructions. No "always call X before Y". The model reasons.
+
+---
+
+## Tool Capability Spec
+
+### Core principle for tool design
+
+Every tool must:
+1. Return **rich, labeled data** — enough for the agent to reason without needing another call
+2. Handle **credential resolution internally** — agent passes `workspace_ids`, tool figures out the rest
+3. Have a description that says **when it's useful**, not when it's mandatory
+
+### Cross-workspace credential resolution pattern
+
+All tools that accept `workspace_ids` follow this pattern internally:
+
+```python
+async def resolve_workspaces(user_id: int, workspace_ids: str | list) -> list[dict]:
+    """Returns list of {boss_id, lark_base_token, lark_table_X, workspace_name}"""
+    if workspace_ids == "current":
+        return [current_workspace_from_ctx]
+    memberships = await db.get_memberships(user_id)
+    if workspace_ids == "all":
+        targets = memberships
+    else:
+        targets = [m for m in memberships if m["boss_chat_id"] in workspace_ids]
+    result = []
+    for m in targets:
+        boss = await db.get_boss(m["boss_chat_id"])
+        result.append({**boss, "workspace_name": boss["company"], "user_role": m["person_type"]})
+    return result
+```
+
+This is the single shared implementation. No per-tool credential logic.
+
+### Tools updated: add `workspace_ids`
+
+| Tool | `workspace_ids` default | Returns |
+|---|---|---|
+| `search_person(name)` | `"current"` | List with workspace label per result |
+| `list_tasks(...)` | `"current"` | List with workspace label per result |
+| `check_effort(assignee)` | `"current"` | Workload per workspace |
+
+Tool descriptions hint: *"Pass workspace_ids='all' when the question is about this user across all their workspaces."*
+
+Agent decides when to pass `"all"`. No rule.
+
+### New tools
+
+| Tool | What it does | Why it matters |
+|---|---|---|
+| `list_available_workspaces()` | Workspaces sender can join (not already a member) | Enables natural join flow |
+| `request_join(target_boss_id, role, intro)` | Creates pending membership, notifies boss | LLM-native join — no keyword matching |
+| `approve_join(membership_id, role)` | Approves join; writes to Lark People of TARGET workspace | **Fixes the bug** |
+| `reject_join(membership_id)` | Rejects join, notifies requester | |
+| `list_pending_approvals()` | Shows all pending task changes + join requests awaiting boss action | Agent can now reason about what needs approval |
+| `approve_task_change(approval_id)` | Applies change, notifies member | Replaces regex pattern |
+| `reject_task_change(approval_id)` | Rejects change, notifies member | |
+| `append_note(note_type, ref_id, content)` | Adds to existing note without overwriting | Preserves accumulated knowledge |
+| `set_language(language_code)` | Persists language for current sender | |
+| `switch_workspace(boss_id)` | Switches active workspace; saves to sessions table (30 min TTL) | For explicit switching |
+| `initiate_reset()` | Step 1 of nuclear reset | |
+| `confirm_reset_step1(input)` | Validates company name input | |
+| `execute_reset()` | Executes full nuclear reset | |
+
+### `append_note` vs `update_note`
+
+Both exist. Agent reasons:
+- `append_note` — adding new info, preserving old (default when learning something new)
+- `update_note` — reorganizing or cleaning up stale content
+
+No instruction about which to use. Agent decides from context.
+
+### `list_pending_approvals` — why it's critical
+
+Without this tool, when boss says "ok duyệt đi", Secretary has no way to know:
+- Which approval they mean
+- How many are pending
+- What each one involves
+
+With this tool, Secretary can naturally: list pending items → understand context → call `approve_task_change` or `approve_join` on the right one.
 
 ---
 
 ## Core Flows
 
-### Flow 1: Multi-workspace context routing
+### Join flow (LLM-native, no keywords)
 
 ```
-User = member of Company A + partner of Company B
-Message: "deadline của dự án web bên công ty B còn bao lâu?"
+User says "tôi muốn làm cộng tác ở công ty khác" (or any variation)
+  Secretary sees active_sessions.join_pending = [] in context
+  Secretary calls: list_available_workspaces()
+  Secretary presents options naturally, asks which one + role
+  User picks
+  Secretary calls: request_join(target_boss_id, role, intro)
+    → pending membership in SQLite
+    → notification to target boss
 
-Router:
-  - Sees memberships: [A-member, B-partner]
-  - Detects "công ty B" reference → workspace_id = B's boss_id
-  → Secretary runs with Company B's Lark Base context
-
-Follow-up message: "còn task nào của tôi chưa xong?"
-Router:
-  - Last 5 messages context is about Company B
-  - No explicit workspace mentioned → keep workspace B
-  → Secretary continues in Company B context
+Target boss sees notification. Says "cho vào" / "ok partner" / "từ chối"
+  Secretary (boss context) sees active_sessions.approvals_pending in context
+  Secretary calls: list_pending_approvals() if needed to clarify
+  Secretary calls: approve_join(membership_id, role)
+    → membership status → "active"
+    → create_record in Lark People of TARGET workspace  ← bug fix
+    → notify requester
 ```
 
-### Flow 2: Cross-workspace person lookup
-
-Tools that deal with people or tasks accept an optional `workspace_ids` parameter:
-
-```python
-search_person(name="Bách", workspace_ids="all")
-# Returns:
-[
-  {"workspace": "Company A", "name": "Bách", "role": "Designer", "tasks": 3},
-  {"workspace": "Company B", "name": "Bách", "role": "Developer", "tasks": 1}
-]
-```
-
-The Secretary agent reasons about the result:
-- 1 result → answer directly
-- Multiple results, context is clear → pick the right one
-- Multiple results, ambiguous → ask user naturally
-- 0 results → say so
-
-No hardcoded case handling in Python. The LLM reasons from the structured data.
-
-Tools updated to support `workspace_ids`:
-- `search_person(name, workspace_ids="current")`
-- `list_tasks(assignee, workspace_ids="current")`
-- `check_effort(assignee, workspace_ids="current")`
-
-Default is `"current"` — backward compatible. Pass `"all"` or a list of boss_ids for cross-workspace.
-
-### Flow 3: Join flow (cross-workspace, LLM-native)
-
-Replaces the current state machine in `onboarding.py` join path and the keyword-check in `agent.py`.
+### Task approval (LLM-native, no regex)
 
 ```
-User (already onboarded as boss of A) says "tôi muốn làm cộng tác ở công ty khác"
-  → Router: mode=admin, type=join
-  → Secretary calls: list_available_workspaces()
-    → returns list of workspaces the user is NOT yet a member of
-  → Secretary presents list naturally, asks which one
-  → User picks
-  → Secretary calls: request_join(target_boss_id, role, intro_text)
-    → creates pending membership in SQLite (status="pending")
-    → sends notification to target boss
+Member requests change → request_task_approval() → pending record in DB
 
-Target boss sees: "Đạt (boss of Company A) wants to join as partner. [intro]. Reply to approve or reject."
-  → Boss replies naturally: "cho vào đi" / "ok partner" / "từ chối"
-  → Router: sees pending join request in active sessions → mode=admin, type=join_approval
-  → Secretary calls: approve_join(membership_id, role) OR reject_join(membership_id)
-    → approve_join:
-        1. Update membership status → "active" in SQLite
-        2. create_record in Lark People table of TARGET workspace ← [BUG FIX]
-        3. Notify the requester
-    → reject_join:
-        1. Update membership status → "rejected"
-        2. Notify the requester
+Boss says "ok" / "duyệt" / "thôi giữ nguyên"
+  Secretary sees approvals_pending in injected context
+  If ambiguous → calls list_pending_approvals() to clarify
+  Calls: approve_task_change(approval_id) or reject_task_change(approval_id)
 ```
 
-### Flow 4: Task approval (LLM-native)
-
-Replaces regex pattern `(approve|reject)\s+(\d+)` in `agent.py`.
+### Nuclear reset (correct order)
 
 ```
-Member: "em done task thiết kế logo rồi anh"
-  → Secretary (member context): minor update → apply directly, notify boss
-
-Member: "anh ơi em muốn chuyển task logo sang tuần sau được không"
-  → Secretary: significant change → calls request_task_approval(task_id, changes, reason)
-  → Notifies boss: "Bách wants to push task X deadline to next week. Reason: [reason]."
-
-Boss: "ừ được" / "ok chuyển đi" / "thôi giữ nguyên đi"
-  → Router: sees pending task approval → mode=admin, type=task_approval
-  → Secretary: calls approve_task_change(approval_id) OR reject_task_change(approval_id)
-  → Applies change or reverts, notifies member
+execute_reset():
+  0. Capture member_ids = SELECT chat_id FROM memberships WHERE boss_chat_id = X
+  1. Notify all members workspace is being reset
+  2. DELETE Lark Base entirely (delete the base, not just records)
+  3. DELETE FROM notes WHERE boss_chat_id = X
+  4. DELETE FROM reminders WHERE boss_chat_id = X
+  5. DELETE FROM scheduled_reviews WHERE boss_chat_id = X
+  6. DELETE FROM pending_approvals WHERE boss_chat_id = X
+  7. DELETE FROM task_notifications WHERE boss_chat_id = X
+  8. DELETE FROM messages WHERE chat_id IN (boss_id + member_ids)
+  9. DELETE FROM people_map WHERE boss_chat_id = X
+  10. UPDATE memberships SET status='workspace_reset' WHERE boss_chat_id = X
+  11. DELETE FROM bosses WHERE chat_id = X
+  12. Qdrant: delete_collection("messages_X"), delete_collection("tasks_X")
+  13. Send visual separator to Telegram:
+      "━━━━━━━━━━━━━━━━━━━━━━
+             WORKSPACE RESET
+        Dữ liệu cũ đã được xóa.
+        Phiên mới bắt đầu từ đây.
+      ━━━━━━━━━━━━━━━━━━━━━━"
 ```
 
-### Flow 5: Nuclear reset
+Note: member_ids captured in step 0 BEFORE any deletion. Step 11 (delete bosses) is LAST.
+
+### Cross-workspace task query
 
 ```
-User: "reset workspace" / "xóa hết đi" / any reset intent
-  → Router: mode=admin, type=reset
-  → Secretary: calls initiate_reset()
-    → Returns: "Type your company name in UPPERCASE to confirm"
-
-User types: "COMPANY NAME"
-  → Secretary: calls confirm_reset_step1(input)
-    → Matches? → Returns: "Type 'tôi chắc chắn' to proceed"
-    → No match? → Cancels
-
-User types: "tôi chắc chắn"
-  → Secretary: calls execute_reset()
-    1. Send visual separator message to Telegram chat:
-       "━━━━━━━━━━━━━━━━━━━━━━\n       WORKSPACE RESET\n  Dữ liệu cũ đã được xóa.\n  Phiên mới bắt đầu từ đây.\n━━━━━━━━━━━━━━━━━━━━━━"
-    2. Notify all active members/partners that workspace is being reset
-    3. DELETE Lark Base entirely (not just records — delete the base)
-    4. DELETE FROM bosses WHERE chat_id = X
-    5. DELETE FROM memberships WHERE boss_chat_id = X
-    6. DELETE FROM people_map WHERE boss_chat_id = X  
-    7. DELETE FROM messages WHERE chat_id IN (boss + all members' chat_ids)
-    8. DELETE FROM reminders WHERE boss_chat_id = X
-    9. DELETE FROM notes WHERE boss_chat_id = X
-    10. DELETE FROM scheduled_reviews WHERE boss_chat_id = X
-    11. DELETE FROM pending_approvals WHERE boss_chat_id = X
-    12. DELETE FROM task_notifications WHERE boss_chat_id = X
-    13. Qdrant: delete_collection("messages_X"), delete_collection("tasks_X")
-    14. Update memberships of members/partners: set status="workspace_reset" for their link to this workspace
-
-After reset: user messages → context.resolve() returns None → onboarding runs again from scratch.
-
-Note: Telegram chat history is NOT deletable via API (48h limit, bot messages only).
-The separator message serves as the visual boundary between old and new sessions.
+User: "tôi đang có task gì tới đây?"
+Secretary sees: user has 2 workspaces in membership context
+Secretary reasons: generic personal task query → should check all workspaces
+Secretary calls: list_tasks(assignee="self", workspace_ids="all")
+Tool returns: [{workspace: "Company A", tasks: [...]}, {workspace: "Company B", tasks: [...]}]
+Secretary aggregates and responds naturally
 ```
-
-### Flow 6: Deadline push (unchanged, cleanup only)
-
-Scheduler remains. Cleanup:
-- Replace complex `task_notifications` logic with simple `last_notified_at` timestamp on notification record
-- Assignee name → people_map lookup → Telegram chat_id → send message
 
 ---
 
 ## Data Model Changes
 
-### `bosses` table
 ```sql
+-- bosses
 ALTER TABLE bosses ADD COLUMN language TEXT DEFAULT 'en';
-```
 
-### `memberships` table
-```sql
+-- memberships  
 ALTER TABLE memberships ADD COLUMN language TEXT DEFAULT NULL;
--- NULL means: use boss workspace language as default
+-- NULL = inherit boss workspace language
+
+-- sessions (new table)
+CREATE TABLE IF NOT EXISTS sessions (
+    user_id     INTEGER NOT NULL,
+    key         TEXT NOT NULL,           -- e.g. "preferred_workspace"
+    value       TEXT NOT NULL,
+    expires_at  TIMESTAMP NOT NULL,
+    PRIMARY KEY (user_id, key)
+);
 ```
-
-### No other schema changes required.
-
----
-
-## New Tools
-
-| Tool | Description |
-|---|---|
-| `list_available_workspaces()` | Returns workspaces the sender can join (not already a member) |
-| `request_join(target_boss_id, role, intro)` | Creates pending membership, notifies target boss |
-| `approve_join(membership_id, role)` | Approves join, writes to Lark People of target workspace |
-| `reject_join(membership_id)` | Rejects join, notifies requester |
-| `approve_task_change(approval_id)` | Applies pending task change, notifies member |
-| `reject_task_change(approval_id)` | Rejects pending task change, notifies member |
-| `initiate_reset()` | Starts reset flow, returns step-1 confirmation prompt |
-| `confirm_reset_step1(input)` | Validates company name; if match → returns step-2 prompt; else cancels |
-| `execute_reset()` | Executes nuclear reset after 2-step confirmation |
-| `set_language(language_code)` | Persists language preference for current user |
-| `switch_workspace(boss_id)` | Switches active workspace context; persisted for 30 min in session table |
-| `append_note(note_type, ref_id, content)` | Appends new information to an existing note without overwriting. Prefer over update_note to preserve knowledge. |
-
-### `append_note` vs `update_note`
-
-Both tools exist. Agent chooses:
-- `append_note` — when adding new information to what's already known (default choice)
-- `update_note` — when reorganizing or cleaning up a note that's grown stale
-
-No instruction in the prompt about which to use when — the agent reasons based on context.
-
-### `switch_workspace` session persistence
-
-When called, `switch_workspace(boss_id)` writes `preferred_workspace_id` to a SQLite `sessions` table with a 30-minute TTL. Router reads this before classifying — if a preference is active, it uses it directly without routing logic. Preference expires after 30 min of inactivity or when user explicitly references a different workspace.
-
-### Cross-workspace permission model
-
-When a user operates in workspace B (as partner/member), their permissions are governed by their `person_type` in workspace B's membership — not their role in their home workspace. Boss-of-A operating as partner-of-B has partner-level permissions in B. This is enforced in code, not prompt.
-
-### Tools updated (add `workspace_ids` param)
-
-| Tool | New param | Default |
-|---|---|---|
-| `search_person(name)` | `workspace_ids` | `"current"` |
-| `list_tasks(...)` | `workspace_ids` | `"current"` |
-| `check_effort(assignee)` | `workspace_ids` | `"current"` |
-
-Pass `"all"` to query across all workspaces the user belongs to. Returns results with workspace labels — agent reasons about disambiguation naturally.
 
 ---
 
 ## Language Preference
 
-### Storage
-- `bosses.language` — workspace default language (set during boss onboarding)
-- `memberships.language` — per-member override (set during their onboarding or via `set_language`)
+**Resolution order for Secretary:** `memberships.language` → `bosses.language` → `'en'`
 
-### Injection into Secretary system prompt
-```
-Respond in: English (user preference).
-If the user writes in a different language or explicitly requests a language change,
-match them immediately and call set_language() to persist the preference.
-```
-No hardcoded language rules. LLM detects and adapts.
+Each sender gets their own language. Boss and member can have different languages in the same workspace.
 
-### Onboarding language step (after role selection)
-```
-Bot: "What language do you prefer?"
-     1. English
-     2. Tiếng Việt
-     3. Other — just reply in your language and I'll match you
+**Injection:** Single line in system prompt: `"Respond in: English"` (resolved from DB). No hardcoded language logic anywhere.
 
-User picks → language saved → rest of onboarding in that language
-```
-Option 3 fallback: LLM detects language from the reply and saves it.
-
----
-
-## Secretary Agent — Cleaned Up Structure
-
-`secretary.py` (renamed from `agent.py`) contains only:
-1. Resolve workspace context (from router output)
-2. Build system prompt (inject: language, personal note, people summary, time, sender info)
-3. Gather context: last 15 messages + 8 RAG results
-4. Tool loop (max 10 rounds)
-5. Send reply
-6. Persist to SQLite + Qdrant
-
-No if/else blocks for join keywords, reset triggers, or approval regex. Zero business logic outside the tool loop.
-
-### System prompt philosophy — principle-based, not procedure-based
-
-The system prompt does NOT list step-by-step procedures. It gives the agent values and context, then trusts the model to reason.
-
-**What to avoid:**
-> ❌ "Before responding about any person, always call get_note() first, then list_tasks(), then check_effort()"
-
-**What to write instead:**
-> ✅ "You genuinely know this team. You care about their wellbeing, not just their output. When making decisions that affect someone — assigning tasks, setting deadlines, sending messages — take a moment to understand their current situation before acting."
-
-> ✅ "You remember everything the boss has told you. If they've shared preferences, habits, or standing instructions in the past, those live in the personal note. Draw on them naturally — don't ask the boss to repeat themselves."
-
-> ✅ "You use your tools to understand context before acting, not just to execute commands."
-
-The agent is smart enough to decide: does understanding this situation require checking notes? Checking workload? Both? Neither? It makes that call based on the principle, not a rigid checklist.
-
-**Tool descriptions follow the same philosophy.** Each tool description says *when it's useful*, not *when it's mandatory*:
-- `get_note`: "Use when you want to recall what you know about a person, project, or group — their history, preferences, context."
-- `append_note`: "Use when you learn something worth remembering — a preference, a concern, a piece of context. Prefer this over update_note to preserve existing knowledge."
-- `check_effort`: "Useful before assigning tasks — helps you understand if someone is already stretched."
-
-This approach maximizes agent reasoning freedom. The model decides the right tool sequence for each situation rather than following a script.
+**Onboarding:** Language is asked explicitly after role selection. Saved to onboarding state dict → passed into `db.create_boss()` or `db.upsert_membership()` at completion.
 
 ---
 
 ## What Is NOT Changing
 
 - Advisor Agent — no changes
-- Scheduler — minor cleanup only  
+- Scheduler — minor cleanup (last_notified_at timestamp)
 - Qdrant setup — no changes
-- Lark Base provisioning — no changes
+- Lark Base provisioning — no changes  
 - Group chat handling — no changes
 - Reminder flow — no changes
 - Review schedule config — no changes
-- Tests — skipped this build cycle (real-world testing instead)
+- Tests — skipped this cycle (real-world testing)
 
 ---
 
-## Open Questions / Known Limitations
+## Known Limitations
 
-- Telegram chat history cannot be deleted (API limitation). The visual separator message is the workaround.
-- Cross-workspace `workspace_ids="all"` queries will be slower (N parallel Lark API calls). Acceptable for demo scale.
-- If router misclassifies workspace, Secretary will detect via tool results and can call `switch_workspace()` — costs 1 extra round but no data loss.
-- Session table for workspace preference needs to be added to SQLite schema (minimal: `user_id`, `preferred_workspace_id`, `expires_at`).
+- Telegram chat history not deletable via API. Separator message is the workaround.
+- `workspace_ids="all"` queries run N parallel Lark API calls — acceptable at demo scale.
+- If Secretary picks wrong workspace, it detects via tool results and calls `switch_workspace()`. Costs 1 extra round, no data loss.
