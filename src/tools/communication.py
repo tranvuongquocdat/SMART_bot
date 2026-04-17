@@ -180,6 +180,7 @@ async def get_communication_log(
     If person query has no resolvable chat_id, lists candidate chat_ids from
     other sources so agent can decide whether to link.
 
+    since: "" | "today" | "YYYY-MM-DD" | "Nd" (e.g. "7d" = last 7 days). Filters both sections.
     log_type applies only to outbound log.
     """
     from src import identity
@@ -217,24 +218,51 @@ async def get_communication_log(
                 lines.append("Không tìm thấy ứng viên nào khớp tên này.")
             return "\n".join(lines)
 
+    # --- Normalize `since` to SQL filter ---
+    # Accepts: "" (no filter) | "today" | "YYYY-MM-DD" | "Nd" (N days back)
+    since_clause = ""
+    since_params: tuple = ()
+    if since:
+        s = since.strip().lower()
+        if s == "today":
+            since_clause = " AND date(created_at) = date('now', 'localtime')"
+        elif s.endswith("d") and s[:-1].isdigit():
+            since_clause = f" AND created_at >= datetime('now', '-{int(s[:-1])} days')"
+        else:
+            try:
+                from datetime import datetime as _dt
+                _dt.strptime(since, "%Y-%m-%d")
+                since_clause = " AND created_at >= ?"
+                since_params = (since,)
+            except ValueError:
+                pass  # bad format — silently no-filter
+
     # --- Section 1: outbound_messages ---
-    outbound_rows = await db.get_outbound_log(
-        boss_chat_id=ctx.boss_chat_id,
-        to_chat_id=to_chat_id,
-        trigger_type=log_type if log_type != "all" else None,
-        limit=30,
-    )
+    _db = await db.get_db()
+    ob_conds = ["boss_chat_id = ?"]
+    ob_params: list = [ctx.boss_chat_id]
+    if to_chat_id:
+        ob_conds.append("to_chat_id = ?")
+        ob_params.append(to_chat_id)
+    if log_type and log_type != "all":
+        ob_conds.append("trigger_type = ?")
+        ob_params.append(log_type)
+    ob_where = " AND ".join(ob_conds) + since_clause
+    async with _db.execute(
+        f"SELECT * FROM outbound_messages WHERE {ob_where} ORDER BY created_at DESC LIMIT 30",
+        tuple(ob_params) + since_params,
+    ) as cur:
+        outbound_rows = [dict(r) for r in await cur.fetchall()]
 
     # --- Section 2: messages table (DM thread) ---
     dm_rows: list[dict] = []
     if to_chat_id and to_chat_id > 0:
-        _db = await db.get_db()
         async with _db.execute(
-            """SELECT created_at, substr(content, 1, 200) AS content
-               FROM messages
-               WHERE chat_id = ? AND role = 'assistant'
-               ORDER BY id DESC LIMIT 30""",
-            (to_chat_id,),
+            f"""SELECT created_at, substr(content, 1, 200) AS content
+                FROM messages
+                WHERE chat_id = ? AND role = 'assistant'{since_clause}
+                ORDER BY id DESC LIMIT 30""",
+            (to_chat_id,) + since_params,
         ) as cur:
             rows = await cur.fetchall()
         dm_rows = [dict(r) for r in rows]
