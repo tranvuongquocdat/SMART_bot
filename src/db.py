@@ -280,6 +280,27 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         )
     """)
 
+    # seen_contacts — passive index of observed chat_ids via Telegram updates
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS seen_contacts (
+            chat_id          INTEGER PRIMARY KEY,
+            display_name     TEXT,
+            username         TEXT,
+            first_seen_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen_chat   INTEGER,
+            seen_count       INTEGER DEFAULT 1
+        )
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_seen_contacts_name
+            ON seen_contacts (display_name)
+    """)
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_seen_contacts_username
+            ON seen_contacts (username)
+    """)
+
     # notified_overdue columns on task_notifications
     for col, definition in [
         ("notified_overdue",    "INTEGER DEFAULT 0"),
@@ -1018,6 +1039,79 @@ async def mark_overdue_notified(db_conn, task_record_id: str, boss_chat_id: str)
         (task_record_id, boss_chat_id),
     )
     await db_conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# seen_contacts
+# ---------------------------------------------------------------------------
+
+async def upsert_seen_contact(
+    chat_id: int,
+    display_name: str = "",
+    username: str = "",
+    last_seen_chat: int | None = None,
+) -> None:
+    """Insert or update a seen contact; bumps last_seen_at and seen_count."""
+    _db = await get_db()
+    await _db.execute(
+        """
+        INSERT INTO seen_contacts (chat_id, display_name, username, last_seen_chat)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(chat_id) DO UPDATE SET
+            display_name   = COALESCE(NULLIF(excluded.display_name, ''), seen_contacts.display_name),
+            username       = COALESCE(NULLIF(excluded.username, ''), seen_contacts.username),
+            last_seen_at   = CURRENT_TIMESTAMP,
+            last_seen_chat = COALESCE(excluded.last_seen_chat, seen_contacts.last_seen_chat),
+            seen_count     = seen_contacts.seen_count + 1
+        """,
+        (chat_id, display_name or "", username or "", last_seen_chat),
+    )
+    await _db.commit()
+
+
+async def get_seen_contact(chat_id: int) -> dict | None:
+    _db = await get_db()
+    async with _db.execute(
+        "SELECT * FROM seen_contacts WHERE chat_id = ?", (chat_id,)
+    ) as cur:
+        row = await cur.fetchone()
+    return dict(row) if row else None
+
+
+async def search_seen_contacts(query: str, limit: int = 20) -> list[dict]:
+    """Tìm contacts theo display_name hoặc username (substring, case-insensitive)."""
+    _db = await get_db()
+    like = f"%{query.lower()}%"
+    async with _db.execute(
+        """SELECT * FROM seen_contacts
+           WHERE lower(display_name) LIKE ? OR lower(username) LIKE ?
+           ORDER BY last_seen_at DESC LIMIT ?""",
+        (like, like, limit),
+    ) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def list_unlinked_seen_contacts(
+    lark_people_chat_ids: set[int],
+    days: int = 30,
+    limit: int = 30,
+) -> list[dict]:
+    """
+    Trả seen_contacts mà chat_id KHÔNG có trong set lark_people_chat_ids
+    (do caller truyền vào), sort theo last_seen_at DESC.
+    Caller phải load Lark People chat_ids trước để so.
+    """
+    _db = await get_db()
+    async with _db.execute(
+        """SELECT * FROM seen_contacts
+           WHERE last_seen_at >= datetime('now', ? )
+           ORDER BY last_seen_at DESC LIMIT ?""",
+        (f"-{days} days", limit * 3),
+    ) as cur:
+        rows = await cur.fetchall()
+    filtered = [dict(r) for r in rows if dict(r)["chat_id"] not in lark_people_chat_ids]
+    return filtered[:limit]
 
 
 # ---------------------------------------------------------------------------
