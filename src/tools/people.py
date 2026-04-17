@@ -107,12 +107,12 @@ async def get_person(
     workspace_ids: str = "current",
 ) -> str:
     """
-    Fat return: person info + active tasks + effort_score + last DM from bot + has_dmd_bot.
+    Fat return: person info + active tasks + effort_score + connected status.
+    `connected=true` means Chat ID present in Lark → bot ↔ người đã liên lạc được.
     Call before assigning a task: effort_score > 0.8 means near overloaded.
     If multiple people share the same name across workspaces, returns all with workspace tag.
     """
     from src.tools._workspace import resolve_workspaces
-    from src import db as _db_mod
 
     query = name or search_name
     if not query:
@@ -161,20 +161,12 @@ async def get_person(
         except Exception:
             lines.append("Tasks: (không tải được)")
 
-        # Last DM from bot
+        # Connection state — Chat ID present in Lark = bot ↔ người đã kết nối
         raw_id = r.get("Chat ID")
         if raw_id:
-            chat_id_val = int(raw_id)
-            outbound = await _db_mod.get_outbound_log(ctx.boss_chat_id, to_chat_id=chat_id_val, limit=1)
-            if outbound:
-                last = outbound[0]
-                lines.append(f"Lần cuối bot nhắn: {last['created_at'][:16]} — {last['content'][:60]}")
-                lines.append("has_dmd_bot: true")
-            else:
-                lines.append("Lần cuối bot nhắn: (chưa từng)")
-                lines.append("has_dmd_bot: true (có Chat ID nhưng chưa nhắn)")
+            lines.append(f"connected: true (chat_id={raw_id})")
         else:
-            lines.append("has_dmd_bot: false (chưa có Chat ID)")
+            lines.append("connected: false (chưa có Chat ID trong Lark — cần /start bot hoặc link_contact_to_person)")
 
     return "\n".join(lines)
 
@@ -318,11 +310,11 @@ async def check_team_engagement(
 ) -> str:
     """
     Returns engagement status for every team member:
-    has_dmd_bot, last_interaction, active task count, overload_flag.
-    Use when asked 'ai chưa nhắn bot', 'ai đang bận', or before broadcast.
+    connected (Chat ID present in Lark = bot và người đã kết nối), active
+    task count, overload_flag. Gọi khi hỏi 'ai chưa kết nối bot', 'ai đang bận',
+    hoặc trước broadcast để biết ai nhận được DM.
     """
     from src.tools._workspace import resolve_workspaces
-    from src import db as _db_mod
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     lines = ["=== Team Engagement ==="]
@@ -349,17 +341,11 @@ async def check_team_engagement(
             overload = " ⚠️OVERLOAD" if task_count >= 5 else ""
 
             if raw_id:
-                chat_id_val = int(raw_id)
-                outbound = await _db_mod.get_outbound_log(ctx.boss_chat_id, to_chat_id=chat_id_val, limit=1)
-                if outbound:
-                    last_dt = outbound[0]["created_at"][:16]
-                    dmd = f"✓ last: {last_dt}"
-                else:
-                    dmd = "✓ có Chat ID, chưa nhắn"
+                connected = f"✓ đã kết nối (chat_id={raw_id})"
             else:
-                dmd = "✗ chưa có Chat ID"
+                connected = "✗ chưa kết nối (thiếu Chat ID trong Lark — cần /start bot hoặc link_contact_to_person)"
 
-            lines.append(f"  {ws_label}{pname} | {dmd} | tasks: {task_count}{overload}")
+            lines.append(f"  {ws_label}{pname} | {connected} | tasks: {task_count}{overload}")
 
     return "\n".join(lines)
 

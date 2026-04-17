@@ -484,8 +484,10 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "check_team_engagement",
             "description": (
-                "Kiểm tra mức độ tương tác của từng thành viên với bot: ai đã nhắn, ai chưa, "
-                "ai đang overload. Gọi khi hỏi 'ai chưa nhắn bot', 'ai đang bận', trước broadcast."
+                "Kiểm tra trạng thái kết nối + workload của từng thành viên trong Lark People: "
+                "ai đã kết nối với bot (có Chat ID trong Lark = bot ↔ người đã liên lạc được), "
+                "ai chưa kết nối, ai đang overload. "
+                "Gọi khi hỏi 'ai đã/chưa nhắn với bot', 'ai đang bận', hoặc trước broadcast."
             ),
             "parameters": {
                 "type": "object",
