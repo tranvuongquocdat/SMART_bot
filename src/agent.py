@@ -212,6 +212,81 @@ def _build_sessions_summary(sessions: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Turn context builder — gathers data + formats system prompt + builds msgs
+# ---------------------------------------------------------------------------
+
+async def _build_turn_messages(
+    ctx,
+    text: str,
+    chat_id: int,
+    is_group: bool,
+    built: dict,
+    group_ctx: dict | None,
+) -> tuple[list[dict], int, int]:
+    """
+    Returns (messages, recent_count, rag_count). Handles both DM and group.
+    Group note is read from group_ctx (deduplicated from the old inline read).
+    """
+    assert _settings is not None
+    from src.context_builder import membership_summary as _ms  # noqa: PLC0415
+    boss_chat_id: int = ctx.boss_chat_id
+
+    personal_note_row, recent, rag_results, people_summary = await asyncio.gather(
+        db.get_note(boss_chat_id, "personal", str(boss_chat_id)),
+        db.get_recent(chat_id, limit=_settings.recent_messages),
+        qdrant.search(
+            collection=ctx.messages_collection,
+            query=text,
+            chat_id=chat_id,
+            top_n=_settings.rag_messages,
+        ),
+        _build_people_summary(ctx),
+    )
+    personal_note = personal_note_row["content"] if personal_note_row else "(Chưa có ghi chú)"
+
+    # context_note for group turns — reuse group_ctx to avoid duplicate DB read
+    context_note = ""
+    if is_group:
+        gnote = (group_ctx or {}).get("group_note")
+        if gnote:
+            context_note = f"Ghi chú nhóm: {gnote}"
+        else:
+            gname = (group_ctx or {}).get("group_name") or ctx.group_name or str(chat_id)
+            context_note = f"Nhóm: {gname}"
+
+    tz = ZoneInfo(_settings.timezone)
+    current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M (%A)")
+    boss = await db.get_boss(boss_chat_id)
+    company = boss.get("company", "") if boss else ""
+    company_info = f" — {company}" if company else ""
+
+    system_content = SECRETARY_PROMPT.format(
+        boss_name=ctx.boss_name,
+        company_info=company_info,
+        personal_note=personal_note,
+        current_time=current_time,
+        people_summary=people_summary,
+        sender_name=ctx.sender_name,
+        sender_type=ctx.sender_type,
+        context_note=context_note,
+        language=built["language"],
+        memberships_summary=_ms(built["memberships"]),
+        active_sessions_summary=_build_sessions_summary(built["active_sessions"]),
+        group_section=_build_group_section(group_ctx),
+    )
+
+    messages: list[dict] = [{"role": "system", "content": system_content}]
+    if rag_results:
+        rag_text = "\n".join(f"[{m['role']}]: {m['content']}" for m in rag_results)
+        messages.append({"role": "system", "content": f"Lịch sử liên quan:\n{rag_text}"})
+    for msg in recent:
+        messages.append({"role": msg["role"], "content": msg["content"]})
+    messages.append({"role": "user", "content": text})
+
+    return messages, len(recent), len(rag_results)
+
+
+# ---------------------------------------------------------------------------
 # Main handler
 # ---------------------------------------------------------------------------
 
@@ -290,7 +365,6 @@ async def handle_message(
         # Step 2: Build rich context via context_builder
         # ------------------------------------------------------------------
         from src import context_builder as _cb  # noqa: PLC0415
-        from src.context_builder import membership_summary as _ms  # noqa: PLC0415
         built = await _cb.build(sender_id, chat_id)
 
         # ------------------------------------------------------------------
@@ -338,87 +412,14 @@ async def handle_message(
         )
 
         # ------------------------------------------------------------------
-        # Step 4: Gather context in parallel
+        # Step 4-6: Gather context + build messages array (extracted helper)
         # ------------------------------------------------------------------
         assert _settings is not None, "init_agent() must be called before handling messages"
         assert ctx.boss_chat_id is not None, "ChatContext must have a boss_chat_id"
-        boss_chat_id: int = ctx.boss_chat_id
-
-        personal_note_row, recent, rag_results, people_summary = await asyncio.gather(
-            db.get_note(boss_chat_id, "personal", str(boss_chat_id)),
-            db.get_recent(chat_id, limit=_settings.recent_messages),
-            qdrant.search(
-                collection=ctx.messages_collection,
-                query=text,
-                chat_id=chat_id,
-                top_n=_settings.rag_messages,
-            ),
-            _build_people_summary(ctx),
+        messages, recent_count, rag_count = await _build_turn_messages(
+            ctx, text, chat_id, is_group, built, group_ctx,
         )
-
-        personal_note = personal_note_row["content"] if personal_note_row else "(Chưa có ghi chú)"
-
-        logger.info(
-            "%s Context: %d recent, %d RAG",
-            log_prefix, len(recent), len(rag_results),
-        )
-
-        # ------------------------------------------------------------------
-        # Step 5: Build group/context notes
-        # ------------------------------------------------------------------
-        context_note = ""
-        if is_group:
-            group_note_row = await db.get_note(
-                boss_chat_id, "group", str(chat_id)
-            )
-            if group_note_row:
-                context_note = f"Ghi chú nhóm: {group_note_row['content']}"
-            else:
-                context_note = f"Nhóm: {ctx.group_name or str(chat_id)}"
-
-        # ------------------------------------------------------------------
-        # Step 6: Build messages array
-        # ------------------------------------------------------------------
-        tz = ZoneInfo(_settings.timezone)
-        current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M (%A)")
-
-        boss = await db.get_boss(boss_chat_id)
-        company = boss.get("company", "") if boss else ""
-        company_info = f" — {company}" if company else ""
-
-        system_content = SECRETARY_PROMPT.format(
-            boss_name=ctx.boss_name,
-            company_info=company_info,
-            personal_note=personal_note,
-            current_time=current_time,
-            people_summary=people_summary,
-            sender_name=ctx.sender_name,
-            sender_type=ctx.sender_type,
-            context_note=context_note,
-            language=built["language"],
-            memberships_summary=_ms(built["memberships"]),
-            active_sessions_summary=_build_sessions_summary(built["active_sessions"]),
-            group_section=_build_group_section(group_ctx),
-        )
-
-        messages = [{"role": "system", "content": system_content}]
-
-        # RAG context as system message
-        if rag_results:
-            rag_text = "\n".join(
-                f"[{m['role']}]: {m['content']}" for m in rag_results
-            )
-            messages.append({
-                "role": "system",
-                "content": f"Lịch sử liên quan:\n{rag_text}",
-            })
-
-        # Recent messages
-        for msg in recent:
-            messages.append({"role": msg["role"], "content": msg["content"]})
-
-        # Current user message
-        messages.append({"role": "user", "content": text})
+        logger.info("%s Context: %d recent, %d RAG", log_prefix, recent_count, rag_count)
 
         # ------------------------------------------------------------------
         # Step 7: Send thinking placeholder
@@ -541,7 +542,7 @@ async def handle_message(
             elapsed,
         )
 
-        await db.log_token_usage(boss_chat_id, "chat", total_prompt, total_completion, total_tokens)
+        await db.log_token_usage(ctx.boss_chat_id, "chat", total_prompt, total_completion, total_tokens)
 
     except Exception:
         logger.exception("%s Error handling message", log_prefix)
