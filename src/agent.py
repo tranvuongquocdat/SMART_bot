@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from src import context, db
+from src import context, db, identity
 from src.config import Settings
 from src.context import ChatContext
 from src.services import lark, openai_client, qdrant, telegram
@@ -222,6 +222,19 @@ async def handle_message(
     new_members = new_members or []
 
     logger.info("%s >>> INPUT: %s", log_prefix, text[:200])
+
+    # Fire-and-forget: harvest chat_ids observed in this update.
+    # Index only — must not block or crash message flow.
+    sender_dict = {"id": sender_id, "name": sender_name, "username": ""} if sender_id else None
+    asyncio.create_task(
+        identity.harvest(
+            context_chat_id=chat_id,
+            sender=sender_dict,
+            mentions=mentions,
+            reply_to=reply_to,
+            new_members=new_members,
+        )
+    )
 
     try:
         # ------------------------------------------------------------------
