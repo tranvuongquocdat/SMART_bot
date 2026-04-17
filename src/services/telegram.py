@@ -21,15 +21,23 @@ async def init_telegram(token: str):
 
 
 async def send(chat_id: int, text: str, parse_mode: str = "Markdown") -> int | None:
-    """Send message, return message_id."""
-    resp = await _client.post(
-        f"{API}/bot{_token}/sendMessage",
-        json={"chat_id": chat_id, "text": text, "parse_mode": parse_mode},
-    )
+    """Send message, return message_id. Falls back to plain text on Markdown parse errors."""
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
+    resp = await _client.post(f"{API}/bot{_token}/sendMessage", json=payload)
     data = resp.json()
     if data.get("ok"):
         return data["result"]["message_id"]
-    logger.warning("sendMessage failed: %s", data)
+    desc = (data.get("description") or "").lower()
+    if parse_mode and ("can't parse" in desc or "parse entities" in desc):
+        logger.warning("sendMessage Markdown failed, retrying plain: %s", desc)
+        payload["parse_mode"] = ""
+        resp2 = await _client.post(f"{API}/bot{_token}/sendMessage", json=payload)
+        data2 = resp2.json()
+        if data2.get("ok"):
+            return data2["result"]["message_id"]
+        logger.warning("sendMessage plain retry also failed: %s", data2)
+    else:
+        logger.warning("sendMessage failed: %s", data)
     return None
 
 
@@ -38,18 +46,23 @@ send_message = send
 
 
 async def edit_message(chat_id: int, message_id: int, text: str, parse_mode: str = "Markdown"):
-    """Edit existing message via editMessageText API."""
-    resp = await _client.post(
-        f"{API}/bot{_token}/editMessageText",
-        json={
-            "chat_id": chat_id,
-            "message_id": message_id,
-            "text": text,
-            "parse_mode": parse_mode,
-        },
-    )
+    """Edit existing message via editMessageText API. Falls back to plain text on Markdown parse errors."""
+    payload = {"chat_id": chat_id, "message_id": message_id, "text": text, "parse_mode": parse_mode}
+    resp = await _client.post(f"{API}/bot{_token}/editMessageText", json=payload)
     data = resp.json()
-    if not data.get("ok"):
+    if data.get("ok"):
+        return
+    desc = (data.get("description") or "").lower()
+    # Telegram Markdown parse errors → retry plain text so the message still delivers
+    if parse_mode and ("can't parse" in desc or "parse entities" in desc):
+        logger.warning("editMessageText Markdown failed, retrying plain: %s", desc)
+        payload["parse_mode"] = ""
+        resp2 = await _client.post(f"{API}/bot{_token}/editMessageText", json=payload)
+        data2 = resp2.json()
+        if data2.get("ok"):
+            return
+        logger.warning("editMessageText plain retry also failed: %s", data2)
+    else:
         logger.warning("editMessageText failed: %s", data)
 
 

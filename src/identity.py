@@ -96,7 +96,24 @@ async def resolve_candidates(
         return []
 
     q_lower = q.lower()
+    q_tokens = {t for t in q_lower.split() if t}
     is_numeric_id = q.isdigit()
+
+    def _name_match(text: str) -> str | None:
+        """Bidirectional + token-level match. 'Linh' matches 'Nguyên Linh' and vice versa."""
+        if not text:
+            return None
+        t = text.lower().strip()
+        if q_lower == t:
+            return "exact_name"
+        # Token overlap — handles shortened / rearranged names
+        t_tokens = {tok for tok in t.split() if tok}
+        if q_tokens & t_tokens:
+            return "partial_name"
+        # Substring either direction — handles single-word names without space
+        if q_lower in t or t in q_lower:
+            return "partial_name"
+        return None
 
     results: list[dict] = []
 
@@ -128,14 +145,13 @@ async def resolve_candidates(
             confidence = None
             if is_numeric_id and chat_id_val and str(chat_id_val) == q:
                 confidence = "exact_id"
-            elif q_lower == full.lower() or (nick and q_lower == nick.lower()):
-                confidence = "exact_name"
-            elif q_lower in full.lower():
-                confidence = "partial_name"
-            elif nick and q_lower in nick.lower():
-                confidence = "nickname_match"
-            elif note and q_lower in note.lower():
-                confidence = "nickname_match"
+            else:
+                confidence = _name_match(full) or _name_match(nick)
+                if not confidence and note:
+                    # Note may contain the person's alias — match tokens against note text
+                    note_tokens = {tok.strip(".,;:()[]'\"") for tok in note.lower().split()}
+                    if q_tokens & note_tokens:
+                        confidence = "nickname_match"
 
             if not confidence:
                 continue
@@ -161,13 +177,10 @@ async def resolve_candidates(
     for r in boss_rows:
         name = str(r["name"] or "")
         cid = int(r["chat_id"])
-        confidence = None
         if is_numeric_id and str(cid) == q:
             confidence = "exact_id"
-        elif q_lower == name.lower():
-            confidence = "exact_name"
-        elif q_lower in name.lower():
-            confidence = "partial_name"
+        else:
+            confidence = _name_match(name)
         if not confidence:
             continue
         results.append({
@@ -198,13 +211,10 @@ async def resolve_candidates(
             cid = None
         if cid is None:
             continue
-        confidence = None
         if is_numeric_id and str(cid) == q:
             confidence = "exact_id"
-        elif q_lower == name.lower():
-            confidence = "exact_name"
-        elif q_lower in name.lower():
-            confidence = "partial_name"
+        else:
+            confidence = _name_match(name)
         if not confidence:
             continue
         try:
@@ -235,13 +245,10 @@ async def resolve_candidates(
         cid = int(r["chat_id"])
         dname = str(r.get("display_name") or "")
         uname = str(r.get("username") or "")
-        confidence = None
         if is_numeric_id and str(cid) == q:
             confidence = "exact_id"
-        elif q_lower == dname.lower() or (uname and q_lower == uname.lower()):
-            confidence = "exact_name"
-        elif q_lower in dname.lower() or (uname and q_lower in uname.lower()):
-            confidence = "partial_name"
+        else:
+            confidence = _name_match(dname) or _name_match(uname)
         if not confidence:
             continue
         results.append({
