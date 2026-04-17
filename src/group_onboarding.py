@@ -22,7 +22,7 @@ _GROUP_COLLECTOR_PROMPT = """\
 You are helping set up a Telegram group for an AI secretary system.
 Extract fields from the user's message and generate a natural Vietnamese reply.
 
-## Current state
+## Current state (GROUND TRUTH — do not contradict)
 {state_json}
 
 ## Available workspaces
@@ -31,13 +31,29 @@ Extract fields from the user's message and generate a natural Vietnamese reply.
 ## Available projects (empty = not loaded yet)
 {project_list}
 
-## Rules
-- "boss_chat_id": if user selects a workspace by number or name, return that workspace's chat_id (integer).
-- "project_id": if user selects a project by number or name, return its record_id (string). If user says no specific project → return "none".
-- "load_projects": return true if boss_chat_id was just set and projects list is empty — tells caller to load projects before next turn.
-- "confirmed": true if user explicitly confirms; false if cancels.
-- If boss_chat_id and project_id are both set and confirmed is null: ask for confirmation.
-- Write reply in Vietnamese, concisely.
+## State-aware rules (STRICT — follow before any other rule)
+- If state.boss_chat_id is NOT null: NEVER ask workspace selection again. The workspace is already chosen. Move to the next step.
+- If state.project_id is NOT null: NEVER ask project selection again. The project is already chosen. Move to confirmation.
+- Step order:
+  1. boss_chat_id null            → ask workspace
+  2. boss_chat_id set, projects empty → reply "Đang load danh sách project..." and set load_projects=true
+  3. boss_chat_id set, projects loaded, project_id null → ask project
+  4. boss_chat_id + project_id set, confirmed null → ASK FOR CONFIRMATION (summarize workspace + project, ask "Đồng ý tạo không?")
+  5. confirmed true → acknowledge, setup sẽ hoàn tất
+
+## Extraction rules
+- "boss_chat_id": integer — if user picks workspace by number or name. Null if ambiguous.
+- "project_id": Lark record_id string — if user picks project. Return "none" if user explicitly says no project. Null if ambiguous.
+- "load_projects": true only right after boss_chat_id is freshly set and projects list is empty.
+- "confirmed":
+    - true: explicit yes ("ok", "uh", "đúng", "yes", "được", "ừ", "đồng ý", "tạo đi", "confirm")
+    - false: explicit no ("không", "sai", "huỷ", "cancel", "làm lại")
+    - null: otherwise
+- NEVER overwrite an existing non-null state field with null.
+
+## Reply rules
+- Write concise Vietnamese.
+- If user's message is completely off-topic (not about workspace/project/confirmation), briefly acknowledge and steer back to the currently pending step.
 
 Return ONLY valid JSON:
 {{
@@ -52,7 +68,13 @@ Return ONLY valid JSON:
 """
 
 
-async def _group_collector(session: dict, text: str, boss_list: str, project_list: str) -> dict:
+async def _group_collector(
+    session: dict,
+    text: str,
+    boss_list: str,
+    project_list: str,
+    group_chat_id: int,
+) -> dict:
     state_copy = {
         k: v for k, v in session.items()
         if k not in ("bosses", "projects", "sender_id")
@@ -62,8 +84,15 @@ async def _group_collector(session: dict, text: str, boss_list: str, project_lis
         boss_list=boss_list,
         project_list=project_list or "Chưa load.",
     )
+    # Load last 10 messages of this group so LLM sees the onboarding dialogue flow
+    recent = await db.get_recent(group_chat_id, limit=10)
+    history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in recent if m.get("content")
+    ]
     messages = [
         {"role": "system", "content": prompt},
+        *history,
         {"role": "user", "content": text},
     ]
     response, _ = await openai_client.chat_with_tools(messages, [])
@@ -186,7 +215,7 @@ async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
         ) + f"\n{len(projects)+1}. Không thuộc dự án cụ thể"
     ) if projects else ""
 
-    result = await _group_collector(session, text, boss_list, project_list)
+    result = await _group_collector(session, text, boss_list, project_list, group_chat_id)
     extracted = result.get("extracted", {})
     reply = result.get("reply", "")
 

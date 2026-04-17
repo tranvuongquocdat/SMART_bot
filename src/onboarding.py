@@ -44,24 +44,33 @@ _COLLECTOR_PROMPT = """\
 You are a smart onboarding assistant for an AI secretary app.
 Extract structured fields from the user's message and generate a natural reply.
 
-## Current collected state
+## Current collected state (GROUND TRUTH — do not contradict)
 {state_json}
 
 ## Available workspaces (for member/partner to join)
 {boss_list}
 
+## State-aware rules (STRICT — follow before any other rule)
+- If a field in state is NOT null, NEVER ask for it again. Move to the next missing field.
+- Step order for boss path: type → name → company → language → confirm
+- Step order for member/partner path: type → name → language → target_boss_id → confirm
+- When all required fields are set and confirmed is null: SUMMARIZE collected info and ASK FOR CONFIRMATION once.
+
 ## Extraction rules
 - "type": sếp/giám đốc/chủ → "boss"; nhân viên/thành viên → "member"; đối tác/partner/freelancer → "partner"
 - "language": infer from the user's own writing style if not stated — Vietnamese → "vi", English → "en". Default "vi".
 - "target_boss_id": if user mentions a boss name or company, match against available workspaces; return their chat_id (integer). Return null if no match or ambiguous.
-- "confirmed": set to true if the user is explicitly confirming ("ok", "đúng rồi", "tạo đi", "xác nhận"); false if cancelling ("không", "sai", "hủy", "làm lại"). null otherwise.
-- Never overwrite an existing non-null field with null.
+- "confirmed":
+    - true: explicit yes ("ok", "uh", "đúng", "đúng rồi", "tạo đi", "xác nhận", "yes", "được", "ừ", "đồng ý", "confirm")
+    - false: explicit no ("không", "sai", "hủy", "làm lại", "cancel")
+    - null: otherwise
+- NEVER overwrite an existing non-null state field with null.
 
 ## Reply rules
 - Write naturally in the user's inferred language.
-- Ask ONLY for fields still missing. Priority: type → name → company (boss) or target workspace (member/partner).
-- If all required fields for the detected type are present and confirmed is null: summarize and ask for confirmation.
+- Ask ONLY for the NEXT missing field (see step order). Do not re-ask fields already set.
 - If confirmed is true: acknowledge and say you are creating the workspace / sending the request.
+- If user's message is off-topic (not about onboarding), briefly acknowledge and steer back to the pending step.
 
 Return ONLY valid JSON:
 {{
@@ -78,14 +87,21 @@ Return ONLY valid JSON:
 """
 
 
-async def _collector(state: dict, text: str, boss_list: str) -> dict:
+async def _collector(state: dict, text: str, boss_list: str, chat_id: int) -> dict:
     state_copy = {k: v for k, v in state.items() if k != "first"}
     prompt = _COLLECTOR_PROMPT.format(
         state_json=json.dumps(state_copy, ensure_ascii=False),
         boss_list=boss_list or "Chưa có workspace nào.",
     )
+    # Load last 10 messages of this DM so LLM sees onboarding dialogue flow
+    recent = await db.get_recent(chat_id, limit=10)
+    history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in recent if m.get("content")
+    ]
     messages = [
         {"role": "system", "content": prompt},
+        *history,
         {"role": "user", "content": text},
     ]
     response, _ = await openai_client.chat_with_tools(messages, [])
@@ -319,7 +335,7 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
         for b in all_bosses
     )
 
-    result = await _collector(state, text, boss_list)
+    result = await _collector(state, text, boss_list, chat_id)
     extracted = result.get("extracted", {})
     reply = result.get("reply", "")
 
