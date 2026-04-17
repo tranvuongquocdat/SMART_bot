@@ -1110,8 +1110,14 @@ async def list_unlinked_seen_contacts(
         (f"-{days} days", limit * 3),
     ) as cur:
         rows = await cur.fetchall()
-    filtered = [dict(r) for r in rows if dict(r)["chat_id"] not in lark_people_chat_ids]
-    return filtered[:limit]
+    filtered: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        if d["chat_id"] not in lark_people_chat_ids:
+            filtered.append(d)
+            if len(filtered) >= limit:
+                break
+    return filtered
 
 
 # ---------------------------------------------------------------------------
