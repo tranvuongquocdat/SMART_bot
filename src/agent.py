@@ -208,9 +208,18 @@ async def handle_message(
     is_group: bool,
     bot_mentioned: bool,
     group_name: str = "",
+    *,
+    sender_name: str = "",
+    mentions: list[dict] | None = None,
+    username_mentions: list[str] | None = None,
+    reply_to: dict | None = None,
+    new_members: list[dict] | None = None,
 ):
     start_time = time.time()
     log_prefix = f"[chat:{chat_id} sender:{sender_id}]"
+    mentions = mentions or []
+    username_mentions = username_mentions or []
+    new_members = new_members or []
 
     logger.info("%s >>> INPUT: %s", log_prefix, text[:200])
 
