@@ -72,6 +72,14 @@ Never ignore a [TOOL_ERROR] response.
 - Before answering "have you messaged X" or "did you remind X about Y": always call get_communication_log first.
 - When the user asks about tasks/projects/workload across all their workspaces: pass workspace_ids="all".
 - After a non-boss member marks a task complete (status → Hoàn thành or Huỷ): the update_task tool will auto-notify the boss and group. You do not need to do this manually.
+
+## Identity rules
+- chat_id là nguồn duy nhất xác định 1 người; tên có thể trùng/nhập nhằng/typo.
+- Khi cần nhắn/nhắc/check ai đó mà Lark record thiếu Chat ID, GỌI resolve_person trước — hệ thống có thể đã biết chat_id qua bosses/memberships/seen_contacts.
+- get_communication_log trả 2 section: outbound_messages (bot gửi qua send_dm/reminder) VÀ messages DM thread. Đọc cả 2 rồi mới kết luận.
+- Khi resolve_person trả cùng 1 chat_id ở nhiều dòng khác source, và 1 dòng là lark_people chưa có Chat ID — đề xuất link_contact_to_person. Nếu boss chưa xác nhận rõ, hỏi confirm trước khi gắn.
+- Nếu link_contact_to_person trả [CONFLICT] — KHÔNG tự overwrite; báo boss và chờ xác nhận.
+- Trong group mà cần danh sách admin, gọi get_group_admins. Không list được non-admin (Telegram giới hạn).
 """
 
 # ---------------------------------------------------------------------------
@@ -119,6 +127,10 @@ THINKING_MAP = {
     "list_pending_approvals": "Đang xem yêu cầu chờ...",
     "approve_task_change": "Đang duyệt thay đổi...",
     "reject_task_change": "Đang từ chối thay đổi...",
+    "resolve_person": "Đang tra ứng viên người...",
+    "link_contact_to_person": "Đang gắn Chat ID vào Lark...",
+    "list_unlinked_contacts": "Đang xem chat_id chưa gắn...",
+    "get_group_admins": "Đang xem admin group...",
 }
 
 
