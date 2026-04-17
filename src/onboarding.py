@@ -20,6 +20,15 @@ from src.services import telegram as tg
 
 logger = logging.getLogger("onboarding")
 
+
+async def _send_and_save(chat_id: int, text: str) -> None:
+    """Send reply to DM and persist as assistant message so next turn has history."""
+    await telegram.send(chat_id, text)
+    try:
+        await db.save_message(chat_id, "assistant", text, None)
+    except Exception:
+        logger.warning("save_message (assistant) failed", exc_info=True)
+
 # join flow state: {chat_id: {"step": str, ...}} — short-lived, in-memory is fine
 _join_sessions: dict[int, dict] = {}
 
@@ -326,7 +335,7 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
     if is_first:
         await db.save_onboarding_state(chat_id, state)
         greeting = await _greeting()
-        await telegram.send(chat_id, greeting)
+        await _send_and_save(chat_id, greeting)
         return
 
     all_bosses = await db.get_all_bosses()
@@ -350,7 +359,7 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
     if user_type == "boss" and _boss_fields_complete(state):
         confirmed = state.get("confirmed")
         if confirmed is True:
-            await telegram.send(chat_id, reply)
+            await _send_and_save(chat_id, reply)
             await _complete_boss(chat_id, state)
             return
         elif confirmed is False:
@@ -359,18 +368,18 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
                 "type": None, "name": None, "company": None,
                 "language": None, "confirmed": None,
             })
-            await telegram.send(chat_id, reply)
+            await _send_and_save(chat_id, reply)
             return
         # confirmed is None — reply already contains confirmation prompt
 
     # Member/partner path completion
     if user_type in ("member", "partner") and _member_fields_complete(state):
-        await telegram.send(chat_id, reply)
+        await _send_and_save(chat_id, reply)
         await _complete_member(chat_id, state)
         return
 
     await db.save_onboarding_state(chat_id, state)
-    await telegram.send(chat_id, reply)
+    await _send_and_save(chat_id, reply)
 
 
 # ---------------------------------------------------------------------------

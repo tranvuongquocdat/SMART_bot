@@ -14,6 +14,15 @@ from src.services import lark, openai_client, telegram
 
 logger = logging.getLogger("group_onboarding")
 
+
+async def _send_and_save(group_chat_id: int, text: str) -> None:
+    """Send reply to group and persist as assistant message so next turn has history."""
+    await telegram.send(group_chat_id, text)
+    try:
+        await db.save_message(group_chat_id, "assistant", text, None)
+    except Exception:
+        logger.warning("save_message (assistant) failed", exc_info=True)
+
 # ---------------------------------------------------------------------------
 # LLM collector
 # ---------------------------------------------------------------------------
@@ -121,7 +130,7 @@ async def _complete_group(group_chat_id: int, group_name: str, session: dict) ->
         None,
     )
     if not boss:
-        await telegram.send(group_chat_id, "Lỗi: không tìm được workspace. Tag em lại nhé.")
+        await _send_and_save(group_chat_id, "Lỗi: không tìm được workspace. Tag em lại nhé.")
         return
 
     raw_project_id = session.get("project_id")
@@ -137,7 +146,7 @@ async def _complete_group(group_chat_id: int, group_name: str, session: dict) ->
     await db.update_note(boss["chat_id"], "group", str(group_chat_id), initial_note)
     await db.clear_onboarding_state(group_chat_id)
 
-    await telegram.send(
+    await _send_and_save(
         group_chat_id,
         f"Xong! Em đã được link vào *{boss['company']}*.\n\n"
         "Các bạn chưa đăng ký với em, nhắn */start* để em nhận ra trong nhóm nhé. "
@@ -162,7 +171,7 @@ async def start(group_chat_id: int, sender_id: int) -> None:
         member = await telegram.get_chat_member(group_chat_id, bot_id)
         status = member.get("status", "")
         if status not in ("administrator", "creator"):
-            await telegram.send(
+            await _send_and_save(
                 group_chat_id,
                 "Để em hoạt động đầy đủ trong nhóm, nhờ admin promote em lên làm *Administrator*:\n"
                 "Settings → Administrators → Add Administrator → chọn @bot\n\n"
@@ -172,7 +181,7 @@ async def start(group_chat_id: int, sender_id: int) -> None:
 
     bosses = await db.get_all_bosses()
     if not bosses:
-        await telegram.send(
+        await _send_and_save(
             group_chat_id,
             "Chưa có workspace nào được đăng ký. Nhờ sếp đăng ký với bot trước nhé.",
         )
@@ -181,7 +190,7 @@ async def start(group_chat_id: int, sender_id: int) -> None:
     lines = ["Nhóm này thuộc workspace nào?\n"]
     for i, b in enumerate(bosses, 1):
         lines.append(f"{i}. {b['company']} (sếp: {b['name']})")
-    await telegram.send(group_chat_id, "\n".join(lines))
+    await _send_and_save(group_chat_id, "\n".join(lines))
 
     await db.save_onboarding_state(group_chat_id, {
         "step": "collecting",
@@ -245,13 +254,13 @@ async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
     confirmed = session.get("confirmed")
 
     if boss_set and project_set and confirmed is True:
-        await telegram.send(group_chat_id, reply)
+        await _send_and_save(group_chat_id, reply)
         await _complete_group(group_chat_id, group_name, session)
         return
     elif confirmed is False:
         await db.clear_onboarding_state(group_chat_id)
-        await telegram.send(group_chat_id, "Đã huỷ. Tag em lại khi muốn setup nhé.")
+        await _send_and_save(group_chat_id, "Đã huỷ. Tag em lại khi muốn setup nhé.")
         return
 
     await db.save_onboarding_state(group_chat_id, session)
-    await telegram.send(group_chat_id, reply)
+    await _send_and_save(group_chat_id, reply)

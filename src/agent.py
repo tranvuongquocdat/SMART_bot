@@ -354,6 +354,11 @@ async def handle_message(
 
             # Bot mentioned — if group not registered, run group onboarding
             if not group_info:
+                # Save inbound user message so onboarding collector can load it as history.
+                try:
+                    await db.save_message(chat_id, "user", text, sender_id)
+                except Exception:
+                    logger.warning("%s save_message (onboarding user) failed", log_prefix, exc_info=True)
                 from src import group_onboarding  # noqa: PLC0415
                 if await group_onboarding.is_group_onboarding(chat_id):
                     await group_onboarding.handle(text, chat_id, group_name)
@@ -377,6 +382,11 @@ async def handle_message(
         if ctx is None:
             # Unknown user — trigger onboarding state machine
             from src import onboarding  # noqa: PLC0415
+            # Save inbound user message so onboarding collector can load it as history.
+            try:
+                await db.save_message(chat_id, "user", text, sender_id)
+            except Exception:
+                logger.warning("%s save_message (DM onboarding user) failed", log_prefix, exc_info=True)
             if not await onboarding.is_onboarding(chat_id):
                 await onboarding.start_onboarding(chat_id)
             await onboarding.handle_onboard_message(text, chat_id)
