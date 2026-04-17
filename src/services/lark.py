@@ -244,7 +244,10 @@ async def search_records(base_token: str, table_id: str, filter_expr: str = "") 
         params=params,
     )
     resp.raise_for_status()
-    data = resp.json().get("data", {})
+    body = resp.json()
+    if body.get("code") != 0:
+        raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
+    data = body.get("data", {})
     items = data.get("items", [])
     return [{"record_id": r["record_id"], **r["fields"]} for r in items]
 
@@ -256,7 +259,10 @@ async def update_record(base_token: str, table_id: str, record_id: str, fields: 
         json={"fields": fields},
     )
     resp.raise_for_status()
-    return resp.json()["data"]["record"]
+    body = resp.json()
+    if body.get("code") != 0:
+        raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
+    return body["data"]["record"]
 
 
 async def delete_record(base_token: str, table_id: str, record_id: str):
