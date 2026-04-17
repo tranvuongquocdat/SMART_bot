@@ -105,3 +105,7 @@ Các case cần check lại xem đã oke chưa:
 - @ceo_companion_bot 9h30 sáng nay nhắn tin riêng nhắc chị test bot -> bot có khả năng tự nhận biết và phân bổ khi nhắc nhở thì nhắc vào đâu ko?
 - Nhắc Linh vụ sáng nay chưa -> tool có đủ khả năng cho phép bot tự lấy thông tin Linh là ai, sáng nay có vụ gì và nhắc chính xác chưa??
 - Cho tôi 1 file .md miêu tả các tool hiện có, description, các thông tin liên quan, chia theo các cụm để tôi xem xem đã có đủ Chưa
+
+
+Bug:
+
