@@ -84,3 +84,24 @@ Quan tâm tới multi workspace:
 - vd bảo check xem Bách làm xong việc chưa, nếu có nhiều Bách ở nhiều workspace, cần check được và hỏi confirm lại
 - bảo là check tôi còn những task nào, nêu tôi ở nhiều workspace thì có thể xử lý được
 - vd hỏi trong group kiểm tra task của mọi người, đã có đủ tool để lấy được task phù hợp và tự filter theo ý muốn của agent chưa
+
+
+Note update:
+- Khi giao task, reminder, nếu người đó chưa nhắn với bot, thì trace task và reminder luôn trong nhóm, đến lúc nhắc nhở thì tag người cần nhắc và nhắc việc
+- Hiện tại đang có lỗi đồng bộ
+
+- Bug mạnh:
+- Khi chat trong group bảo thêm/ bớt người, reminder, chỉnh thông tin project,... đều ko được đồng bộ lên lark, mà bot lại báo thành công
+- Lark luôn là cái được ưu tiên, DB là phụ, đừng check theo DB, bắt buộc phải check theo lark
+
+
+Nguyên tắc thiết kế agent prompt và tool:
+robust theo dự án hiện tại và flow tool ko bị break code và logic structure hiện tại chưa, 
+
+Nhớ tiêu chí: tối đa hoá khả năng tư duy của agent, và tối thiểu hoá việc giới hạn flow agent
+
+
+Các case cần check lại xem đã oke chưa:
+- @ceo_companion_bot 9h30 sáng nay nhắn tin riêng nhắc chị test bot -> bot có khả năng tự nhận biết và phân bổ khi nhắc nhở thì nhắc vào đâu ko?
+- Nhắc Linh vụ sáng nay chưa -> tool có đủ khả năng cho phép bot tự lấy thông tin Linh là ai, sáng nay có vụ gì và nhắc chính xác chưa??
+- Cho tôi 1 file .md miêu tả các tool hiện có, description, các thông tin liên quan, chia theo các cụm để tôi xem xem đã có đủ Chưa

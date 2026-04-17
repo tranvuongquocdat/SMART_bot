@@ -57,18 +57,21 @@ async def start_polling(on_message):
     """
     Long polling loop.
 
-    on_message callback signature: (text, chat_id, sender_id, is_group, bot_mentioned, group_name)
-    - text: message text
-    - chat_id: conversation id (user or group)
-    - sender_id: who sent (from.id)
-    - is_group: True if chat.type is "group" or "supergroup"
-    - bot_mentioned: True if @bot_username appears in text
-    - group_name: group title (empty string for DMs)
+    on_message callback signature (backward-compatible qua kwargs):
+        on_message(text, chat_id, sender_id, is_group, bot_mentioned, group_name,
+                   *, sender_name="", mentions=None, username_mentions=None,
+                   reply_to=None, new_members=None)
+
+    New kwargs:
+      sender_name: display name from message.from
+      mentions: [{id, name, username}] từ entities type=text_mention
+      username_mentions: [str] — @username text chưa resolve user_id
+      reply_to: {id, name, username} or None
+      new_members: [{id, name, username}] từ new_chat_members
     """
     global _polling
     _polling = True
 
-    # Resolve bot username once for mention detection
     me_resp = await _client.get(f"{API}/bot{_token}/getMe")
     bot_username = me_resp.json().get("result", {}).get("username", "")
     logger.info("Polling started as @%s", bot_username)
@@ -90,29 +93,90 @@ async def start_polling(on_message):
                 text = message.get("text", "")
                 chat = message.get("chat", {})
                 chat_id = chat.get("id")
-                sender_id = message.get("from", {}).get("id")
+                from_user = message.get("from", {}) or {}
+                sender_id = from_user.get("id")
                 chat_type = chat.get("type", "")
 
-                if not (text and chat_id):
+                new_members_raw = message.get("new_chat_members", []) or []
+
+                if not chat_id:
+                    continue
+                if not text and not new_members_raw:
                     continue
 
                 is_group = chat_type in ("group", "supergroup")
-                bot_mentioned = bool(bot_username) and f"@{bot_username}" in text
+                bot_mentioned = bool(bot_username) and f"@{bot_username}" in (text or "")
                 group_name = chat.get("title", "") if is_group else ""
+
+                # --- Harvest identity data from update ---
+                sender_name = _full_name(from_user)
+
+                mentions: list[dict] = []
+                username_mentions: list[str] = []
+                for ent in (message.get("entities") or []):
+                    etype = ent.get("type")
+                    if etype == "text_mention":
+                        u = ent.get("user", {}) or {}
+                        if u.get("id"):
+                            mentions.append({
+                                "id": u["id"],
+                                "name": _full_name(u),
+                                "username": u.get("username", ""),
+                            })
+                    elif etype == "mention":
+                        off = ent.get("offset", 0)
+                        length = ent.get("length", 0)
+                        mention_text = (text or "")[off:off + length].lstrip("@")
+                        if mention_text:
+                            username_mentions.append(mention_text)
+
+                reply_to = None
+                rt = message.get("reply_to_message", {})
+                if rt:
+                    rt_from = rt.get("from", {}) or {}
+                    if rt_from.get("id"):
+                        reply_to = {
+                            "id": rt_from["id"],
+                            "name": _full_name(rt_from),
+                            "username": rt_from.get("username", ""),
+                        }
+
+                new_members: list[dict] = []
+                for m in new_members_raw:
+                    if m.get("is_bot"):
+                        continue
+                    if m.get("id"):
+                        new_members.append({
+                            "id": m["id"],
+                            "name": _full_name(m),
+                            "username": m.get("username", ""),
+                        })
 
                 logger.info(
                     "[chat:%s type:%s sender:%s] Received: %s",
-                    chat_id, chat_type, sender_id, text[:100],
+                    chat_id, chat_type, sender_id, (text or "")[:100],
                 )
                 asyncio.create_task(
-                    on_message(text, chat_id, sender_id, is_group, bot_mentioned, group_name)
+                    on_message(
+                        text or "", chat_id, sender_id, is_group, bot_mentioned, group_name,
+                        sender_name=sender_name,
+                        mentions=mentions,
+                        username_mentions=username_mentions,
+                        reply_to=reply_to,
+                        new_members=new_members,
+                    )
                 )
 
         except httpx.ReadTimeout:
-            continue  # normal for long polling
+            continue
         except Exception:
             logger.exception("Polling error, retrying in 3s")
             await asyncio.sleep(3)
+
+
+def _full_name(user: dict) -> str:
+    """Join first_name + last_name, stripped."""
+    return (f"{user.get('first_name', '')} {user.get('last_name', '')}").strip()
 
 
 async def get_chat_member(chat_id: int, user_id: int) -> dict:
@@ -228,3 +292,45 @@ async def close_telegram():
     stop_polling()
     if _client:
         await _client.aclose()
+
+
+# --- Admin list cache (10 min TTL) ---
+_admins_cache: dict[int, tuple[float, list[dict]]] = {}
+_ADMIN_TTL = 600  # seconds
+
+
+async def get_chat_administrators(chat_id: int) -> list[dict]:
+    """
+    Returns list of admin members: [{user_id, name, username, status}, ...].
+    Cached per-chat for 10 minutes.
+    Privacy note: bot không list được non-admin members (Telegram API limit).
+    """
+    import time as _time
+    now = _time.time()
+    cached = _admins_cache.get(chat_id)
+    if cached and now - cached[0] < _ADMIN_TTL:
+        return cached[1]
+
+    resp = await _client.post(
+        f"{API}/bot{_token}/getChatAdministrators",
+        json={"chat_id": chat_id},
+        timeout=10,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        logger.warning("getChatAdministrators failed for %s: %s", chat_id, data)
+        return []
+
+    result = []
+    for m in data.get("result", []):
+        user = m.get("user", {})
+        if user.get("is_bot"):
+            continue
+        result.append({
+            "user_id": user.get("id"),
+            "name": (user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
+            "username": user.get("username", ""),
+            "status": m.get("status", ""),
+        })
+    _admins_cache[chat_id] = (now, result)
+    return result

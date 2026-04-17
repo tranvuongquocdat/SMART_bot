@@ -1025,6 +1025,77 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_person",
+            "description": (
+                "Tra tất cả ứng viên người khớp query (tên/nickname/chat_id). "
+                "Trả về nhiều nguồn: lark_people, bosses, memberships, seen_contacts — kèm source tag. "
+                "GỌI TRƯỚC khi trả 'không tìm thấy X' hoặc 'X chưa có Chat ID' — "
+                "có thể hệ thống đã biết chat_id của X qua nguồn khác."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Tên, nickname, hoặc chat_id số"},
+                    "workspace_ids": {"type": "string", "description": "\"current\" (mặc định) | \"all\""},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "link_contact_to_person",
+            "description": (
+                "Gắn chat_id vào trường Chat ID của 1 Lark People record đang thiếu. "
+                "Dùng khi xác định được seen_contacts/bosses chính là record Lark nào. "
+                "Fails loud nếu record đã có Chat ID khác — phải hỏi sếp xác nhận trước khi overwrite."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "chat_id": {"type": "integer", "description": "Chat ID Telegram (số) cần gắn"},
+                    "lark_record_id": {"type": "string", "description": "record_id của Lark People record đích"},
+                    "workspace_ids": {"type": "string"},
+                },
+                "required": ["chat_id", "lark_record_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_unlinked_contacts",
+            "description": (
+                "Liệt kê chat_id bot đã thấy trong group/DM (Telegram) nhưng CHƯA gắn "
+                "vào Lark People record nào của workspace hiện tại. Dùng khi sếp hỏi "
+                "'ai trong group mà chưa add', hoặc khi cần proactively propose linking."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "Xem trong N ngày qua (mặc định 30)"},
+                    "limit": {"type": "integer", "description": "Tối đa N mục (mặc định 30)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_group_admins",
+            "description": (
+                "Trả danh sách admin của group hiện tại kèm chat_id. "
+                "Chỉ chạy trong context group. Không list được non-admin members "
+                "(Telegram API không cho phép)."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
 ]
 
 
@@ -1191,6 +1262,14 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
             return await communication.broadcast(ctx, **args)
         case "get_communication_log":
             return await communication.get_communication_log(ctx, **args)
+        case "resolve_person":
+            return await communication.resolve_person(ctx, **args)
+        case "link_contact_to_person":
+            return await communication.link_contact_to_person(ctx, **args)
+        case "list_unlinked_contacts":
+            return await communication.list_unlinked_contacts(ctx, **args)
+        case "get_group_admins":
+            return await communication.get_group_admins(ctx, **args)
 
         # Workspace & language tools
         case "set_language":
