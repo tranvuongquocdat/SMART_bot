@@ -234,7 +234,10 @@ async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
         if val is not None:
             session[key] = val
 
-    # Load projects lazily when boss just selected
+    # Load projects lazily when boss just selected. The LLM reply was generated
+    # BEFORE this load finishes, so it typically says "Đang load..." — we override
+    # it with the actual project list below so the user sees options immediately.
+    just_loaded_projects = False
     if extracted.get("load_projects") and session.get("boss_chat_id") and not projects:
         boss = next((b for b in bosses if b["chat_id"] == session["boss_chat_id"]), None)
         if boss and boss.get("lark_table_projects"):
@@ -246,8 +249,21 @@ async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
                     {"name": r.get("Tên dự án", ""), "record_id": r["record_id"]}
                     for r in records if r.get("Tên dự án")
                 ]
+                just_loaded_projects = True
             except Exception:
                 logger.exception("Failed to load projects for boss %s", boss["chat_id"])
+
+    if just_loaded_projects and session.get("projects"):
+        company = next(
+            (b.get("company", "") for b in bosses if b["chat_id"] == session["boss_chat_id"]),
+            "workspace",
+        )
+        plines = [f"{i+1}. {p['name']}" for i, p in enumerate(session["projects"])]
+        plines.append(f"{len(session['projects'])+1}. Không thuộc dự án cụ thể")
+        reply = (
+            f"Đã chọn workspace *{company}*. Nhóm này thuộc project nào?\n"
+            + "\n".join(plines)
+        )
 
     boss_set = session.get("boss_chat_id") is not None
     project_set = session.get("project_id") is not None
