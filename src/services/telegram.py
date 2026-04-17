@@ -228,3 +228,45 @@ async def close_telegram():
     stop_polling()
     if _client:
         await _client.aclose()
+
+
+# --- Admin list cache (10 min TTL) ---
+_admins_cache: dict[int, tuple[float, list[dict]]] = {}
+_ADMIN_TTL = 600  # seconds
+
+
+async def get_chat_administrators(chat_id: int) -> list[dict]:
+    """
+    Returns list of admin members: [{user_id, name, username, status}, ...].
+    Cached per-chat for 10 minutes.
+    Privacy note: bot không list được non-admin members (Telegram API limit).
+    """
+    import time as _time
+    now = _time.time()
+    cached = _admins_cache.get(chat_id)
+    if cached and now - cached[0] < _ADMIN_TTL:
+        return cached[1]
+
+    resp = await _client.post(
+        f"{API}/bot{_token}/getChatAdministrators",
+        json={"chat_id": chat_id},
+        timeout=10,
+    )
+    data = resp.json()
+    if not data.get("ok"):
+        logger.warning("getChatAdministrators failed for %s: %s", chat_id, data)
+        return []
+
+    result = []
+    for m in data.get("result", []):
+        user = m.get("user", {})
+        if user.get("is_bot"):
+            continue
+        result.append({
+            "user_id": user.get("id"),
+            "name": (user.get("first_name", "") + " " + user.get("last_name", "")).strip(),
+            "username": user.get("username", ""),
+            "status": m.get("status", ""),
+        })
+    _admins_cache[chat_id] = (now, result)
+    return result
