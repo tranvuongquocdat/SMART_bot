@@ -100,7 +100,6 @@ THINKING_MAP = {
     "get_summary": "Đang tổng hợp...",
     "get_workload": "Đang xem workload...",
     "web_search": "Đang tìm kiếm web...",
-    "send_message": "Đang gửi tin nhắn...",
     "escalate_to_advisor": "Đang phân tích chiến lược...",
     "create_reminder": "Đang tạo nhắc nhở...",
     "list_reminders": "Đang xem nhắc nhở...",
@@ -131,6 +130,9 @@ THINKING_MAP = {
     "link_contact_to_person": "Đang gắn Chat ID vào Lark...",
     "list_unlinked_contacts": "Đang xem chat_id chưa gắn...",
     "get_group_admins": "Đang xem admin group...",
+    "summarize_group_conversation": "Đang tóm tắt group...",
+    "update_group_note": "Đang cập nhật note group...",
+    "broadcast_to_group": "Đang gửi thông báo vào group...",
 }
 
 

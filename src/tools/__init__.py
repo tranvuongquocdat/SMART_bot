@@ -9,7 +9,6 @@ from src.tools import (
     note,
     memory,
     summary,
-    messaging,
     reminder,
     review_config,
     web_search,
@@ -535,42 +534,24 @@ TOOL_DEFINITIONS = [
         },
     },
     # ------------------------------------------------------------------
-    # Messaging tools (1)
-    # ------------------------------------------------------------------
-    {
-        "type": "function",
-        "function": {
-            "name": "send_message",
-            "description": "Gửi tin nhắn Telegram thay sếp. Tra tên người nhận trong danh sách nhân sự để lấy Chat ID. Dùng khi: 'nhắn Bách mai 9h họp', 'gửi Linh file thiết kế'.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "to": {"type": "string", "description": "Tên người nhận (tìm gần đúng trong danh sách nhân sự)"},
-                    "content": {"type": "string", "description": "Nội dung tin nhắn gửi đi (viết hoàn chỉnh, lịch sự)"},
-                },
-                "required": ["to", "content"],
-            },
-        },
-    },
-    # ------------------------------------------------------------------
     # Reminder tools (4)
     # ------------------------------------------------------------------
     {
         "type": "function",
         "function": {
             "name": "create_reminder",
-            "description": "Tạo nhắc nhở vào một thời điểm cụ thể. Có thể nhắc sếp hoặc nhắc người khác trong team.",
+            "description": "Tạo nhắc nhở vào một thời điểm cụ thể. Khi giờ tới, bot tự gửi tin cho người nhận.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "content": {"type": "string", "description": "Nội dung nhắc nhở"},
                     "remind_at": {
                         "type": "string",
-                        "description": "Thời gian nhắc dạng YYYY-MM-DD HH:MM theo giờ địa phương (timezone app, mặc định Asia/Ho_Chi_Minh)",
+                        "description": "Thời gian nhắc, định dạng YYYY-MM-DD HH:MM (giờ địa phương, mặc định Asia/Ho_Chi_Minh). Tự convert từ natural language như '9h30 sáng nay' dùng current_time trong context.",
                     },
                     "target": {
                         "type": "string",
-                        "description": "Tên người cần nhắc. Để trống = nhắc sếp.",
+                        "description": "Ai nhận nhắc. Để TRỐNG nếu nhắc chính sếp (bot sẽ DM riêng sếp). Chỉ truyền tên NGƯỜI KHÁC (member/partner trong team) khi muốn nhắc người đó — KHÔNG truyền 'tôi'/'chị'/'anh'/'sếp'/tên boss vào đây.",
                     },
                 },
                 "required": ["content", "remind_at"],
@@ -1096,6 +1077,62 @@ TOOL_DEFINITIONS = [
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
+    # ------------------------------------------------------------------
+    # Group-context tools (3) — only usable when ctx.is_group = True
+    # ------------------------------------------------------------------
+    {
+        "type": "function",
+        "function": {
+            "name": "summarize_group_conversation",
+            "description": (
+                "Tóm tắt N tin nhắn gần nhất trong group hiện tại — theo 3 mục: "
+                "chủ đề chính, quyết định đã ra, action items chưa được giao. "
+                "Chỉ chạy trong context group."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "n_messages": {"type": "integer", "description": "Số tin nhắn lấy từ lịch sử group (mặc định 20)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_group_note",
+            "description": (
+                "Ghi/append vào group note — lưu quyết định, rule, context lặp lại của group. "
+                "Chỉ chạy trong context group. Dùng khi cần nhớ lâu điều đã thống nhất trong nhóm."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {"type": "string", "description": "Nội dung cần ghi vào note"},
+                    "append": {"type": "boolean", "description": "True = append vào note hiện có (mặc định); False = ghi đè"},
+                },
+                "required": ["content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "broadcast_to_group",
+            "description": (
+                "Gửi 1 tin nhắn công khai vào group hiện tại. Dùng cho thông báo team, "
+                "broadcast deadline, kết quả duyệt. Chỉ chạy trong context group."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "Nội dung thông báo"},
+                },
+                "required": ["message"],
+            },
+        },
+    },
 ]
 
 
@@ -1189,10 +1226,6 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
         case "create_idea":
             return await ideas.create_idea(ctx, **args)
 
-        # Messaging tools
-        case "send_message":
-            return await messaging.send_message(ctx, **args)
-
         # Reminder tools
         case "create_reminder":
             return await reminder.create_reminder(ctx, **args)
@@ -1270,6 +1303,14 @@ async def _dispatch_tool(name: str, args: dict, ctx: ChatContext) -> str:
             return await communication.list_unlinked_contacts(ctx, **args)
         case "get_group_admins":
             return await communication.get_group_admins(ctx, **args)
+
+        # Group-context tools
+        case "summarize_group_conversation":
+            return await group_tools.summarize_group_conversation(ctx, **args)
+        case "update_group_note":
+            return await group_tools.update_group_note(ctx, **args)
+        case "broadcast_to_group":
+            return await group_tools.broadcast_to_group(ctx, **args)
 
         # Workspace & language tools
         case "set_language":
