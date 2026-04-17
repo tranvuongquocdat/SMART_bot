@@ -540,7 +540,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_reminder",
-            "description": "Tạo nhắc nhở vào một thời điểm cụ thể. Khi giờ tới, bot tự gửi tin cho người nhận.",
+            "description": "Tạo nhắc nhở vào một thời điểm cụ thể. Khi giờ tới, bot tự gửi tin cho người nhận (DM riêng). Mỗi call tạo 1 reminder cho 1 đích (1 người hoặc sếp nếu target trống). Cần nhắc NHIỀU NGƯỜI (vd 'nhắc cả nhóm', 'nhắc team'): gọi tool này NHIỀU LẦN trong 1 turn — mỗi người một call, cùng `remind_at`. Trước khi gọi, dùng list_people / check_team_engagement để lấy danh sách tên có Chat ID.",
             "parameters": {
                 "type": "object",
                 "properties": {
