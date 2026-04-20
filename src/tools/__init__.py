@@ -87,7 +87,7 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "search_keyword": {"type": "string", "description": "Từ khóa tìm trong TÊN task (ví dụ: 'thiết kế logo')"},
+                    "search_keyword": {"type": "string", "description": "Substring của TÊN task (không phải cả câu user nói). Match bằng lowercase substring, không phải fuzzy/semantic — tự trích phần lõi từ câu user (vd user nói 'Task check bot đã xong' thì truyền 'check bot'). Nếu không match: thử keyword ngắn hơn hoặc gọi list_tasks/search_tasks để lấy tên chính xác."},
                     "status": {
                         "type": "string",
                         "enum": ["Mới", "Đang làm", "Hoàn thành", "Huỷ"],
@@ -114,7 +114,7 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "search_keyword": {"type": "string", "description": "Từ khóa tìm trong TÊN task cần xóa"},
+                    "search_keyword": {"type": "string", "description": "Substring của TÊN task. Match lowercase substring, không fuzzy — trích phần lõi từ câu user, không truyền cả câu."},
                 },
                 "required": ["search_keyword"],
             },

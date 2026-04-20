@@ -16,12 +16,8 @@ logger = logging.getLogger("group_onboarding")
 
 
 async def _send_and_save(group_chat_id: int, text: str) -> None:
-    """Send reply to group and persist as assistant message so next turn has history."""
+    """Send reply to group. telegram.send auto-persists as assistant message so next turn has history."""
     await telegram.send(group_chat_id, text)
-    try:
-        await db.save_message(group_chat_id, "assistant", text, None)
-    except Exception:
-        logger.warning("save_message (assistant) failed", exc_info=True)
 
 # ---------------------------------------------------------------------------
 # LLM collector

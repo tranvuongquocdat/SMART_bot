@@ -22,12 +22,8 @@ logger = logging.getLogger("onboarding")
 
 
 async def _send_and_save(chat_id: int, text: str) -> None:
-    """Send reply to DM and persist as assistant message so next turn has history."""
+    """Send reply to DM. telegram.send auto-persists as assistant message so next turn has history."""
     await telegram.send(chat_id, text)
-    try:
-        await db.save_message(chat_id, "assistant", text, None)
-    except Exception:
-        logger.warning("save_message (assistant) failed", exc_info=True)
 
 # join flow state: {chat_id: {"step": str, ...}} — short-lived, in-memory is fine
 _join_sessions: dict[int, dict] = {}

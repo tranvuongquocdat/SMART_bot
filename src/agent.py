@@ -434,7 +434,7 @@ async def handle_message(
         # ------------------------------------------------------------------
         # Step 7: Send thinking placeholder
         # ------------------------------------------------------------------
-        thinking_msg_id = await telegram.send(chat_id, "_Đang xử lý..._")
+        thinking_msg_id = await telegram.send(chat_id, "_Đang xử lý..._", save_history=False)
 
         # ------------------------------------------------------------------
         # Step 8: Agent loop (max MAX_TOOL_ROUNDS)
@@ -525,7 +525,8 @@ async def handle_message(
         if thinking_msg_id:
             await telegram.edit_message(chat_id, thinking_msg_id, reply_text)
         else:
-            await telegram.send(chat_id, reply_text)
+            # Explicit save_message below handles history — skip auto-save here.
+            await telegram.send(chat_id, reply_text, save_history=False)
 
         # ------------------------------------------------------------------
         # Step 10: Save assistant reply to DB + Qdrant

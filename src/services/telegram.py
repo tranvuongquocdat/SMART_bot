@@ -20,25 +20,46 @@ async def init_telegram(token: str):
     await _client.post(f"{API}/bot{_token}/deleteWebhook")
 
 
-async def send(chat_id: int, text: str, parse_mode: str = "Markdown") -> int | None:
-    """Send message, return message_id. Falls back to plain text on Markdown parse errors."""
+async def send(
+    chat_id: int,
+    text: str,
+    parse_mode: str = "Markdown",
+    save_history: bool = True,
+) -> int | None:
+    """Send message, return message_id. Falls back to plain text on Markdown parse errors.
+
+    When save_history is True (default), persist the outbound text to the `messages`
+    table as role='assistant' so it shows up in get_recent()-based context for
+    future turns. Pass save_history=False for transient placeholders.
+    """
     payload = {"chat_id": chat_id, "text": text, "parse_mode": parse_mode}
     resp = await _client.post(f"{API}/bot{_token}/sendMessage", json=payload)
     data = resp.json()
-    if data.get("ok"):
-        return data["result"]["message_id"]
-    desc = (data.get("description") or "").lower()
-    if parse_mode and ("can't parse" in desc or "parse entities" in desc):
-        logger.warning("sendMessage Markdown failed, retrying plain: %s", desc)
-        payload["parse_mode"] = ""
-        resp2 = await _client.post(f"{API}/bot{_token}/sendMessage", json=payload)
-        data2 = resp2.json()
-        if data2.get("ok"):
-            return data2["result"]["message_id"]
-        logger.warning("sendMessage plain retry also failed: %s", data2)
-    else:
-        logger.warning("sendMessage failed: %s", data)
-    return None
+    ok = data.get("ok")
+    message_id = data["result"]["message_id"] if ok else None
+    if not ok:
+        desc = (data.get("description") or "").lower()
+        if parse_mode and ("can't parse" in desc or "parse entities" in desc):
+            logger.warning("sendMessage Markdown failed, retrying plain: %s", desc)
+            payload["parse_mode"] = ""
+            resp2 = await _client.post(f"{API}/bot{_token}/sendMessage", json=payload)
+            data2 = resp2.json()
+            if data2.get("ok"):
+                message_id = data2["result"]["message_id"]
+                ok = True
+            else:
+                logger.warning("sendMessage plain retry also failed: %s", data2)
+        else:
+            logger.warning("sendMessage failed: %s", data)
+
+    if ok and save_history and chat_id and text:
+        try:
+            from src import db  # local import to avoid import cycle at module load
+            await db.save_message(chat_id, "assistant", text)
+        except Exception:
+            logger.warning("save_message after send failed", exc_info=True)
+
+    return message_id
 
 
 # Alias for compatibility
