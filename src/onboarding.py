@@ -333,7 +333,7 @@ async def _complete_member(chat_id: int, state: dict) -> None:
 async def is_onboarding(chat_id: int) -> bool:
     """Return True if chat_id is currently in the onboarding flow."""
     state = await db.get_onboarding_state(chat_id)
-    return bool(state)
+    return state is not None
 
 
 async def start_onboarding(chat_id: int) -> None:

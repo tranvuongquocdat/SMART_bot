@@ -987,7 +987,8 @@ async def get_outbound_log(
 # onboarding_state
 # ---------------------------------------------------------------------------
 
-async def get_onboarding_state(chat_id: int) -> dict:
+async def get_onboarding_state(chat_id: int) -> dict | None:
+    """Return parsed state dict if a row exists, or None if no onboarding in progress."""
     import json as _json
     _db = await get_db()
     async with _db.execute(
@@ -995,7 +996,7 @@ async def get_onboarding_state(chat_id: int) -> dict:
     ) as cur:
         row = await cur.fetchone()
     if not row:
-        return {}
+        return None
     try:
         return _json.loads(row["state_json"])
     except Exception:

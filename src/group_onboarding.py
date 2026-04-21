@@ -157,7 +157,7 @@ async def _complete_group(group_chat_id: int, group_name: str, session: dict) ->
 
 async def is_group_onboarding(group_chat_id: int) -> bool:
     state = await db.get_onboarding_state(group_chat_id)
-    return bool(state)
+    return state is not None
 
 
 async def start(group_chat_id: int, sender_id: int) -> None:
