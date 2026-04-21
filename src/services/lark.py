@@ -276,6 +276,23 @@ async def delete_record(base_token: str, table_id: str, record_id: str):
         raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
 
 
+async def delete_base(app_token: str) -> None:
+    """Move a Bitable base to the trash. Requires scope `drive:drive`.
+
+    Lark keeps the file in the owner's trash for ~30 days before permanent deletion
+    (restorable from Lark Drive UI during that window).
+    """
+    resp = await _client.delete(
+        f"{LARK_API}/drive/v1/files/{app_token}",
+        headers=await _headers(),
+        params={"type": "bitable"},
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if body.get("code") != 0:
+        raise Exception(f"Lark delete_base error: {body.get('code')} - {body.get('msg')}")
+
+
 # ---------------------------------------------------------------------------
 # Drive permissions (share Base with external users by email)
 # ---------------------------------------------------------------------------
