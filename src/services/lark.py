@@ -277,6 +277,71 @@ async def delete_record(base_token: str, table_id: str, record_id: str):
 
 
 # ---------------------------------------------------------------------------
+# Drive permissions (share Base with external users by email)
+# ---------------------------------------------------------------------------
+
+
+async def share_base(
+    app_token: str,
+    email: str,
+    perm: str = "edit",
+    need_notification: bool = False,
+) -> dict | None:
+    """Grant a Lark user access to a Bitable base by email.
+
+    `perm` is one of: "view", "edit", "full_access".
+    Returns the Lark response body or None if email is falsy.
+    Requires scope `drive:drive` on the app.
+    """
+    if not email:
+        return None
+    resp = await _client.post(
+        f"{LARK_API}/drive/v1/permissions/{app_token}/members",
+        headers=await _headers(),
+        params={"type": "bitable", "need_notification": str(need_notification).lower()},
+        json={"member_type": "email", "member_id": email, "perm": perm},
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if body.get("code") != 0:
+        raise Exception(f"Lark share error: {body.get('code')} - {body.get('msg')}")
+    return body
+
+
+async def make_base_public(
+    app_token: str,
+    link_share_entity: str = "anyone_editable",
+) -> dict:
+    """Enable a public share link on a Bitable base.
+
+    `link_share_entity` options:
+        - "anyone_editable"  — anyone with the link can edit
+        - "anyone_readable"  — anyone with the link can view only
+        - "tenant_editable"  — internal tenant members can edit
+        - "tenant_readable"  — internal tenant members can view
+        - "closed"           — disable public link
+    Requires scope `drive:drive` on the app.
+    """
+    resp = await _client.patch(
+        f"{LARK_API}/drive/v1/permissions/{app_token}/public",
+        headers=await _headers(),
+        params={"type": "bitable"},
+        json={
+            "external_access_entity": "open",
+            "link_share_entity": link_share_entity,
+            "security_entity": "anyone_can_view",
+            "comment_entity": "anyone_can_view",
+            "share_entity": "anyone",
+        },
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    if body.get("code") != 0:
+        raise Exception(f"Lark public-share error: {body.get('code')} - {body.get('msg')}")
+    return body
+
+
+# ---------------------------------------------------------------------------
 # Sync helpers
 # ---------------------------------------------------------------------------
 

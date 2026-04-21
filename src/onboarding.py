@@ -158,6 +158,7 @@ async def _complete_boss(chat_id: int, state: dict) -> None:
     name = state["name"]
     company = state["company"]
     language = state.get("language", "vi")
+    email = (state.get("email") or "").strip()  # optional, reserved for future private-share
 
     messages = [
         {"role": "system", "content": _PERSONA},
@@ -185,8 +186,19 @@ async def _complete_boss(chat_id: int, state: dict) -> None:
             base_token, table_people, table_tasks, table_projects, table_ideas,
             lark_table_reminders=table_reminders,
             lark_table_notes=table_notes,
+            email=email,
         )
         logger.info("[onboarding] boss created in DB for chat_id=%s", chat_id)
+
+        public_ok = False
+        try:
+            await lark.make_base_public(base_token, link_share_entity="anyone_editable")
+            public_ok = True
+            logger.info("[onboarding] Lark base made public (anyone_editable) for chat_id=%s", chat_id)
+        except Exception:
+            logger.exception(
+                "[onboarding] failed to make Lark base public for chat_id=%s", chat_id,
+            )
 
         _db = await db.get_db()
         await _db.execute(
@@ -219,10 +231,17 @@ async def _complete_boss(chat_id: int, state: dict) -> None:
         ]
         resp2, _ = await openai_client.chat_with_tools(messages2, [])
         success_reply = (resp2.content or "").strip()
+
+        if public_ok:
+            access_hint = "Bấm link để mở Base — không cần đăng nhập, xem và chỉnh sửa trực tiếp."
+        else:
+            access_hint = (
+                "Em chưa mở được chế độ chia sẻ công khai. Anh/chị thử mở link; "
+                "nếu không vào được, liên hệ admin hệ thống để được cấp quyền."
+            )
         await telegram.send(
             chat_id,
-            f"{success_reply}\n\nLark Base: {lark_base_url}\n"
-            "(Mở link để xem dữ liệu trực tiếp trên Lark)",
+            f"{success_reply}\n\nLark Base: {lark_base_url}\n{access_hint}",
         )
 
     except Exception:
