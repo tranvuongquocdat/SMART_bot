@@ -204,9 +204,10 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
         if "no such table" not in str(exc).lower():
             raise
 
-    # Add language to bosses
+    # Add language + email to bosses
     for col, definition in [
         ("language", "TEXT DEFAULT 'en'"),
+        ("email",    "TEXT DEFAULT ''"),
     ]:
         try:
             # f-string safe: col/definition are hardcoded above, SQLite doesn't support parameterized DDL
@@ -352,6 +353,7 @@ async def create_boss(
     lark_table_ideas: Optional[str] = None,
     lark_table_reminders: Optional[str] = None,
     lark_table_notes: Optional[str] = None,
+    email: str = "",
     db_path: str = "data/history.db",
 ) -> None:
     db = await get_db(db_path)
@@ -360,8 +362,8 @@ async def create_boss(
         INSERT INTO bosses
             (chat_id, name, company, lark_base_token, lark_table_people,
              lark_table_tasks, lark_table_projects, lark_table_ideas,
-             lark_table_reminders, lark_table_notes)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             lark_table_reminders, lark_table_notes, email)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(chat_id) DO UPDATE SET
             name                 = excluded.name,
             company              = excluded.company,
@@ -371,11 +373,12 @@ async def create_boss(
             lark_table_projects  = excluded.lark_table_projects,
             lark_table_ideas     = excluded.lark_table_ideas,
             lark_table_reminders = excluded.lark_table_reminders,
-            lark_table_notes     = excluded.lark_table_notes
+            lark_table_notes     = excluded.lark_table_notes,
+            email                = excluded.email
         """,
         (chat_id, name, company, lark_base_token, lark_table_people,
          lark_table_tasks, lark_table_projects, lark_table_ideas,
-         lark_table_reminders, lark_table_notes),
+         lark_table_reminders, lark_table_notes, email),
     )
     await db.commit()
 

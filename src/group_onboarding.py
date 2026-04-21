@@ -14,6 +14,11 @@ from src.services import lark, openai_client, telegram
 
 logger = logging.getLogger("group_onboarding")
 
+
+async def _send_and_save(group_chat_id: int, text: str) -> None:
+    """Send reply to group. telegram.send auto-persists as assistant message so next turn has history."""
+    await telegram.send(group_chat_id, text)
+
 # ---------------------------------------------------------------------------
 # LLM collector
 # ---------------------------------------------------------------------------
@@ -22,7 +27,7 @@ _GROUP_COLLECTOR_PROMPT = """\
 You are helping set up a Telegram group for an AI secretary system.
 Extract fields from the user's message and generate a natural Vietnamese reply.
 
-## Current state
+## Current state (GROUND TRUTH — do not contradict)
 {state_json}
 
 ## Available workspaces
@@ -31,13 +36,29 @@ Extract fields from the user's message and generate a natural Vietnamese reply.
 ## Available projects (empty = not loaded yet)
 {project_list}
 
-## Rules
-- "boss_chat_id": if user selects a workspace by number or name, return that workspace's chat_id (integer).
-- "project_id": if user selects a project by number or name, return its record_id (string). If user says no specific project → return "none".
-- "load_projects": return true if boss_chat_id was just set and projects list is empty — tells caller to load projects before next turn.
-- "confirmed": true if user explicitly confirms; false if cancels.
-- If boss_chat_id and project_id are both set and confirmed is null: ask for confirmation.
-- Write reply in Vietnamese, concisely.
+## State-aware rules (STRICT — follow before any other rule)
+- If state.boss_chat_id is NOT null: NEVER ask workspace selection again. The workspace is already chosen. Move to the next step.
+- If state.project_id is NOT null: NEVER ask project selection again. The project is already chosen. Move to confirmation.
+- Step order:
+  1. boss_chat_id null            → ask workspace
+  2. boss_chat_id set, projects empty → reply "Đang load danh sách project..." and set load_projects=true
+  3. boss_chat_id set, projects loaded, project_id null → ask project
+  4. boss_chat_id + project_id set, confirmed null → ASK FOR CONFIRMATION (summarize workspace + project, ask "Đồng ý tạo không?")
+  5. confirmed true → acknowledge, setup sẽ hoàn tất
+
+## Extraction rules
+- "boss_chat_id": integer — if user picks workspace by number or name. Null if ambiguous.
+- "project_id": Lark record_id string — if user picks project. Return "none" if user explicitly says no project. Null if ambiguous.
+- "load_projects": true only right after boss_chat_id is freshly set and projects list is empty.
+- "confirmed":
+    - true: explicit yes ("ok", "uh", "đúng", "yes", "được", "ừ", "đồng ý", "tạo đi", "confirm")
+    - false: explicit no ("không", "sai", "huỷ", "cancel", "làm lại")
+    - null: otherwise
+- NEVER overwrite an existing non-null state field with null.
+
+## Reply rules
+- Write concise Vietnamese.
+- If user's message is completely off-topic (not about workspace/project/confirmation), briefly acknowledge and steer back to the currently pending step.
 
 Return ONLY valid JSON:
 {{
@@ -52,7 +73,13 @@ Return ONLY valid JSON:
 """
 
 
-async def _group_collector(session: dict, text: str, boss_list: str, project_list: str) -> dict:
+async def _group_collector(
+    session: dict,
+    text: str,
+    boss_list: str,
+    project_list: str,
+    group_chat_id: int,
+) -> dict:
     state_copy = {
         k: v for k, v in session.items()
         if k not in ("bosses", "projects", "sender_id")
@@ -62,8 +89,15 @@ async def _group_collector(session: dict, text: str, boss_list: str, project_lis
         boss_list=boss_list,
         project_list=project_list or "Chưa load.",
     )
+    # Load last 10 messages of this group so LLM sees the onboarding dialogue flow
+    recent = await db.get_recent(group_chat_id, limit=10)
+    history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in recent if m.get("content")
+    ]
     messages = [
         {"role": "system", "content": prompt},
+        *history,
         {"role": "user", "content": text},
     ]
     response, _ = await openai_client.chat_with_tools(messages, [])
@@ -92,7 +126,7 @@ async def _complete_group(group_chat_id: int, group_name: str, session: dict) ->
         None,
     )
     if not boss:
-        await telegram.send(group_chat_id, "Lỗi: không tìm được workspace. Tag em lại nhé.")
+        await _send_and_save(group_chat_id, "Lỗi: không tìm được workspace. Tag em lại nhé.")
         return
 
     raw_project_id = session.get("project_id")
@@ -108,7 +142,7 @@ async def _complete_group(group_chat_id: int, group_name: str, session: dict) ->
     await db.update_note(boss["chat_id"], "group", str(group_chat_id), initial_note)
     await db.clear_onboarding_state(group_chat_id)
 
-    await telegram.send(
+    await _send_and_save(
         group_chat_id,
         f"Xong! Em đã được link vào *{boss['company']}*.\n\n"
         "Các bạn chưa đăng ký với em, nhắn */start* để em nhận ra trong nhóm nhé. "
@@ -133,7 +167,7 @@ async def start(group_chat_id: int, sender_id: int) -> None:
         member = await telegram.get_chat_member(group_chat_id, bot_id)
         status = member.get("status", "")
         if status not in ("administrator", "creator"):
-            await telegram.send(
+            await _send_and_save(
                 group_chat_id,
                 "Để em hoạt động đầy đủ trong nhóm, nhờ admin promote em lên làm *Administrator*:\n"
                 "Settings → Administrators → Add Administrator → chọn @bot\n\n"
@@ -143,7 +177,7 @@ async def start(group_chat_id: int, sender_id: int) -> None:
 
     bosses = await db.get_all_bosses()
     if not bosses:
-        await telegram.send(
+        await _send_and_save(
             group_chat_id,
             "Chưa có workspace nào được đăng ký. Nhờ sếp đăng ký với bot trước nhé.",
         )
@@ -152,7 +186,7 @@ async def start(group_chat_id: int, sender_id: int) -> None:
     lines = ["Nhóm này thuộc workspace nào?\n"]
     for i, b in enumerate(bosses, 1):
         lines.append(f"{i}. {b['company']} (sếp: {b['name']})")
-    await telegram.send(group_chat_id, "\n".join(lines))
+    await _send_and_save(group_chat_id, "\n".join(lines))
 
     await db.save_onboarding_state(group_chat_id, {
         "step": "collecting",
@@ -186,7 +220,7 @@ async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
         ) + f"\n{len(projects)+1}. Không thuộc dự án cụ thể"
     ) if projects else ""
 
-    result = await _group_collector(session, text, boss_list, project_list)
+    result = await _group_collector(session, text, boss_list, project_list, group_chat_id)
     extracted = result.get("extracted", {})
     reply = result.get("reply", "")
 
@@ -196,7 +230,10 @@ async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
         if val is not None:
             session[key] = val
 
-    # Load projects lazily when boss just selected
+    # Load projects lazily when boss just selected. The LLM reply was generated
+    # BEFORE this load finishes, so it typically says "Đang load..." — we override
+    # it with the actual project list below so the user sees options immediately.
+    just_loaded_projects = False
     if extracted.get("load_projects") and session.get("boss_chat_id") and not projects:
         boss = next((b for b in bosses if b["chat_id"] == session["boss_chat_id"]), None)
         if boss and boss.get("lark_table_projects"):
@@ -208,21 +245,34 @@ async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
                     {"name": r.get("Tên dự án", ""), "record_id": r["record_id"]}
                     for r in records if r.get("Tên dự án")
                 ]
+                just_loaded_projects = True
             except Exception:
                 logger.exception("Failed to load projects for boss %s", boss["chat_id"])
+
+    if just_loaded_projects and session.get("projects"):
+        company = next(
+            (b.get("company", "") for b in bosses if b["chat_id"] == session["boss_chat_id"]),
+            "workspace",
+        )
+        plines = [f"{i+1}. {p['name']}" for i, p in enumerate(session["projects"])]
+        plines.append(f"{len(session['projects'])+1}. Không thuộc dự án cụ thể")
+        reply = (
+            f"Đã chọn workspace *{company}*. Nhóm này thuộc project nào?\n"
+            + "\n".join(plines)
+        )
 
     boss_set = session.get("boss_chat_id") is not None
     project_set = session.get("project_id") is not None
     confirmed = session.get("confirmed")
 
     if boss_set and project_set and confirmed is True:
-        await telegram.send(group_chat_id, reply)
+        await _send_and_save(group_chat_id, reply)
         await _complete_group(group_chat_id, group_name, session)
         return
     elif confirmed is False:
         await db.clear_onboarding_state(group_chat_id)
-        await telegram.send(group_chat_id, "Đã huỷ. Tag em lại khi muốn setup nhé.")
+        await _send_and_save(group_chat_id, "Đã huỷ. Tag em lại khi muốn setup nhé.")
         return
 
     await db.save_onboarding_state(group_chat_id, session)
-    await telegram.send(group_chat_id, reply)
+    await _send_and_save(group_chat_id, reply)

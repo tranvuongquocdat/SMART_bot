@@ -107,12 +107,12 @@ async def get_person(
     workspace_ids: str = "current",
 ) -> str:
     """
-    Fat return: person info + active tasks + effort_score + last DM from bot + has_dmd_bot.
+    Fat return: person info + active tasks + effort_score + connected status.
+    `connected=true` means Chat ID present in Lark → bot ↔ người đã liên lạc được.
     Call before assigning a task: effort_score > 0.8 means near overloaded.
     If multiple people share the same name across workspaces, returns all with workspace tag.
     """
     from src.tools._workspace import resolve_workspaces
-    from src import db as _db_mod
 
     query = name or search_name
     if not query:
@@ -161,20 +161,49 @@ async def get_person(
         except Exception:
             lines.append("Tasks: (không tải được)")
 
-        # Last DM from bot
+        # Connection state — resolve across ALL sources (Lark + bosses + memberships + seen_contacts).
+        # Chat_id cross-reference = same person (guaranteed by Telegram uniqueness).
+        from src import identity as _id
+        from src import db as _db
         raw_id = r.get("Chat ID")
+        record_id = r.get("record_id", "")
+        candidates = await _id.resolve_candidates(ctx, person_name, workspace_ids="all")
+        cross_chat_ids = sorted({c["chat_id"] for c in candidates if c.get("chat_id")})
+
         if raw_id:
-            chat_id_val = int(raw_id)
-            outbound = await _db_mod.get_outbound_log(ctx.boss_chat_id, to_chat_id=chat_id_val, limit=1)
-            if outbound:
-                last = outbound[0]
-                lines.append(f"Lần cuối bot nhắn: {last['created_at'][:16]} — {last['content'][:60]}")
-                lines.append("has_dmd_bot: true")
-            else:
-                lines.append("Lần cuối bot nhắn: (chưa từng)")
-                lines.append("has_dmd_bot: true (có Chat ID nhưng chưa nhắn)")
+            lines.append(f"connected: true (chat_id={raw_id}, nguồn=lark_people)")
+        elif cross_chat_ids:
+            srcs = sorted({c["source"] for c in candidates if c.get("chat_id")})
+            lines.append(
+                f"connected: true via cross-workspace — chat_id={cross_chat_ids[0]} "
+                f"(nguồn={','.join(srcs)}, Lark record này chưa link Chat ID)"
+            )
+            lines.append(f"  → gợi ý: link_contact_to_person({cross_chat_ids[0]}, '{record_id}')")
         else:
-            lines.append("has_dmd_bot: false (chưa có Chat ID)")
+            lines.append("connected: false (không tìm được chat_id ở bất kỳ nguồn nào)")
+
+        # DM history (messages table, role='user' — inbound from person to bot)
+        all_cids = set(cross_chat_ids)
+        if raw_id:
+            try:
+                all_cids.add(int(raw_id))
+            except (ValueError, TypeError):
+                pass
+        if all_cids:
+            _db_conn = await _db.get_db()
+            hits = []
+            for cid in sorted(all_cids):
+                async with _db_conn.execute(
+                    "SELECT COUNT(*) FROM messages WHERE chat_id = ? AND role = 'user'",
+                    (cid,),
+                ) as cur:
+                    n = (await cur.fetchone())[0]
+                if n > 0:
+                    hits.append(f"chat_id={cid}: {n} tin user→bot")
+            if hits:
+                lines.append("dm_history: " + "; ".join(hits))
+            else:
+                lines.append("dm_history: chưa có tin nào từ người này (dù đã có chat_id)")
 
     return "\n".join(lines)
 
@@ -317,15 +346,20 @@ async def check_team_engagement(
     workspace_ids: str = "current",
 ) -> str:
     """
-    Returns engagement status for every team member:
-    has_dmd_bot, last_interaction, active task count, overload_flag.
-    Use when asked 'ai chưa nhắn bot', 'ai đang bận', or before broadcast.
+    Engagement status cho từng thành viên: cross-workspace identity resolution
+    (Chat ID ở bất kỳ nguồn nào — Lark record, bosses table, memberships,
+    seen_contacts — đều tính là đã kết nối), DM history thực (query messages
+    table theo chat_id), active task count, overload flag.
+
+    Gọi khi: 'ai đã/chưa kết nối bot', 'ai đang bận', trước broadcast.
     """
     from src.tools._workspace import resolve_workspaces
-    from src import db as _db_mod
+    from src import identity as _id
+    from src import db as _db
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     lines = ["=== Team Engagement ==="]
+    _db_conn = await _db.get_db()
 
     for ws in workspaces:
         ws_label = f"[{ws['workspace_name']}] " if workspace_ids != "current" else ""
@@ -339,6 +373,7 @@ async def check_team_engagement(
 
         for p in people_list:
             pname = p.get("Tên", "?")
+            record_id = p.get("record_id", "")
             raw_id = p.get("Chat ID")
             active_tasks = [
                 t for t in tasks
@@ -348,18 +383,40 @@ async def check_team_engagement(
             task_count = len(active_tasks)
             overload = " ⚠️OVERLOAD" if task_count >= 5 else ""
 
-            if raw_id:
-                chat_id_val = int(raw_id)
-                outbound = await _db_mod.get_outbound_log(ctx.boss_chat_id, to_chat_id=chat_id_val, limit=1)
-                if outbound:
-                    last_dt = outbound[0]["created_at"][:16]
-                    dmd = f"✓ last: {last_dt}"
-                else:
-                    dmd = "✓ có Chat ID, chưa nhắn"
-            else:
-                dmd = "✗ chưa có Chat ID"
+            # Cross-workspace identity resolution — chat_id khớp = cùng người.
+            candidates = await _id.resolve_candidates(ctx, pname, workspace_ids="all")
+            cross_ids = sorted({c["chat_id"] for c in candidates if c.get("chat_id")})
 
-            lines.append(f"  {ws_label}{pname} | {dmd} | tasks: {task_count}{overload}")
+            if raw_id:
+                connected = f"✓ chat_id={raw_id}"
+            elif cross_ids:
+                srcs = sorted({c["source"] for c in candidates if c.get("chat_id")})
+                connected = (
+                    f"✓ chat_id={cross_ids[0]} (từ {','.join(srcs)}; Lark record này chưa link — "
+                    f"gợi ý link_contact_to_person({cross_ids[0]}, '{record_id}'))"
+                )
+            else:
+                connected = "✗ chưa có chat_id (chưa kết nối bot)"
+
+            # DM history
+            all_cids = set(cross_ids)
+            if raw_id:
+                try:
+                    all_cids.add(int(raw_id))
+                except (ValueError, TypeError):
+                    pass
+            dm_info = ""
+            if all_cids:
+                total = 0
+                for cid in all_cids:
+                    async with _db_conn.execute(
+                        "SELECT COUNT(*) FROM messages WHERE chat_id = ? AND role = 'user'",
+                        (cid,),
+                    ) as cur:
+                        total += (await cur.fetchone())[0]
+                dm_info = f" | dm_history: {total} tin user→bot" if total else " | dm_history: 0"
+
+            lines.append(f"  {ws_label}{pname} | {connected} | tasks: {task_count}{overload}{dm_info}")
 
     return "\n".join(lines)
 

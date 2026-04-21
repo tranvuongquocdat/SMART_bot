@@ -109,13 +109,14 @@ async def _do_reset(ctx: ChatContext) -> str:
             except Exception:
                 pass
 
-    # Step 2: Delete Lark Base (or all records if delete_base not available)
+    # Step 2: Delete Lark Base (fallback: clear all records if delete API fails)
     base_token = boss.get("lark_base_token", "")
     if base_token:
         try:
             await lark.delete_base(base_token)
-        except (AttributeError, Exception):
-            # Fallback: delete all records per table
+            logger.info("[reset] Lark base %s moved to trash for boss %s", base_token, boss_id)
+        except Exception:
+            logger.exception("[reset] delete_base failed, falling back to per-record cleanup")
             await _delete_all_lark_records(boss, base_token)
 
     # Step 3-9: Delete SQLite rows (correct order — bosses row last)

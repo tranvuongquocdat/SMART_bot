@@ -1,7 +1,7 @@
 # Tools Overview — 2026-04-17
 
 **Branch:** `feature/person-identity-harvesting`
-**Total registered tools:** 57 (all entries in `TOOL_DEFINITIONS` in [`src/tools/__init__.py`](../src/tools/__init__.py))
+**Total registered tools:** 59 (all entries in `TOOL_DEFINITIONS` in [`src/tools/__init__.py`](../src/tools/__init__.py))
 **Consistency:** `TOOL_DEFINITIONS` and `_dispatch_tool` are fully in sync — no gaps.
 
 ---
@@ -14,13 +14,13 @@
 4. [Reminder](#4-reminder) — 4 tools
 5. [Communication](#5-communication) — 7 tools _(4 identity tools newly added in this branch)_
 6. [Note / Idea](#6-note--idea) — 4 tools
-7. [Group](#7-group) — 1 tool
+7. [Group](#7-group) — 4 tools
 8. [Workspace](#8-workspace) — 2 tools
 9. [Approval](#9-approval) — 3 tools
 10. [Summary / Search](#10-summary--search) — 7 tools
 11. [Reset](#11-reset) — 3 tools
 12. [Review Schedule Config](#12-review-schedule-config) — 4 tools
-13. [Misc](#13-misc) — 4 tools
+13. [Misc](#13-misc) — 2 tools
 14. [Gaps / Questions](#gaps--questions)
 
 ---
@@ -99,8 +99,6 @@
 | `list_unlinked_contacts` | Liệt kê chat_id bot đã thấy trong group/DM nhưng CHƯA gắn vào Lark People record nào. | _(none)_ | Reads `seen_contacts` SQLite; reads Lark (people table) to diff | [communication.py:404](../src/tools/communication.py#L404) |
 | `get_group_admins` | Trả danh sách admin của group hiện tại kèm chat_id. Chỉ chạy trong group context. | _(none)_ | Calls Telegram API (`getChatAdministrators`); read-only | [communication.py:454](../src/tools/communication.py#L454) |
 
-> **Legacy note:** `send_message` (in cluster [Misc](#13-misc)) is an older, simpler DM tool that only looks up Lark people and does NOT log to `outbound_messages`. `send_dm` is the preferred successor.
-
 ---
 
 ## 6. Note / Idea
@@ -118,15 +116,16 @@
 
 ## 7. Group
 
-**1 tool** — [`src/tools/group.py`](../src/tools/group.py)
-
-> Note: `summarize_group_conversation`, `update_group_note`, and `broadcast_to_group` are implemented in `group.py` but are **not** registered in `TOOL_DEFINITIONS` — they are internal helpers only.
+**4 tools** — [`src/tools/group.py`](../src/tools/group.py) _(all require `ctx.is_group = True`)_
 
 | Name | Description | Required params | Side effects | File:line |
 |------|-------------|-----------------|--------------|-----------|
 | `manage_group` | Manage the Telegram group: invite, rename, pin/unpin, kick, set description, generate invite link. Requires bot to be admin. | `action` | Calls Telegram Bot API (admin actions); reads Lark people table for invite/kick; may send Telegram messages | [group.py:84](../src/tools/group.py#L84) |
+| `summarize_group_conversation` | Tóm tắt N tin gần nhất trong group theo 3 mục: chủ đề chính, quyết định, action items chưa giao. | _(none — `n_messages` optional, default 20)_ | Reads `messages` SQLite; calls LLM (OpenAI) | [group.py:13](../src/tools/group.py#L13) |
+| `update_group_note` | Ghi/append vào group note — lưu quyết định, rule, context lặp lại của group. | `content` | Reads then writes `notes` SQLite (type=`group`) | [group.py:55](../src/tools/group.py#L55) |
+| `broadcast_to_group` | Gửi 1 tin công khai vào group hiện tại (thông báo team, broadcast deadline, kết quả duyệt). | `message` | Sends Telegram message to `ctx.chat_id` | [group.py:73](../src/tools/group.py#L73) |
 
-**`action` values:** `invite` \| `rename` \| `pin` \| `unpin` \| `kick` \| `set_description` \| `invite_link`
+**`action` values for `manage_group`:** `invite` \| `rename` \| `pin` \| `unpin` \| `kick` \| `set_description` \| `invite_link`
 
 ---
 
@@ -198,27 +197,23 @@
 
 ## 13. Misc
 
-**4 tools** — various files
+**2 tools** — various files
 
 | Name | Description | Required params | Side effects | File:line |
 |------|-------------|-----------------|--------------|-----------|
 | `web_search` | Tìm kiếm thông tin trên web. Uses DuckDuckGo Instant Answer API. | `query` | HTTP GET to `api.duckduckgo.com` (external); no writes | [web_search.py:7](../src/tools/web_search.py#L7) |
 | `escalate_to_advisor` | Chuyển sang Cố vấn chiến lược cho phân tích tổng thể. KHÔNG gọi cho CRUD đơn giản. | `reason` | Returns sentinel `__ESCALATE__` to the agent loop — triggers advisor mode | [\_\_init\_\_.py:1222](../src/tools/__init__.py#L1222) |
-| `send_message` | Gửi tin nhắn Telegram thay sếp. Legacy tool — looks up Chat ID from Lark only, no outbound log. Prefer `send_dm`. | `to`, `content` | Sends Telegram DM; reads Lark (people table); NO outbound log | [messaging.py:8](../src/tools/messaging.py#L8) |
-| `review_config` | _(module name — not a single tool)_ | — | — | — |
-
-> Note: `review_config` above refers to the module; the individual tools are in cluster [12](#12-review-schedule-config).
 
 ---
 
 ## Gaps / Questions
 
-_(To be filled in — em sẽ lấp sau)_
+- `get_people` dispatches to `people.get_person()` (not `get_people()`). The alias `get_person` is also handled in dispatch (`case "get_people" | "get_person"`), but only `get_people` appears in `TOOL_DEFINITIONS`. Minor naming quirk, not functional.
 
-- `send_message` (messaging.py) vs `send_dm` (communication.py): two tools do the same thing — `send_message` is older, has no outbound log, no identity resolution. Consider deprecating `send_message` from `TOOL_DEFINITIONS` and routing all DMs through `send_dm`.
+### Resolved in commits `46968bd` + `bc98236` (2026-04-17):
 
-- `group.py` implements `summarize_group_conversation`, `update_group_note`, and `broadcast_to_group` — these are real, working functions but **not** registered in `TOOL_DEFINITIONS`. Intentional omission or oversight?
-
-- `memory.py::search_history` (line 8) is a legacy version of the search tool — the active routing uses `search.py::search_history`. The old function in `memory.py` is dead code (not reachable via dispatch).
-
-- `get_people` dispatches to `people.get_person()` (not `get_people()`). The alias `get_person` is also handled in dispatch (`case "get_people" | "get_person"`), but only `get_people` appears in `TOOL_DEFINITIONS`.
+- ✅ `get_communication_log`'s `since` param was a silent no-op — now properly filters both sections by SQL `created_at >= ?`.
+- ✅ `send_message` legacy tool removed (was redundant with `send_dm`). `src/tools/messaging.py` deleted.
+- ✅ 3 group tools registered: `summarize_group_conversation`, `update_group_note`, `broadcast_to_group`.
+- ✅ Dead `memory.py::search_history` removed.
+- ✅ `create_reminder` description improved: explicit NL time-parsing guidance; clarify `target=""` = DM boss; warn against passing self-references as target.

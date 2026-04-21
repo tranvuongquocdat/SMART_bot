@@ -20,6 +20,11 @@ from src.services import telegram as tg
 
 logger = logging.getLogger("onboarding")
 
+
+async def _send_and_save(chat_id: int, text: str) -> None:
+    """Send reply to DM. telegram.send auto-persists as assistant message so next turn has history."""
+    await telegram.send(chat_id, text)
+
 # join flow state: {chat_id: {"step": str, ...}} — short-lived, in-memory is fine
 _join_sessions: dict[int, dict] = {}
 
@@ -44,24 +49,33 @@ _COLLECTOR_PROMPT = """\
 You are a smart onboarding assistant for an AI secretary app.
 Extract structured fields from the user's message and generate a natural reply.
 
-## Current collected state
+## Current collected state (GROUND TRUTH — do not contradict)
 {state_json}
 
 ## Available workspaces (for member/partner to join)
 {boss_list}
 
+## State-aware rules (STRICT — follow before any other rule)
+- If a field in state is NOT null, NEVER ask for it again. Move to the next missing field.
+- Step order for boss path: type → name → company → language → confirm
+- Step order for member/partner path: type → name → language → target_boss_id → confirm
+- When all required fields are set and confirmed is null: SUMMARIZE collected info and ASK FOR CONFIRMATION once.
+
 ## Extraction rules
 - "type": sếp/giám đốc/chủ → "boss"; nhân viên/thành viên → "member"; đối tác/partner/freelancer → "partner"
 - "language": infer from the user's own writing style if not stated — Vietnamese → "vi", English → "en". Default "vi".
 - "target_boss_id": if user mentions a boss name or company, match against available workspaces; return their chat_id (integer). Return null if no match or ambiguous.
-- "confirmed": set to true if the user is explicitly confirming ("ok", "đúng rồi", "tạo đi", "xác nhận"); false if cancelling ("không", "sai", "hủy", "làm lại"). null otherwise.
-- Never overwrite an existing non-null field with null.
+- "confirmed":
+    - true: explicit yes ("ok", "uh", "đúng", "đúng rồi", "tạo đi", "xác nhận", "yes", "được", "ừ", "đồng ý", "confirm")
+    - false: explicit no ("không", "sai", "hủy", "làm lại", "cancel")
+    - null: otherwise
+- NEVER overwrite an existing non-null state field with null.
 
 ## Reply rules
 - Write naturally in the user's inferred language.
-- Ask ONLY for fields still missing. Priority: type → name → company (boss) or target workspace (member/partner).
-- If all required fields for the detected type are present and confirmed is null: summarize and ask for confirmation.
+- Ask ONLY for the NEXT missing field (see step order). Do not re-ask fields already set.
 - If confirmed is true: acknowledge and say you are creating the workspace / sending the request.
+- If user's message is off-topic (not about onboarding), briefly acknowledge and steer back to the pending step.
 
 Return ONLY valid JSON:
 {{
@@ -78,14 +92,21 @@ Return ONLY valid JSON:
 """
 
 
-async def _collector(state: dict, text: str, boss_list: str) -> dict:
+async def _collector(state: dict, text: str, boss_list: str, chat_id: int) -> dict:
     state_copy = {k: v for k, v in state.items() if k != "first"}
     prompt = _COLLECTOR_PROMPT.format(
         state_json=json.dumps(state_copy, ensure_ascii=False),
         boss_list=boss_list or "Chưa có workspace nào.",
     )
+    # Load last 10 messages of this DM so LLM sees onboarding dialogue flow
+    recent = await db.get_recent(chat_id, limit=10)
+    history = [
+        {"role": m["role"], "content": m["content"]}
+        for m in recent if m.get("content")
+    ]
     messages = [
         {"role": "system", "content": prompt},
+        *history,
         {"role": "user", "content": text},
     ]
     response, _ = await openai_client.chat_with_tools(messages, [])
@@ -137,6 +158,7 @@ async def _complete_boss(chat_id: int, state: dict) -> None:
     name = state["name"]
     company = state["company"]
     language = state.get("language", "vi")
+    email = (state.get("email") or "").strip()  # optional, reserved for future private-share
 
     messages = [
         {"role": "system", "content": _PERSONA},
@@ -164,8 +186,19 @@ async def _complete_boss(chat_id: int, state: dict) -> None:
             base_token, table_people, table_tasks, table_projects, table_ideas,
             lark_table_reminders=table_reminders,
             lark_table_notes=table_notes,
+            email=email,
         )
         logger.info("[onboarding] boss created in DB for chat_id=%s", chat_id)
+
+        public_ok = False
+        try:
+            await lark.make_base_public(base_token, link_share_entity="anyone_editable")
+            public_ok = True
+            logger.info("[onboarding] Lark base made public (anyone_editable) for chat_id=%s", chat_id)
+        except Exception:
+            logger.exception(
+                "[onboarding] failed to make Lark base public for chat_id=%s", chat_id,
+            )
 
         _db = await db.get_db()
         await _db.execute(
@@ -198,10 +231,17 @@ async def _complete_boss(chat_id: int, state: dict) -> None:
         ]
         resp2, _ = await openai_client.chat_with_tools(messages2, [])
         success_reply = (resp2.content or "").strip()
+
+        if public_ok:
+            access_hint = "Bấm link để mở Base — không cần đăng nhập, xem và chỉnh sửa trực tiếp."
+        else:
+            access_hint = (
+                "Em chưa mở được chế độ chia sẻ công khai. Anh/chị thử mở link; "
+                "nếu không vào được, liên hệ admin hệ thống để được cấp quyền."
+            )
         await telegram.send(
             chat_id,
-            f"{success_reply}\n\nLark Base: {lark_base_url}\n"
-            "(Mở link để xem dữ liệu trực tiếp trên Lark)",
+            f"{success_reply}\n\nLark Base: {lark_base_url}\n{access_hint}",
         )
 
     except Exception:
@@ -310,7 +350,7 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
     if is_first:
         await db.save_onboarding_state(chat_id, state)
         greeting = await _greeting()
-        await telegram.send(chat_id, greeting)
+        await _send_and_save(chat_id, greeting)
         return
 
     all_bosses = await db.get_all_bosses()
@@ -319,7 +359,7 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
         for b in all_bosses
     )
 
-    result = await _collector(state, text, boss_list)
+    result = await _collector(state, text, boss_list, chat_id)
     extracted = result.get("extracted", {})
     reply = result.get("reply", "")
 
@@ -334,7 +374,7 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
     if user_type == "boss" and _boss_fields_complete(state):
         confirmed = state.get("confirmed")
         if confirmed is True:
-            await telegram.send(chat_id, reply)
+            await _send_and_save(chat_id, reply)
             await _complete_boss(chat_id, state)
             return
         elif confirmed is False:
@@ -343,18 +383,18 @@ async def handle_onboard_message(text: str, chat_id: int) -> None:
                 "type": None, "name": None, "company": None,
                 "language": None, "confirmed": None,
             })
-            await telegram.send(chat_id, reply)
+            await _send_and_save(chat_id, reply)
             return
         # confirmed is None — reply already contains confirmation prompt
 
     # Member/partner path completion
     if user_type in ("member", "partner") and _member_fields_complete(state):
-        await telegram.send(chat_id, reply)
+        await _send_and_save(chat_id, reply)
         await _complete_member(chat_id, state)
         return
 
     await db.save_onboarding_state(chat_id, state)
-    await telegram.send(chat_id, reply)
+    await _send_and_save(chat_id, reply)
 
 
 # ---------------------------------------------------------------------------
