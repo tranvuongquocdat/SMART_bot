@@ -20,4 +20,4 @@ class Settings(BaseSettings):
     recent_messages: int = 15
     rag_messages: int = 8
 
-    model_config = {"env_file": ".env"}
+    model_config = {"env_file": ".env", "extra": "ignore"}
