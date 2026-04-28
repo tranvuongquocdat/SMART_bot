@@ -9,7 +9,7 @@ from src.context import ChatContext
 async def _embed_note(ctx: ChatContext, note_type: str, ref_id: str, content: str) -> None:
     """Async background: embed note to Qdrant notes_{boss_chat_id} collection."""
     try:
-        from src.services import qdrant
+        from src.infrastructure import qdrant_client as qdrant
         from src.infrastructure import openai_client
         collection = f"notes_{ctx.boss_chat_id}"
         await qdrant.ensure_collection(collection)

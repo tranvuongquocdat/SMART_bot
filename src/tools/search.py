@@ -2,7 +2,7 @@
 Search tools — semantic search for notes/ideas and message history.
 """
 from src.context import ChatContext
-from src.services import qdrant
+from src.infrastructure import qdrant_client as qdrant
 
 
 async def search_notes(

@@ -4,7 +4,8 @@ from datetime import date, datetime
 
 from src import db as db_mod
 from src.context import ChatContext
-from src.services import qdrant, telegram
+from src.services import telegram
+from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
 from src.infrastructure import openai_client
 from src.utils.dates import date_to_ms, ms_to_date

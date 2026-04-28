@@ -144,7 +144,7 @@ async def _do_reset(ctx: ChatContext) -> str:
     # Step 10: Delete Qdrant collections
     # qdrant.py exposes no delete_collection helper — call the underlying client directly.
     try:
-        from src.services import qdrant as _qdrant_mod
+        from src.infrastructure import qdrant_client as _qdrant_mod
         client = _qdrant_mod._qdrant
         if client is not None:
             await asyncio.gather(
