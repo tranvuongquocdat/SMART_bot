@@ -313,11 +313,23 @@ User message
 
 ---
 
+## Setup
+
+Project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+
+```bash
+uv sync                  # install deps + create .venv
+uv run uvicorn src.main:app --port 8000   # run server
+uv run pytest tests/ -v                    # run tests
+```
+
+Python 3.12 (pinned via `.python-version`). Source of truth: `pyproject.toml` + `uv.lock`.
+
 ## Tests
 
 ```bash
-python -m pytest tests/ -v
-# 47 tests: unit (schema, context, lark, onboarding) + integration (approvals, reviews, reset)
+uv run pytest tests/ -v
+# unit (schema, context, lark, onboarding, utils) + integration (approvals, reviews, reset)
 ```
 
 ---
