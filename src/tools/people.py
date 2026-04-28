@@ -7,16 +7,12 @@ from datetime import datetime
 from src import db
 from src.context import ChatContext
 from src.services import lark
+from src.utils.dates import date_to_ms
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _date_to_ms(date_str: str) -> int:
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
-    return int(dt.timestamp() * 1000)
-
 
 def _fmt_person(r: dict) -> str:
     parts = [f"Tên: {r.get('Tên', '')}"]
@@ -451,7 +447,7 @@ async def check_effort(ctx: ChatContext, assignee: str, deadline: str = "", work
     lines = [f"{assignee} đang có {len(all_tasks)} task:"]
     conflicts = []
 
-    deadline_ms = _date_to_ms(deadline) if deadline else None
+    deadline_ms = date_to_ms(deadline) if deadline else None
 
     for t in all_tasks:
         task_name = t.get("Tên task", "?")

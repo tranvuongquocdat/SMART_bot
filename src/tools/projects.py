@@ -6,6 +6,7 @@ from datetime import datetime
 
 from src.context import ChatContext
 from src.services import lark
+from src.utils.dates import date_to_ms
 
 # Canonical enum values — must match Lark field options exactly
 PROJECT_STATUS_VALUES = ("Chưa bắt đầu", "Đang thực hiện", "Hoàn thành", "Tạm dừng", "Huỷ")
@@ -23,11 +24,6 @@ def _validate_project_status(status: str) -> str:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-def _date_to_ms(date_str: str) -> int:
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
-    return int(dt.timestamp() * 1000)
-
 
 def _fmt_project(r: dict) -> str:
     parts = [f"Tên: {r.get('Tên dự án', '')}"]
@@ -81,7 +77,7 @@ async def create_project(
     if members:
         fields["Thành viên"] = members
     if deadline:
-        fields["Deadline"] = _date_to_ms(deadline)
+        fields["Deadline"] = date_to_ms(deadline)
 
     await lark.create_record(ctx.lark_base_token, ctx.lark_table_projects, fields)
     return f"Đã tạo dự án: {name}"
@@ -191,7 +187,7 @@ async def update_project(
     if members:
         updates["Thành viên"] = members
     if deadline:
-        updates["Deadline"] = _date_to_ms(deadline)
+        updates["Deadline"] = date_to_ms(deadline)
     if status:
         updates["Trạng thái"] = _validate_project_status(status)
 
