@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from src import db
 from src.config import Settings
 from src.context import ChatContext
-from src.services import openai_client
+from src.infrastructure import openai_client
 from src.tools import TOOL_DEFINITIONS, execute_tool
 
 logger = logging.getLogger("advisor")

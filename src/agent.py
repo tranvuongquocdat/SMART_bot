@@ -11,7 +11,8 @@ from zoneinfo import ZoneInfo
 from src import context, db, identity
 from src.config import Settings
 from src.context import ChatContext
-from src.services import lark, openai_client, qdrant, telegram
+from src.services import lark, qdrant, telegram
+from src.infrastructure import openai_client
 from src.tools import TOOL_DEFINITIONS, execute_tool
 
 logger = logging.getLogger("agent")

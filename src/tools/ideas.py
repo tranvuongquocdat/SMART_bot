@@ -22,7 +22,8 @@ async def create_idea(ctx: ChatContext, content: str, tags: str = "", project: s
     # Embed to notes Qdrant collection for search_notes
     async def _embed():
         try:
-            from src.services import qdrant, openai_client
+            from src.services import qdrant
+            from src.infrastructure import openai_client
             collection = f"notes_{ctx.boss_chat_id}"
             await qdrant.ensure_collection(collection)
             vector = await openai_client.embed(content)

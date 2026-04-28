@@ -218,7 +218,7 @@ async def _get_active_topic(messages: list[dict]) -> str:
     """LLM mini-call: summarize what the group is currently discussing in 1 sentence."""
     if not messages:
         return ""
-    from src.services import openai_client as _oai
+    from src.infrastructure import openai_client as _oai
     conversation = "\n".join(
         f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
     )

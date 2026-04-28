@@ -18,7 +18,7 @@ from qdrant_client.models import (
     models,
 )
 
-from src.services import openai_client
+from src.infrastructure import openai_client
 
 _qdrant: AsyncQdrantClient | None = None
 

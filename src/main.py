@@ -12,7 +12,8 @@ logging.basicConfig(
 
 from src import agent, context, db, scheduler
 from src.config import Settings
-from src.services import cohere, lark, openai_client, qdrant, telegram
+from src.services import cohere, lark, qdrant, telegram
+from src.infrastructure import openai_client
 
 
 @asynccontextmanager

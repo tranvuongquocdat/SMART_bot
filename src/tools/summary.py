@@ -163,7 +163,7 @@ async def get_project_report(
     Covers: progress %, tasks by status, who's blocking, upcoming deadlines.
     """
     from src.tools._workspace import resolve_workspaces
-    from src.services import openai_client as _oai
+    from src.infrastructure import openai_client as _oai
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     tasks_text = ""

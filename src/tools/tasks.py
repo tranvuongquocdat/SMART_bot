@@ -5,7 +5,7 @@ from datetime import date, datetime
 from src import db as db_mod
 from src.context import ChatContext
 from src.services import lark, qdrant, telegram
-from src.services import openai_client
+from src.infrastructure import openai_client
 from src.utils.dates import date_to_ms, ms_to_date
 from src.utils.validation import (
     TASK_PRIORITY_VALUES,

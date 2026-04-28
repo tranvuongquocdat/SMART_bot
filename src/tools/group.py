@@ -5,7 +5,8 @@ import logging
 
 from src import db
 from src.context import ChatContext
-from src.services import openai_client, telegram
+from src.services import telegram
+from src.infrastructure import openai_client
 
 logger = logging.getLogger("tools.group")
 
