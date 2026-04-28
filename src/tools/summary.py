@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from src.context import ChatContext
-from src.services import lark
+from src.infrastructure import lark_client as lark
 from src.tools._workspace import resolve_workspaces
 
 

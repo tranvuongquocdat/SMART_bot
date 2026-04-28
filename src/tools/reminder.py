@@ -10,7 +10,7 @@ import asyncio
 from src import db
 from src.config import Settings
 from src.context import ChatContext
-from src.services import lark
+from src.infrastructure import lark_client as lark
 
 
 def _local_remind_string_to_utc_naive(remind_at: str) -> datetime:

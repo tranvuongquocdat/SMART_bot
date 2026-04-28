@@ -14,7 +14,8 @@ import json
 import logging
 
 from src import db
-from src.services import lark, qdrant
+from src.services import qdrant
+from src.infrastructure import lark_client as lark
 from src.infrastructure import openai_client
 from src.services import telegram
 from src.services import telegram as tg

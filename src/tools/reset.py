@@ -9,7 +9,8 @@ import logging
 
 from src import db
 from src.context import ChatContext
-from src.services import lark, telegram
+from src.services import telegram
+from src.infrastructure import lark_client as lark
 
 logger = logging.getLogger("tools.reset")
 
@@ -165,7 +166,7 @@ async def _do_reset(ctx: ChatContext) -> str:
 
 async def _delete_all_lark_records(boss: dict, base_token: str) -> None:
     """Fallback: delete all records per table when delete_base not available."""
-    from src.services import lark as _lark
+    from src.infrastructure import lark_client as _lark
     table_ids = [
         boss.get("lark_table_people", ""),
         boss.get("lark_table_tasks", ""),

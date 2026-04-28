@@ -140,7 +140,7 @@ async def build_group_context(group_chat_id: int, boss_chat_id: int) -> dict:
         "active_topic": str,
     }
     """
-    from src.services import lark as _lark
+    from src.infrastructure import lark_client as _lark
 
     _db = await db.get_db()
 

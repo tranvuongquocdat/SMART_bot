@@ -6,7 +6,7 @@ from datetime import datetime
 
 from src import db
 from src.context import ChatContext
-from src.services import lark
+from src.infrastructure import lark_client as lark
 from src.utils.dates import date_to_ms
 
 

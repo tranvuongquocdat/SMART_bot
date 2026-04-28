@@ -144,7 +144,7 @@ async def manage_group(ctx: ChatContext, action: str, **kwargs) -> str:
 
 async def _invite_member(ctx: ChatContext, name: str) -> str:
     """Try direct add first; fallback to invite link."""
-    from src.services import lark as _lark
+    from src.infrastructure import lark_client as _lark
 
     # Search People table for chat_id
     records = await _lark.search_records(ctx.lark_base_token, ctx.lark_table_people)
@@ -174,7 +174,7 @@ async def _invite_member(ctx: ChatContext, name: str) -> str:
 
 async def _kick_member(ctx: ChatContext, name: str) -> str:
     """Find member in People table and kick from group (ban + immediate unban)."""
-    from src.services import lark as _lark
+    from src.infrastructure import lark_client as _lark
 
     records = await _lark.search_records(ctx.lark_base_token, ctx.lark_table_people)
     person = next(

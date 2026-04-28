@@ -3,7 +3,7 @@ Idea creation tool. Takes ChatContext as first argument.
 """
 import asyncio
 from src.context import ChatContext
-from src.services import lark
+from src.infrastructure import lark_client as lark
 
 
 async def create_idea(ctx: ChatContext, content: str, tags: str = "", project: str = "") -> str:

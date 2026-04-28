@@ -19,7 +19,7 @@ from typing import Any
 
 from src import db
 from src.context import ChatContext
-from src.services import lark
+from src.infrastructure import lark_client as lark
 
 logger = logging.getLogger("identity")
 

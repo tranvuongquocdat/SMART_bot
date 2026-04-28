@@ -5,7 +5,7 @@ All functions take a ChatContext as first argument.
 from datetime import datetime
 
 from src.context import ChatContext
-from src.services import lark
+from src.infrastructure import lark_client as lark
 from src.utils.dates import date_to_ms
 
 # Canonical enum values — must match Lark field options exactly

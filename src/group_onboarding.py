@@ -10,7 +10,8 @@ import logging
 from datetime import date
 
 from src import db
-from src.services import lark, telegram
+from src.services import telegram
+from src.infrastructure import lark_client as lark
 from src.infrastructure import openai_client
 
 logger = logging.getLogger("group_onboarding")

@@ -4,7 +4,8 @@ from datetime import date, datetime
 
 from src import db as db_mod
 from src.context import ChatContext
-from src.services import lark, qdrant, telegram
+from src.services import qdrant, telegram
+from src.infrastructure import lark_client as lark
 from src.infrastructure import openai_client
 from src.utils.dates import date_to_ms, ms_to_date
 from src.utils.validation import (
@@ -414,7 +415,8 @@ async def approve_task_change(ctx: ChatContext, approval_id: int) -> str:
     """Apply a pending task change and notify the requester."""
     import json
     from src import db
-    from src.services import lark, telegram
+    from src.services import telegram
+    from src.infrastructure import lark_client as lark
 
     _db = await db.get_db()
     async with _db.execute(
