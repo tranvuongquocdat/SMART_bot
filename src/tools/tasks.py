@@ -6,39 +6,13 @@ from src import db as db_mod
 from src.context import ChatContext
 from src.services import lark, qdrant, telegram
 from src.services import openai_client
-
-# Canonical enum values — must match Lark field options exactly
-TASK_STATUS_VALUES = ("Mới", "Đang làm", "Hoàn thành", "Huỷ")
-TASK_PRIORITY_VALUES = ("Cao", "Trung bình", "Thấp")
-
-
-def _validate_status(status: str) -> str:
-    for v in TASK_STATUS_VALUES:
-        if status.lower() == v.lower():
-            return v
-    raise ValueError(
-        f"Status '{status}' không hợp lệ. Chỉ dùng: {', '.join(TASK_STATUS_VALUES)}"
-    )
-
-
-def _validate_priority(priority: str) -> str:
-    for v in TASK_PRIORITY_VALUES:
-        if priority.lower() == v.lower():
-            return v
-    raise ValueError(
-        f"Priority '{priority}' không hợp lệ. Chỉ dùng: {', '.join(TASK_PRIORITY_VALUES)}"
-    )
-
-
-def _date_to_ms(date_str: str) -> int:
-    """Convert YYYY-MM-DD to millisecond timestamp for Lark."""
-    dt = datetime.strptime(date_str, "%Y-%m-%d")
-    return int(dt.timestamp() * 1000)
-
-
-def _ms_to_date(ms: int) -> str:
-    """Convert millisecond timestamp to YYYY-MM-DD string."""
-    return datetime.fromtimestamp(ms / 1000).strftime("%Y-%m-%d")
+from src.utils.dates import date_to_ms, ms_to_date
+from src.utils.validation import (
+    TASK_PRIORITY_VALUES,
+    TASK_STATUS_VALUES,
+    validate_priority,
+    validate_status,
+)
 
 
 def _format_task(r: dict, workspace_label: str = "") -> str:
@@ -66,7 +40,7 @@ def _format_task(r: dict, workspace_label: str = "") -> str:
 async def _embed_and_upsert(ctx: ChatContext, record_id: str, fields: dict):
     """Build text repr of task and upsert to Qdrant."""
     deadline = fields.get("Deadline")
-    dl_str = _ms_to_date(int(deadline)) if isinstance(deadline, (int, float)) else ""
+    dl_str = ms_to_date(int(deadline)) if isinstance(deadline, (int, float)) else ""
     text = " ".join(filter(None, [
         fields.get("Tên task", ""),
         fields.get("Assignee", ""),
@@ -185,7 +159,7 @@ async def create_task(
 
     # Validate priority
     if priority:
-        priority = _validate_priority(priority)
+        priority = validate_priority(priority)
 
     fields: dict = {
         "Tên task": name,
@@ -196,9 +170,9 @@ async def create_task(
     if assignee_display:
         fields["Assignee"] = assignee_display
     if deadline:
-        fields["Deadline"] = _date_to_ms(deadline)
+        fields["Deadline"] = date_to_ms(deadline)
     if start_time:
-        fields["Start time"] = _date_to_ms(start_time)
+        fields["Start time"] = date_to_ms(start_time)
     if location:
         fields["Location"] = location
     if project:
@@ -299,11 +273,11 @@ async def update_task(
 
     fields: dict = {}
     if status:
-        fields["Status"] = _validate_status(status)
+        fields["Status"] = validate_status(status)
     if deadline:
-        fields["Deadline"] = _date_to_ms(deadline)
+        fields["Deadline"] = date_to_ms(deadline)
     if priority:
-        fields["Priority"] = _validate_priority(priority)
+        fields["Priority"] = validate_priority(priority)
     if assignee:
         fields["Assignee"] = assignee
     if name:
@@ -333,7 +307,7 @@ async def update_task(
                 payload,
             )
             changes_str = ", ".join(
-                f"{k}: {_ms_to_date(v) if k == 'Deadline' else v}"
+                f"{k}: {ms_to_date(v) if k == 'Deadline' else v}"
                 for k, v in fields.items()
             )
             boss = await db_mod.get_boss(str(ctx.boss_chat_id))
