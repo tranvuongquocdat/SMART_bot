@@ -389,7 +389,7 @@ async def get_boss(db_or_chat_id, chat_id_or_path=None) -> Optional[dict]:
 
 
 async def create_boss(
-    chat_id: int,
+    chat_id: str,
     name: str,
     company: str = "",
     lark_base_token: Optional[str] = None,
@@ -437,41 +437,38 @@ async def get_all_bosses(db_path: str = "data/history.db") -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# people_map
+# people_map (legacy) — table dropped in Phase 2; functions are thin wrappers
+# over `memberships` so existing callers keep working until refactored.
 # ---------------------------------------------------------------------------
 
-async def get_person(chat_id: int, db_path: str = "data/history.db") -> Optional[dict]:
+async def get_person(chat_id: str, db_path: str = "data/history.db") -> Optional[dict]:
+    """Return the first active membership row for chat_id (any boss). Legacy shape."""
     db = await get_db(db_path)
-    async with db.execute("SELECT * FROM people_map WHERE chat_id = ?", (chat_id,)) as cur:
+    async with db.execute(
+        "SELECT chat_id, boss_chat_id, person_type AS type, name FROM memberships "
+        "WHERE chat_id = ? AND status = 'active' LIMIT 1",
+        (str(chat_id),),
+    ) as cur:
         row = await cur.fetchone()
     return dict(row) if row else None
 
 
 async def add_person(
-    chat_id: int,
-    boss_chat_id: int,
+    chat_id: str,
+    boss_chat_id: str,
     person_type: str,
     name: str = "",
     db_path: str = "data/history.db",
 ) -> None:
+    """Legacy wrapper — upserts the corresponding `memberships` row as active."""
     db = await get_db(db_path)
-    await db.execute(
-        """
-        INSERT INTO people_map (chat_id, boss_chat_id, type, name)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(chat_id) DO UPDATE SET
-            boss_chat_id = excluded.boss_chat_id,
-            type         = excluded.type,
-            name         = excluded.name
-        """,
-        (chat_id, boss_chat_id, person_type, name),
-    )
-    await db.commit()
+    await upsert_membership(db, str(chat_id), str(boss_chat_id), person_type, name, status="active")
 
 
-async def delete_person(chat_id: int, db_path: str = "data/history.db") -> None:
+async def delete_person(chat_id: str, db_path: str = "data/history.db") -> None:
+    """Legacy wrapper — removes every membership row for chat_id (across all bosses)."""
     db = await get_db(db_path)
-    await db.execute("DELETE FROM people_map WHERE chat_id = ?", (chat_id,))
+    await db.execute("DELETE FROM memberships WHERE chat_id = ?", (str(chat_id),))
     await db.commit()
 
 
@@ -497,8 +494,8 @@ async def get_group(db_or_group_chat_id, group_chat_id_or_path=None) -> Optional
 
 
 async def add_group(
-    group_chat_id: int,
-    boss_chat_id: int,
+    group_chat_id: str,
+    boss_chat_id: str,
     group_name: str = "",
     project_id: str | None = None,
 ) -> None:
@@ -522,10 +519,10 @@ async def add_group(
 # ---------------------------------------------------------------------------
 
 async def save_message(
-    chat_id: int,
+    chat_id: str,
     role: str,
     content: str,
-    sender_id: Optional[int] = None,
+    sender_id: Optional[str] = None,
     db_path: str = "data/history.db",
 ) -> int:
     db = await get_db(db_path)
@@ -538,7 +535,7 @@ async def save_message(
 
 
 async def get_recent(
-    chat_id: int,
+    chat_id: str,
     limit: int = 8,
     db_path: str = "data/history.db",
 ) -> list[dict]:
@@ -563,7 +560,7 @@ async def get_recent(
 # ---------------------------------------------------------------------------
 
 async def get_note(
-    boss_chat_id: int,
+    boss_chat_id: str,
     note_type: str,
     ref_id: str,
     db_path: str = "data/history.db",
@@ -578,7 +575,7 @@ async def get_note(
 
 
 async def update_note(
-    boss_chat_id: int,
+    boss_chat_id: str,
     note_type: str,
     ref_id: str,
     content: str,
@@ -604,10 +601,10 @@ async def update_note(
 # ---------------------------------------------------------------------------
 
 async def create_reminder(
-    boss_chat_id: int,
+    boss_chat_id: str,
     content: str,
     remind_at: datetime,
-    target_chat_id: Optional[int] = None,
+    target_chat_id: Optional[str] = None,
     target_name: str = "",
     db_path: str = "data/history.db",
 ) -> int:
@@ -647,7 +644,7 @@ async def mark_reminder_done(reminder_id: int, db_path: str = "data/history.db")
 
 
 async def list_reminders(
-    boss_chat_id: int,
+    boss_chat_id: str,
     status: str = "pending",
     limit: int = 50,
     db_path: str = "data/history.db",
@@ -681,12 +678,12 @@ async def list_reminders(
 
 async def update_reminder(
     reminder_id: int,
-    boss_chat_id: int,
+    boss_chat_id: str,
     *,
     content: Optional[str] = None,
     remind_at: Optional[datetime] = None,
     update_target: bool = False,
-    target_chat_id: Optional[int] = None,
+    target_chat_id: Optional[str] = None,
     target_name: str = "",
     db_path: str = "data/history.db",
 ) -> bool:
@@ -715,7 +712,7 @@ async def update_reminder(
 
 async def delete_reminder(
     reminder_id: int,
-    boss_chat_id: int,
+    boss_chat_id: str,
     db_path: str = "data/history.db",
 ) -> bool:
     db = await get_db(db_path)
@@ -732,7 +729,7 @@ async def delete_reminder(
 # ---------------------------------------------------------------------------
 
 async def log_token_usage(
-    boss_chat_id: int,
+    boss_chat_id: str,
     source: str,
     prompt_tokens: int,
     completion_tokens: int,
@@ -751,7 +748,7 @@ async def log_token_usage(
 # sessions
 # ---------------------------------------------------------------------------
 
-async def set_session(user_id: int, key: str, value: str, ttl_minutes: int = 30) -> None:
+async def set_session(user_id: str, key: str, value: str, ttl_minutes: int = 30) -> None:
     from datetime import datetime, timedelta, timezone
     expires = (datetime.now(timezone.utc) + timedelta(minutes=ttl_minutes)).isoformat()
     db = await get_db()
@@ -762,7 +759,7 @@ async def set_session(user_id: int, key: str, value: str, ttl_minutes: int = 30)
     await db.commit()
 
 
-async def get_session(user_id: int, key: str) -> str | None:
+async def get_session(user_id: str, key: str) -> str | None:
     from datetime import datetime, timezone
     db = await get_db()
     now = datetime.now(timezone.utc).isoformat()
@@ -774,7 +771,7 @@ async def get_session(user_id: int, key: str) -> str | None:
     return row["value"] if row else None
 
 
-async def delete_session(user_id: int, key: str) -> None:
+async def delete_session(user_id: str, key: str) -> None:
     db = await get_db()
     await db.execute("DELETE FROM sessions WHERE user_id = ? AND key = ?", (user_id, key))
     await db.commit()
@@ -986,8 +983,8 @@ async def sync_reminder_from_lark(db, sqlite_id: int, content: str, status: str)
 # ---------------------------------------------------------------------------
 
 async def log_outbound_dm(
-    boss_chat_id: int,
-    to_chat_id: int,
+    boss_chat_id: str,
+    to_chat_id: str,
     to_name: str,
     content: str,
     trigger_type: str = "manual",
@@ -1006,8 +1003,8 @@ async def log_outbound_dm(
 
 
 async def get_outbound_log(
-    boss_chat_id: int,
-    to_chat_id: int | None = None,
+    boss_chat_id: str,
+    to_chat_id: str | None = None,
     trigger_type: str | None = None,
     limit: int = 50,
 ) -> list[dict]:
@@ -1033,7 +1030,7 @@ async def get_outbound_log(
 # onboarding_state
 # ---------------------------------------------------------------------------
 
-async def get_onboarding_state(chat_id: int) -> dict:
+async def get_onboarding_state(chat_id: str) -> dict:
     import json as _json
     _db = await get_db()
     async with _db.execute(
@@ -1048,7 +1045,7 @@ async def get_onboarding_state(chat_id: int) -> dict:
         return {}
 
 
-async def save_onboarding_state(chat_id: int, state: dict) -> None:
+async def save_onboarding_state(chat_id: str, state: dict) -> None:
     import json as _json
     _db = await get_db()
     await _db.execute(
@@ -1060,7 +1057,7 @@ async def save_onboarding_state(chat_id: int, state: dict) -> None:
     await _db.commit()
 
 
-async def clear_onboarding_state(chat_id: int) -> None:
+async def clear_onboarding_state(chat_id: str) -> None:
     _db = await get_db()
     await _db.execute("DELETE FROM onboarding_state WHERE chat_id = ?", (chat_id,))
     await _db.commit()
@@ -1095,10 +1092,10 @@ async def mark_overdue_notified(db_conn, task_record_id: str, boss_chat_id: str)
 # ---------------------------------------------------------------------------
 
 async def upsert_seen_contact(
-    chat_id: int,
+    chat_id: str,
     display_name: str = "",
     username: str = "",
-    last_seen_chat: int | None = None,
+    last_seen_chat: str | None = None,
 ) -> None:
     """Insert or update a seen contact; bumps last_seen_at and seen_count."""
     _db = await get_db()
@@ -1118,7 +1115,7 @@ async def upsert_seen_contact(
     await _db.commit()
 
 
-async def get_seen_contact(chat_id: int) -> dict | None:
+async def get_seen_contact(chat_id: str) -> dict | None:
     _db = await get_db()
     async with _db.execute(
         "SELECT * FROM seen_contacts WHERE chat_id = ?", (chat_id,)
@@ -1142,7 +1139,7 @@ async def search_seen_contacts(query: str, limit: int = 20) -> list[dict]:
 
 
 async def list_unlinked_seen_contacts(
-    lark_people_chat_ids: set[int],
+    lark_people_chat_ids: set[str],
     days: int = 30,
     limit: int = 30,
 ) -> list[dict]:
