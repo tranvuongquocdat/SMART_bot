@@ -1,0 +1,62 @@
+"""ToolDispatcher — name → handler registry with legacy fallback.
+
+For Phase 4b-1 only a handful of handlers are migrated. Unknown names
+delegate to `src.tools.execute_tool` (the legacy `match`-statement
+dispatcher) so the bot keeps working end-to-end. Phase 4b-2 mass-migrates
+the rest; once every tool has a handler, the fallback can be removed and
+`src.tools` deleted entirely (Phase 4b-2 done criterion).
+"""
+from __future__ import annotations
+
+import json
+import logging
+
+from src.agent_pkg.handlers._base import ToolHandler
+from src.context import ChatContext
+
+logger = logging.getLogger("agent.dispatcher")
+
+
+class ToolDispatcher:
+    def __init__(self, handlers: list[ToolHandler]) -> None:
+        self._by_name: dict[str, ToolHandler] = {}
+        for h in handlers:
+            if h.name in self._by_name:
+                raise ValueError(f"duplicate handler name: {h.name!r}")
+            self._by_name[h.name] = h
+
+    @property
+    def known_names(self) -> set[str]:
+        return set(self._by_name.keys())
+
+    async def execute(
+        self, name: str, arguments: str | dict, ctx: ChatContext,
+    ) -> str:
+        handler = self._by_name.get(name)
+        if handler is None:
+            return await self._fallback(name, arguments, ctx)
+
+        try:
+            args = self._parse_args(arguments)
+        except json.JSONDecodeError as e:
+            logger.warning("Bad JSON args for %s: %s", name, e)
+            return f"[TOOL_ERROR:bad_args] {name}: invalid JSON"
+
+        try:
+            return await handler.handle(args, ctx)
+        except Exception as exc:  # noqa: BLE001  — uniform error envelope
+            err_type = type(exc).__name__
+            return f"[TOOL_ERROR:unknown] {name} failed ({err_type}): {exc}"
+
+    @staticmethod
+    def _parse_args(arguments: str | dict) -> dict:
+        if isinstance(arguments, dict):
+            return arguments
+        return json.loads(arguments)
+
+    @staticmethod
+    async def _fallback(name: str, arguments: str | dict, ctx: ChatContext) -> str:
+        # Keep the import inside the method so unit tests can run without
+        # importing the heavy legacy tools module.
+        from src.tools import execute_tool as _legacy_execute
+        return await _legacy_execute(name, arguments, ctx)
