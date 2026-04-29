@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     openai_api_key: str
     openai_chat_model: str = "gpt-5.4"
     openai_embedding_model: str = "text-embedding-3-small"
+    openai_embedding_dim: int = 1536      # text-embedding-3-small = 1536
 
     qdrant_url: str = "http://qdrant:6333"
 
