@@ -20,4 +20,8 @@ class Settings(BaseSettings):
     recent_messages: int = 15
     rag_messages: int = 8
 
+    # Forward-compat (Phase 3): per-boss LLM credential encryption.
+    # Empty = encryption disabled (no boss can have an encrypted key column populated).
+    boss_credential_encryption_key: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}

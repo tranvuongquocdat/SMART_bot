@@ -12,6 +12,7 @@ dependencies = [
     "apscheduler==3.11.0",
     "pydantic-settings==2.9.1",
     "qdrant-client==1.14.2",
+    "cryptography>=47.0.0",
 ]
 
 [dependency-groups]
