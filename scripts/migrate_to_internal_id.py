@@ -27,6 +27,16 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
+def exec_many(conn: sqlite3.Connection, sql: str) -> None:
+    """Run multi-statement SQL via execute() so statements participate in
+    our manual transaction. `executescript()` issues an implicit COMMIT,
+    which would defeat rollback safety."""
+    for stmt in sql.split(";"):
+        s = stmt.strip()
+        if s:
+            conn.execute(s)
+
+
 def already_migrated(conn: sqlite3.Connection) -> bool:
     cur = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='external_identity'"
@@ -134,12 +144,20 @@ def collect_conversation_rows(conn: sqlite3.Connection) -> list[tuple[str, str, 
     ):
         s = str(cid)
         rows.setdefault(s, ("group", ""))
-    # seen_contacts.last_seen_chat — could be group or DM; default group (it's where contact was seen)
+    # seen_contacts.last_seen_chat — classify by Telegram sign convention:
+    # negative chat_id = (super)group, positive = DM. Only used as a fallback
+    # when this id wasn't already classified via group_map / messages / etc.
     for (cid,) in conn.execute(
         "SELECT DISTINCT last_seen_chat FROM seen_contacts WHERE last_seen_chat IS NOT NULL"
     ):
         s = str(cid)
-        rows.setdefault(s, ("group", ""))
+        if s in rows:
+            continue
+        try:
+            chat_type = "group" if int(s) < 0 else "dm"
+        except (TypeError, ValueError):
+            chat_type = "dm"
+        rows[s] = (chat_type, "")
     return [(eid, ct, title) for eid, (ct, title) in rows.items()]
 
 
@@ -203,7 +221,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """Rebuild every business table using copy-pattern to swap external ids → internal ids."""
 
     # ----- bosses -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE bosses_new (
             chat_id              TEXT PRIMARY KEY,
             name                 TEXT NOT NULL,
@@ -236,7 +254,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- memberships -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE memberships_new (
             chat_id             TEXT NOT NULL,
             boss_chat_id        TEXT NOT NULL,
@@ -269,7 +287,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- group_map -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE group_map_new (
             group_chat_id  TEXT PRIMARY KEY,
             boss_chat_id   TEXT NOT NULL,
@@ -292,7 +310,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- messages -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE messages_new (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             chat_id    TEXT NOT NULL,
@@ -319,7 +337,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- notes -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE notes_new (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
             boss_chat_id TEXT NOT NULL,
@@ -339,7 +357,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- reminders -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE reminders_new (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             boss_chat_id    TEXT NOT NULL,
@@ -367,7 +385,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- token_usage -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE token_usage_new (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
             boss_chat_id      TEXT NOT NULL,
@@ -390,7 +408,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- pending_approvals -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE pending_approvals_new (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             boss_chat_id    TEXT NOT NULL,
@@ -419,7 +437,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- task_notifications -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE task_notifications_new (
             task_record_id      TEXT NOT NULL,
             boss_chat_id        TEXT NOT NULL,
@@ -451,7 +469,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- scheduled_reviews -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE scheduled_reviews_new (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             owner_id      TEXT NOT NULL,
@@ -480,7 +498,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- outbound_messages -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE outbound_messages_new (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             boss_chat_id  TEXT NOT NULL,
@@ -514,7 +532,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- onboarding_state -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE onboarding_state_new (
             chat_id    TEXT PRIMARY KEY,
             state_json TEXT NOT NULL DEFAULT '{}',
@@ -530,7 +548,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- sessions -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE sessions_new (
             user_id     TEXT NOT NULL,
             key         TEXT NOT NULL,
@@ -548,7 +566,7 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     """)
 
     # ----- seen_contacts -----
-    conn.executescript("""
+    exec_many(conn, """
         CREATE TABLE seen_contacts_new (
             chat_id          TEXT PRIMARY KEY,
             display_name     TEXT,
@@ -580,6 +598,92 @@ def rebuild_business_tables(conn: sqlite3.Connection) -> None:
     conn.execute("DROP TABLE IF EXISTS people_map")
 
 
+# Tables that must preserve row count across migration. Maps logical name to
+# (pre-count-snapshot SQL, post-count SQL). Snapshots are taken before rebuild.
+_COUNT_TABLES = (
+    "bosses", "memberships", "group_map", "messages", "notes",
+    "reminders", "token_usage", "pending_approvals", "task_notifications",
+    "scheduled_reviews", "outbound_messages", "onboarding_state",
+    "sessions", "seen_contacts",
+)
+
+
+def snapshot_counts(conn: sqlite3.Connection) -> dict[str, int]:
+    return {
+        t: conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+        for t in _COUNT_TABLES
+    }
+
+
+def assert_counts_unchanged(conn: sqlite3.Connection, before: dict[str, int]) -> None:
+    """Raise if any rebuilt table dropped or gained rows. Detects silent FK-resolve failures."""
+    after = snapshot_counts(conn)
+    diffs = {t: (before[t], after[t]) for t in _COUNT_TABLES if before[t] != after[t]}
+    if diffs:
+        details = ", ".join(f"{t}: {b}->{a}" for t, (b, a) in diffs.items())
+        raise RuntimeError(f"Row counts changed during rebuild: {details}")
+
+
+def assert_fk_resolves(conn: sqlite3.Connection) -> None:
+    """Verify every FK column in rebuilt tables resolves to a mapping row.
+    Catches silent NULL-via-LEFT-JOIN bugs and CAST mismatches."""
+    checks = (
+        ("bosses.chat_id",
+         "SELECT COUNT(*) FROM bosses b LEFT JOIN external_identity ei ON ei.internal_id = b.chat_id WHERE ei.internal_id IS NULL"),
+        ("memberships.chat_id",
+         "SELECT COUNT(*) FROM memberships m LEFT JOIN external_identity ei ON ei.internal_id = m.chat_id WHERE ei.internal_id IS NULL"),
+        ("memberships.boss_chat_id",
+         "SELECT COUNT(*) FROM memberships m LEFT JOIN external_identity ei ON ei.internal_id = m.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("group_map.group_chat_id",
+         "SELECT COUNT(*) FROM group_map g LEFT JOIN conversation c ON c.internal_chat_id = g.group_chat_id WHERE c.internal_chat_id IS NULL"),
+        ("group_map.boss_chat_id",
+         "SELECT COUNT(*) FROM group_map g LEFT JOIN external_identity ei ON ei.internal_id = g.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("messages.chat_id",
+         "SELECT COUNT(*) FROM messages m LEFT JOIN conversation c ON c.internal_chat_id = m.chat_id WHERE c.internal_chat_id IS NULL"),
+        ("messages.sender_id (non-null)",
+         "SELECT COUNT(*) FROM messages m LEFT JOIN external_identity ei ON ei.internal_id = m.sender_id WHERE m.sender_id IS NOT NULL AND ei.internal_id IS NULL"),
+        ("notes.boss_chat_id",
+         "SELECT COUNT(*) FROM notes n LEFT JOIN external_identity ei ON ei.internal_id = n.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("reminders.boss_chat_id",
+         "SELECT COUNT(*) FROM reminders r LEFT JOIN external_identity ei ON ei.internal_id = r.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("reminders.target_chat_id (non-null)",
+         "SELECT COUNT(*) FROM reminders r LEFT JOIN external_identity ei ON ei.internal_id = r.target_chat_id WHERE r.target_chat_id IS NOT NULL AND ei.internal_id IS NULL"),
+        ("token_usage.boss_chat_id",
+         "SELECT COUNT(*) FROM token_usage t LEFT JOIN external_identity ei ON ei.internal_id = t.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("pending_approvals.boss_chat_id",
+         "SELECT COUNT(*) FROM pending_approvals p LEFT JOIN external_identity ei ON ei.internal_id = p.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("pending_approvals.requester_id",
+         "SELECT COUNT(*) FROM pending_approvals p LEFT JOIN external_identity ei ON ei.internal_id = p.requester_id WHERE ei.internal_id IS NULL"),
+        ("task_notifications.boss_chat_id",
+         "SELECT COUNT(*) FROM task_notifications tn LEFT JOIN external_identity ei ON ei.internal_id = tn.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("task_notifications.assignee_chat_id (non-null)",
+         "SELECT COUNT(*) FROM task_notifications tn LEFT JOIN external_identity ei ON ei.internal_id = tn.assignee_chat_id WHERE tn.assignee_chat_id IS NOT NULL AND ei.internal_id IS NULL"),
+        ("scheduled_reviews.owner_id",
+         "SELECT COUNT(*) FROM scheduled_reviews s LEFT JOIN external_identity ei ON ei.internal_id = s.owner_id WHERE ei.internal_id IS NULL"),
+        ("scheduled_reviews.group_chat_id (non-null)",
+         "SELECT COUNT(*) FROM scheduled_reviews s LEFT JOIN conversation c ON c.internal_chat_id = s.group_chat_id WHERE s.group_chat_id IS NOT NULL AND c.internal_chat_id IS NULL"),
+        ("outbound_messages.boss_chat_id",
+         "SELECT COUNT(*) FROM outbound_messages o LEFT JOIN external_identity ei ON ei.internal_id = o.boss_chat_id WHERE ei.internal_id IS NULL"),
+        ("outbound_messages.to_chat_id",
+         "SELECT COUNT(*) FROM outbound_messages o LEFT JOIN external_identity ei ON ei.internal_id = o.to_chat_id WHERE ei.internal_id IS NULL"),
+        ("onboarding_state.chat_id",
+         "SELECT COUNT(*) FROM onboarding_state o LEFT JOIN external_identity ei ON ei.internal_id = o.chat_id WHERE ei.internal_id IS NULL"),
+        ("sessions.user_id",
+         "SELECT COUNT(*) FROM sessions s LEFT JOIN external_identity ei ON ei.internal_id = s.user_id WHERE ei.internal_id IS NULL"),
+        ("seen_contacts.chat_id",
+         "SELECT COUNT(*) FROM seen_contacts sc LEFT JOIN external_identity ei ON ei.internal_id = sc.chat_id WHERE ei.internal_id IS NULL"),
+        ("seen_contacts.last_seen_chat (non-null)",
+         "SELECT COUNT(*) FROM seen_contacts sc LEFT JOIN conversation c ON c.internal_chat_id = sc.last_seen_chat WHERE sc.last_seen_chat IS NOT NULL AND c.internal_chat_id IS NULL"),
+    )
+    failures: list[str] = []
+    for label, sql in checks:
+        n = conn.execute(sql).fetchone()[0]
+        if n:
+            failures.append(f"{label}: {n} unresolved row(s)")
+    if failures:
+        raise RuntimeError("FK resolution failed: " + "; ".join(failures))
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--db", default="data/history.db")
@@ -599,7 +703,12 @@ def main() -> int:
 
     conn = sqlite3.connect(str(db_path))
     conn.row_factory = sqlite3.Row
+    # autocommit off, manual transaction control. Default LEGACY_TRANSACTION_CONTROL
+    # would auto-commit on DDL, defeating rollback. isolation_level = None gives
+    # us "no implicit BEGIN" so we drive the transaction explicitly.
+    conn.isolation_level = None
     conn.execute("PRAGMA foreign_keys = OFF")
+    # PRAGMA must run outside the transaction; subsequent BEGIN starts the txn.
 
     if already_migrated(conn):
         print("Already migrated — exiting 0.")
@@ -610,7 +719,7 @@ def main() -> int:
         conn.execute("BEGIN")
         # Tables external_identity / conversation must already exist (added by db._init_schema).
         # If running migration on a fresh DB from sqlite3 directly (no app boot), create now.
-        conn.executescript("""
+        exec_many(conn, """
             CREATE TABLE IF NOT EXISTS external_identity (
                 internal_id   TEXT PRIMARY KEY,
                 provider      TEXT NOT NULL,
@@ -634,11 +743,22 @@ def main() -> int:
         counts = insert_mappings(conn)
         print(f"Mapped {counts['persons']} persons and {counts['conversations']} conversations.")
 
+        # Snapshot row counts before destructive rebuild so we can detect
+        # silent FK-resolve failures (LEFT JOIN dropping rows on CAST mismatch).
+        pre_counts = snapshot_counts(conn)
+
         rebuild_business_tables(conn)
-        conn.commit()
+
+        assert_counts_unchanged(conn, pre_counts)
+        assert_fk_resolves(conn)
+
+        conn.execute("COMMIT")
         print("Migration committed.")
     except Exception as exc:
-        conn.rollback()
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
         print(f"Migration failed, rolled back: {exc}", file=sys.stderr)
         raise
     finally:

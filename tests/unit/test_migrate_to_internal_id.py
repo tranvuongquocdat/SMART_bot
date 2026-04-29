@@ -154,6 +154,24 @@ def _seed(db_path: Path) -> None:
         "INSERT INTO token_usage (boss_chat_id, source, total_tokens) VALUES (?, 'agent', 100)",
         (100,),
     )
+    # Tables previously uncovered by the test
+    conn.execute(
+        "INSERT INTO pending_approvals (boss_chat_id, requester_id, task_record_id, payload) VALUES ('100', '300', 'rec_xx', '{}')",
+    )
+    conn.executemany(
+        "INSERT INTO task_notifications (task_record_id, boss_chat_id, assignee_chat_id) VALUES (?, ?, ?)",
+        [("rec_a", "100", "300"),
+         ("rec_b", "100", None)],   # NULL assignee — exercises LEFT JOIN
+    )
+    conn.execute(
+        "INSERT INTO scheduled_reviews (owner_id, cron_time, content_type, group_chat_id) VALUES ('100', '09 00', 'daily', NULL)",
+    )
+    conn.execute(
+        "INSERT INTO onboarding_state (chat_id) VALUES (200)",
+    )
+    conn.execute(
+        "INSERT INTO sessions (user_id, key, value, expires_at) VALUES (100, 'k', 'v', '2099-01-01')",
+    )
     conn.commit()
     conn.close()
 
@@ -219,6 +237,50 @@ def test_migration_end_to_end(tmp_path):
         if r["last_seen_chat"]:
             assert len(r["last_seen_chat"]) == 36
 
+    # pending_approvals — both FKs resolve
+    for r in conn.execute("SELECT boss_chat_id, requester_id FROM pending_approvals"):
+        assert len(r["boss_chat_id"]) == 36
+        assert len(r["requester_id"]) == 36
+
+    # task_notifications — boss FK + assignee may be NULL
+    for r in conn.execute("SELECT boss_chat_id, assignee_chat_id FROM task_notifications"):
+        assert len(r["boss_chat_id"]) == 36
+        if r["assignee_chat_id"] is not None:
+            assert len(r["assignee_chat_id"]) == 36
+
+    # scheduled_reviews — owner FK; group_chat_id may be NULL
+    for r in conn.execute("SELECT owner_id, group_chat_id FROM scheduled_reviews"):
+        assert len(r["owner_id"]) == 36
+        if r["group_chat_id"] is not None:
+            assert len(r["group_chat_id"]) == 36
+
+    # onboarding_state + sessions
+    for r in conn.execute("SELECT chat_id FROM onboarding_state"):
+        assert len(r["chat_id"]) == 36
+    for r in conn.execute("SELECT user_id FROM sessions"):
+        assert len(r["user_id"]) == 36
+
+    # FK resolution: every business id MUST point at an existing mapping row.
+    # This catches silent CAST mismatches that could LEFT-JOIN a NULL.
+    bad = conn.execute("""
+        SELECT 'memberships.boss' AS src FROM memberships m
+          LEFT JOIN external_identity ei ON ei.internal_id = m.boss_chat_id
+          WHERE ei.internal_id IS NULL
+        UNION ALL
+        SELECT 'reminders.target' FROM reminders r
+          LEFT JOIN external_identity ei ON ei.internal_id = r.target_chat_id
+          WHERE r.target_chat_id IS NOT NULL AND ei.internal_id IS NULL
+        UNION ALL
+        SELECT 'task_notifications.assignee' FROM task_notifications tn
+          LEFT JOIN external_identity ei ON ei.internal_id = tn.assignee_chat_id
+          WHERE tn.assignee_chat_id IS NOT NULL AND ei.internal_id IS NULL
+        UNION ALL
+        SELECT 'pending_approvals.requester' FROM pending_approvals p
+          LEFT JOIN external_identity ei ON ei.internal_id = p.requester_id
+          WHERE ei.internal_id IS NULL
+    """).fetchall()
+    assert bad == [], f"Unresolved FKs: {bad}"
+
     # people_map dropped
     has_pm = conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='people_map'"
@@ -245,3 +307,114 @@ def test_migration_end_to_end(tmp_path):
     )
     assert result2.returncode == 0
     assert "Already migrated" in result2.stdout
+
+
+def test_rollback_on_failure_leaves_db_intact(tmp_path):
+    """Inject a failure mid-rebuild; verify the DB is fully rolled back.
+    This is the hard guarantee that a partial migration cannot corrupt data.
+    """
+    db = tmp_path / "history.db"
+    _seed(db)
+
+    # Snapshot pre-migration state
+    pre_conn = sqlite3.connect(str(db))
+    pre_conn.row_factory = sqlite3.Row
+    pre_bosses = list(pre_conn.execute("SELECT chat_id, name FROM bosses ORDER BY chat_id"))
+    pre_messages = pre_conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0]
+    pre_has_people_map = pre_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='people_map'"
+    ).fetchone() is not None
+    pre_conn.close()
+    assert pre_has_people_map
+
+    # Import the script and call rebuild with a forced raise after a few tables.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("migrate_mod", str(SCRIPT))
+    migrate_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migrate_mod)
+
+    conn = sqlite3.connect(str(db))
+    conn.row_factory = sqlite3.Row
+    conn.isolation_level = None
+    conn.execute("PRAGMA foreign_keys = OFF")
+
+    try:
+        conn.execute("BEGIN")
+        # Recreate the new tables (since this seed DB doesn't have them)
+        migrate_mod.exec_many(conn, """
+            CREATE TABLE IF NOT EXISTS external_identity (
+                internal_id   TEXT PRIMARY KEY,
+                provider      TEXT NOT NULL,
+                external_id   TEXT NOT NULL,
+                name          TEXT DEFAULT '',
+                username      TEXT DEFAULT '',
+                created_at    INTEGER NOT NULL,
+                UNIQUE(provider, external_id)
+            );
+            CREATE TABLE IF NOT EXISTS conversation (
+                internal_chat_id  TEXT PRIMARY KEY,
+                provider          TEXT NOT NULL,
+                external_chat_id  TEXT NOT NULL,
+                chat_type         TEXT NOT NULL,
+                title             TEXT DEFAULT '',
+                created_at        INTEGER NOT NULL,
+                UNIQUE(provider, external_chat_id)
+            );
+        """)
+        migrate_mod.insert_mappings(conn)
+
+        # Monkey-patch exec_many to raise after a few tables. We want some tables
+        # rebuilt before the failure to prove the rollback unwinds them.
+        original_exec = migrate_mod.exec_many
+        call_count = {"n": 0}
+
+        def failing_exec(c, sql):
+            call_count["n"] += 1
+            if call_count["n"] >= 4:
+                raise RuntimeError("simulated failure mid-rebuild")
+            original_exec(c, sql)
+
+        migrate_mod.exec_many = failing_exec
+        try:
+            try:
+                migrate_mod.rebuild_business_tables(conn)
+            except RuntimeError:
+                conn.execute("ROLLBACK")
+        finally:
+            migrate_mod.exec_many = original_exec
+    finally:
+        conn.close()
+
+    # Verify: the DB looks identical to pre-migration.
+    post_conn = sqlite3.connect(str(db))
+    post_conn.row_factory = sqlite3.Row
+
+    # bosses chat_id is still INTEGER (legacy schema)
+    bosses_after = list(post_conn.execute("SELECT chat_id, name FROM bosses ORDER BY chat_id"))
+    assert len(bosses_after) == len(pre_bosses)
+    for before, after in zip(pre_bosses, bosses_after):
+        assert before["chat_id"] == after["chat_id"]
+        assert before["name"] == after["name"]
+        assert isinstance(after["chat_id"], int), "rollback should restore INTEGER chat_id"
+
+    # messages count unchanged
+    assert post_conn.execute("SELECT COUNT(*) FROM messages").fetchone()[0] == pre_messages
+
+    # people_map still present (migration didn't drop it)
+    has_pm = post_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='people_map'"
+    ).fetchone() is not None
+    assert has_pm
+
+    # external_identity / conversation were CREATE'd inside the transaction —
+    # rollback should remove them entirely. Strongest proof of full rollback.
+    has_ei = post_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='external_identity'"
+    ).fetchone() is not None
+    has_conv = post_conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='conversation'"
+    ).fetchone() is not None
+    assert not has_ei, "ROLLBACK should drop external_identity (CREATE was inside txn)"
+    assert not has_conv, "ROLLBACK should drop conversation (CREATE was inside txn)"
+
+    post_conn.close()
