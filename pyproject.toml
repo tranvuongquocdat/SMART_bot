@@ -13,6 +13,7 @@ dependencies = [
     "pydantic-settings==2.9.1",
     "qdrant-client==1.14.2",
     "cryptography>=47.0.0",
+    "ddgs>=9.14.1",
 ]
 
 [dependency-groups]
