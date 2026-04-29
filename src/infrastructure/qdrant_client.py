@@ -56,7 +56,7 @@ async def ensure_collection(collection: str):
             },
         )
         await _qdrant.create_payload_index(
-            collection_name=collection, field_name="chat_id", field_schema="integer"
+            collection_name=collection, field_name="chat_id", field_schema="keyword"
         )
 
 
