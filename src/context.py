@@ -11,10 +11,10 @@ def init_context(database):
 
 @dataclass
 class ChatContext:
-    sender_chat_id: int
+    sender_chat_id: str
     sender_name: str
     sender_type: str          # boss | member | partner | unknown
-    boss_chat_id: int
+    boss_chat_id: str
     boss_name: str
     lark_base_token: str
     lark_table_people: str
@@ -23,7 +23,7 @@ class ChatContext:
     lark_table_ideas: str
     lark_table_reminders: str
     lark_table_notes: str
-    chat_id: int
+    chat_id: str
     is_group: bool
     group_name: str
     messages_collection: str
@@ -31,8 +31,8 @@ class ChatContext:
     all_memberships: list[dict] = field(default_factory=list)
 
 
-async def resolve(chat_id: int, sender_id: int, is_group: bool,
-                  preferred_boss_id: int | None = None) -> ChatContext | None:
+async def resolve(chat_id: str, sender_id: str, is_group: bool,
+                  preferred_boss_id: str | None = None) -> ChatContext | None:
     """
     Resolve context for a message. Returns None if user is unknown (needs onboarding).
 
@@ -108,15 +108,15 @@ async def resolve(chat_id: int, sender_id: int, is_group: bool,
                        chat_id, False, "", memberships)
 
 
-def _build_ctx(boss: dict, sender_id: int, sender_name: str, sender_type: str,
-               chat_id: int, is_group: bool, group_name: str,
+def _build_ctx(boss: dict, sender_id: str, sender_name: str, sender_type: str,
+               chat_id: str, is_group: bool, group_name: str,
                all_memberships: list[dict]) -> ChatContext:
     bid = boss["chat_id"]
     return ChatContext(
-        sender_chat_id=int(sender_id),
+        sender_chat_id=str(sender_id),
         sender_name=sender_name,
         sender_type=sender_type,
-        boss_chat_id=int(bid),
+        boss_chat_id=str(bid),
         boss_name=boss["name"],
         lark_base_token=boss["lark_base_token"],
         lark_table_people=boss["lark_table_people"],
@@ -125,7 +125,7 @@ def _build_ctx(boss: dict, sender_id: int, sender_name: str, sender_type: str,
         lark_table_ideas=boss["lark_table_ideas"],
         lark_table_reminders=boss.get("lark_table_reminders", ""),
         lark_table_notes=boss.get("lark_table_notes", ""),
-        chat_id=int(chat_id),
+        chat_id=str(chat_id),
         is_group=is_group,
         group_name=group_name,
         messages_collection=f"messages_{bid}",

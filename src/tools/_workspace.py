@@ -54,7 +54,7 @@ async def resolve_workspaces(ctx: ChatContext, workspace_ids: str | list) -> lis
     return result
 
 
-async def _get_active_workspace_id(sender_chat_id: int) -> str | None:
+async def _get_active_workspace_id(sender_chat_id: str) -> str | None:
     _db = await db.get_db()
     async with _db.execute(
         "SELECT active_workspace_id FROM memberships WHERE chat_id = ? AND active_workspace_id IS NOT NULL LIMIT 1",
@@ -64,7 +64,7 @@ async def _get_active_workspace_id(sender_chat_id: int) -> str | None:
     return row["active_workspace_id"] if row else None
 
 
-async def set_active_workspace_id(sender_chat_id: int, boss_chat_id: str) -> None:
+async def set_active_workspace_id(sender_chat_id: str, boss_chat_id: str) -> None:
     _db = await db.get_db()
     await _db.execute(
         "UPDATE memberships SET active_workspace_id = ? WHERE chat_id = ?",

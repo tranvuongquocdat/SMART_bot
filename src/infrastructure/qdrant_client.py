@@ -60,13 +60,13 @@ async def ensure_collection(collection: str):
         )
 
 
-async def provision_collections(boss_chat_id: int):
+async def provision_collections(boss_chat_id: str):
     """Create messages_{id} and tasks_{id} collections for new boss."""
     await ensure_collection(f"messages_{boss_chat_id}")
     await ensure_collection(f"tasks_{boss_chat_id}")
 
 
-async def upsert(collection: str, point_id: int, chat_id: int, role: str, text: str, vector: list[float]):
+async def upsert(collection: str, point_id: int, chat_id: str, role: str, text: str, vector: list[float]):
     """Upsert message point with dense + BM25 sparse vectors."""
     sparse = _tokenize_bm25(text)
     point = PointStruct(
@@ -90,7 +90,7 @@ async def upsert_task(collection: str, record_id: str, text: str, vector: list[f
 
 
 async def upsert_note(
-    collection: str, point_id: int, boss_chat_id: int,
+    collection: str, point_id: int, boss_chat_id: str,
     text: str, vector: list[float], note_type: str = "", ref: str = "",
 ):
     """Upsert note/idea point with type and ref metadata."""
@@ -115,7 +115,7 @@ async def delete_task(collection: str, record_id: str):
     await _qdrant.delete(collection_name=collection, points_selector=[point_id])
 
 
-async def search(collection: str, query: str, chat_id: int | None = None, top_n: int = 5) -> list[dict]:
+async def search(collection: str, query: str, chat_id: str | None = None, top_n: int = 5) -> list[dict]:
     """Hybrid search (dense + BM25 RRF fusion). Optional chat_id filter. Returns list of dicts with role, content, record_id keys."""
     query_vector = await openai_client.embed(query)
     query_sparse = _tokenize_bm25(query)

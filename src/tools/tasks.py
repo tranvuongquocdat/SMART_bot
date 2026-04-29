@@ -74,7 +74,7 @@ async def _find_assignee_chat_id(ctx: ChatContext, assignee_name: str) -> tuple[
 
 async def _notify_assignee_task(
     assignee_chat_id: str, task_name: str, deadline: str,
-    assigner_name: str, boss_chat_id: int = 0,
+    assigner_name: str, boss_chat_id: str = 0,
 ):
     msg = (
         f"📋 Bạn vừa được giao task mới!\n\n"
@@ -126,7 +126,7 @@ async def _notify_group_completion(
         await telegram.send(group_chat_id, group_msg)
         await db_mod.log_outbound_dm(
             boss_chat_id=ctx.boss_chat_id,
-            to_chat_id=int(group_chat_id),
+            to_chat_id=group_chat_id,
             to_name="(group)",
             content=group_msg,
             trigger_type="task_completed",
@@ -461,7 +461,7 @@ async def approve_task_change(ctx: ChatContext, approval_id: int) -> str:
     if group_chat_id:
         try:
             await telegram.send(
-                int(group_chat_id),
+                group_chat_id,
                 f"✅ Task *{task_name}* đã được duyệt cập nhật.",
             )
         except Exception:
@@ -497,7 +497,7 @@ async def reject_task_change(ctx: ChatContext, approval_id: int) -> str:
 
     try:
         await telegram.send(
-            int(approval["requester_id"]),
+            approval["requester_id"],
             f"Your requested update to task '{task_name}' was not approved.",
         )
     except Exception:
@@ -508,7 +508,7 @@ async def reject_task_change(ctx: ChatContext, approval_id: int) -> str:
     if group_chat_id:
         try:
             await telegram.send(
-                int(group_chat_id),
+                group_chat_id,
                 f"Task *{task_name}*: yêu cầu cập nhật không được duyệt.",
             )
         except Exception:

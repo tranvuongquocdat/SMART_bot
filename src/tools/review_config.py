@@ -21,7 +21,7 @@ async def add_review_schedule(
     cron_time: str,
     content_type: str = "morning_brief",
     custom_prompt: str = "",
-    group_chat_id: int | None = None,
+    group_chat_id: str | None = None,
 ) -> str:
     if not _valid_time(cron_time):
         return f"Định dạng giờ không hợp lệ: '{cron_time}'. Dùng HH:MM (VD: 08:00)."

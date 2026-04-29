@@ -53,7 +53,7 @@ async def _find_person(ctx: ChatContext, search_name: str) -> list[dict]:
 async def add_people(
     ctx: ChatContext,
     name: str,
-    chat_id: int = 0,
+    chat_id: str = 0,
     username: str = "",
     group: str = "",
     person_type: str = "member",

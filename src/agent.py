@@ -221,7 +221,7 @@ def _build_sessions_summary(sessions: dict) -> str:
 async def _build_turn_messages(
     ctx,
     text: str,
-    chat_id: int,
+    chat_id: str,
     is_group: bool,
     built: dict,
     group_ctx: dict | None,
@@ -232,7 +232,7 @@ async def _build_turn_messages(
     """
     assert _settings is not None
     from src.context_builder import membership_summary as _ms  # noqa: PLC0415
-    boss_chat_id: int = ctx.boss_chat_id
+    boss_chat_id: str = ctx.boss_chat_id
 
     personal_note_row, recent, rag_results, people_summary = await asyncio.gather(
         db.get_note(boss_chat_id, "personal", str(boss_chat_id)),
@@ -295,8 +295,8 @@ async def _build_turn_messages(
 
 async def handle_message(
     text: str,
-    chat_id: int,
-    sender_id: int,
+    chat_id: str,
+    sender_id: str,
     is_group: bool,
     bot_mentioned: bool,
     group_name: str = "",

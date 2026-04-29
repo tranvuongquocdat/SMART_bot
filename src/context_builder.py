@@ -11,7 +11,7 @@ from src import db
 logger = logging.getLogger("context_builder")
 
 
-async def build(sender_id: int, chat_id: int) -> dict:
+async def build(sender_id: str, chat_id: str) -> dict:
     """
     Returns:
     {
@@ -78,7 +78,7 @@ async def build(sender_id: int, chat_id: int) -> dict:
     }
 
 
-async def _get_active_sessions(sender_id: int) -> dict:
+async def _get_active_sessions(sender_id: str) -> dict:
     reset_raw = await db.get_session(sender_id, "reset_step")
     reset_pending = json.loads(reset_raw) if reset_raw else None
 
@@ -115,7 +115,7 @@ async def _get_active_sessions(sender_id: int) -> dict:
     }
 
 
-def _resolve_language(memberships: list, sender_id: int, primary: dict | None) -> str:
+def _resolve_language(memberships: list, sender_id: str, primary: dict | None) -> str:
     # memberships is the raw DB rows list — each row has chat_id = sender_id by query design.
     # The synthetic boss entry also has chat_id = sender_id. So sender_m always finds a row.
     sender_m = next(
@@ -129,7 +129,7 @@ def _resolve_language(memberships: list, sender_id: int, primary: dict | None) -
     return "en"
 
 
-async def build_group_context(group_chat_id: int, boss_chat_id: int) -> dict:
+async def build_group_context(group_chat_id: str, boss_chat_id: str) -> dict:
     """
     Builds group-specific context dict:
     {

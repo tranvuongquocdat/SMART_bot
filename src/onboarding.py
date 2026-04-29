@@ -23,7 +23,7 @@ from src.services import telegram as tg
 logger = logging.getLogger("onboarding")
 
 
-async def _send_and_save(chat_id: int, text: str) -> None:
+async def _send_and_save(chat_id: str, text: str) -> None:
     """Send reply to DM. telegram.send auto-persists as assistant message so next turn has history."""
     await telegram.send(chat_id, text)
 
@@ -94,7 +94,7 @@ Return ONLY valid JSON:
 """
 
 
-async def _collector(state: dict, text: str, boss_list: str, chat_id: int) -> dict:
+async def _collector(state: dict, text: str, boss_list: str, chat_id: str) -> dict:
     state_copy = {k: v for k, v in state.items() if k != "first"}
     prompt = _COLLECTOR_PROMPT.format(
         state_json=json.dumps(state_copy, ensure_ascii=False),
@@ -155,7 +155,7 @@ def _member_fields_complete(state: dict) -> bool:
 # Completion actions
 # ---------------------------------------------------------------------------
 
-async def _complete_boss(chat_id: int, state: dict) -> None:
+async def _complete_boss(chat_id: str, state: dict) -> None:
     """Provision Lark workspace and persist boss record. Called after confirmation."""
     name = state["name"]
     company = state["company"]
@@ -260,7 +260,7 @@ async def _complete_boss(chat_id: int, state: dict) -> None:
     logger.info("[onboarding] completed (boss) for chat_id=%s", chat_id)
 
 
-async def _complete_member(chat_id: int, state: dict) -> None:
+async def _complete_member(chat_id: str, state: dict) -> None:
     """Create pending membership and notify boss."""
     name = state["name"]
     person_type = state["type"]
@@ -332,19 +332,19 @@ async def _complete_member(chat_id: int, state: dict) -> None:
 # Public API
 # ---------------------------------------------------------------------------
 
-async def is_onboarding(chat_id: int) -> bool:
+async def is_onboarding(chat_id: str) -> bool:
     """Return True if chat_id is currently in the onboarding flow."""
     state = await db.get_onboarding_state(chat_id)
     return bool(state)
 
 
-async def start_onboarding(chat_id: int) -> None:
+async def start_onboarding(chat_id: str) -> None:
     """Begin onboarding for a new user."""
     await db.save_onboarding_state(chat_id, {"first": True})
     logger.info("[onboarding] started for chat_id=%s", chat_id)
 
 
-async def handle_onboard_message(text: str, chat_id: int) -> None:
+async def handle_onboard_message(text: str, chat_id: str) -> None:
     """Route onboarding message through the LLM collector."""
     state = await db.get_onboarding_state(chat_id) or {}
     is_first = state.pop("first", False)
@@ -436,7 +436,7 @@ async def _ai_classify(system_prompt: str, user_text: str) -> dict:
     return {}
 
 
-async def handle_join_inquiry(chat_id: int) -> str:
+async def handle_join_inquiry(chat_id: str) -> str:
     """Called when user wants to see available companies. Returns listing message."""
     bosses = await db.get_all_bosses()
     if not bosses:
@@ -451,11 +451,11 @@ async def handle_join_inquiry(chat_id: int) -> str:
     return "\n".join(lines)
 
 
-def is_join_session(chat_id: int) -> bool:
+def is_join_session(chat_id: str) -> bool:
     return chat_id in _join_sessions
 
 
-async def handle_join_message(text: str, chat_id: int) -> str:
+async def handle_join_message(text: str, chat_id: str) -> str:
     session = _join_sessions.get(chat_id)
     if not session:
         return ""

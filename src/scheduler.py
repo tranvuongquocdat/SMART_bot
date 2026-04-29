@@ -381,7 +381,7 @@ async def _run_dynamic_reviews():
             if group_context_str and text:
                 text = group_context_str + "\n\n" + text
 
-            await telegram.send(int(target_chat_id), text)
+            await telegram.send(target_chat_id, text)
             logger.info("[scheduler] Dynamic review '%s' sent to %s", content_type, boss["name"])
         except Exception:
             logger.exception("[scheduler] Dynamic review failed for review_id=%s", review.get("id"))

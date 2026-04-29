@@ -25,7 +25,7 @@ logger = logging.getLogger("identity")
 
 
 async def harvest(
-    context_chat_id: int,
+    context_chat_id: str,
     sender: dict | None,
     mentions: list[dict] | None,
     reply_to: dict | None,

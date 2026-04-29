@@ -186,7 +186,7 @@ async def get_communication_log(
     """
     from src import identity
 
-    to_chat_id: int | None = None
+    to_chat_id: str | None = None
     resolved_name = person
 
     if person:
@@ -355,7 +355,7 @@ async def resolve_person(
 
 async def link_contact_to_person(
     ctx: ChatContext,
-    chat_id: int,
+    chat_id: str,
     lark_record_id: str,
     workspace_ids: str = "current",
 ) -> str:
@@ -414,12 +414,17 @@ async def link_contact_to_person(
     except Exception as e:
         return f"[TOOL_ERROR:lark] Không ghi được Chat ID vào Lark: {e}"
 
-    # Also insert into people_map so SQLite-side flows can find this person
+    # Also insert membership so SQLite-side flows can find this person.
+    # `chat_id` here is the external Telegram numeric id (LLM input). Resolve
+    # to internal_id before writing to memberships (whose PK is internal).
     name = target_record.get("Tên", "")
     person_type = target_record.get("Type", "member")
     try:
+        internal_person_id = await db.resolve_or_create_person(
+            "telegram", str(chat_id), name, "",
+        )
         await db.add_person(
-            chat_id=int(chat_id),
+            chat_id=internal_person_id,
             boss_chat_id=ctx.boss_chat_id,
             person_type=person_type,
             name=name,
