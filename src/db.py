@@ -37,36 +37,78 @@ async def get_db(db_path: str = "data/history.db") -> aiosqlite.Connection:
 
 
 async def _init_schema(db: aiosqlite.Connection) -> None:
+    """Canonical post-Phase-2 schema. All chat-id-shaped columns are TEXT
+    (UUID internal_id from external_identity / conversation mapping tables).
+    """
     await db.executescript("""
-        CREATE TABLE IF NOT EXISTS bosses (
-            chat_id             INTEGER PRIMARY KEY,
-            name                TEXT NOT NULL,
-            company             TEXT DEFAULT '',
-            lark_base_token     TEXT,
-            lark_table_people   TEXT,
-            lark_table_tasks    TEXT,
-            lark_table_projects TEXT,
-            lark_table_ideas    TEXT,
-            created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS external_identity (
+            internal_id   TEXT PRIMARY KEY,
+            provider      TEXT NOT NULL,
+            external_id   TEXT NOT NULL,
+            name          TEXT DEFAULT '',
+            username      TEXT DEFAULT '',
+            created_at    INTEGER NOT NULL,
+            UNIQUE(provider, external_id)
         );
 
-        CREATE TABLE IF NOT EXISTS people_map (
-            chat_id      INTEGER PRIMARY KEY,
-            boss_chat_id INTEGER NOT NULL REFERENCES bosses(chat_id),
-            type         TEXT NOT NULL CHECK (type IN ('boss', 'member', 'partner')),
-            name         TEXT DEFAULT ''
+        CREATE INDEX IF NOT EXISTS idx_external_identity_provider_external
+            ON external_identity (provider, external_id);
+
+        CREATE TABLE IF NOT EXISTS conversation (
+            internal_chat_id  TEXT PRIMARY KEY,
+            provider          TEXT NOT NULL,
+            external_chat_id  TEXT NOT NULL,
+            chat_type         TEXT NOT NULL,
+            title             TEXT DEFAULT '',
+            created_at        INTEGER NOT NULL,
+            UNIQUE(provider, external_chat_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_conversation_provider_external
+            ON conversation (provider, external_chat_id);
+
+        CREATE TABLE IF NOT EXISTS bosses (
+            chat_id              TEXT PRIMARY KEY,
+            name                 TEXT NOT NULL,
+            company              TEXT DEFAULT '',
+            lark_base_token      TEXT,
+            lark_table_people    TEXT,
+            lark_table_tasks     TEXT,
+            lark_table_projects  TEXT,
+            lark_table_ideas     TEXT,
+            lark_table_reminders TEXT DEFAULT '',
+            lark_table_notes     TEXT DEFAULT '',
+            language             TEXT DEFAULT 'en',
+            email                TEXT DEFAULT '',
+            created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS memberships (
+            chat_id             TEXT NOT NULL,
+            boss_chat_id        TEXT NOT NULL,
+            person_type         TEXT NOT NULL,
+            name                TEXT,
+            lark_record_id      TEXT,
+            status              TEXT DEFAULT 'pending',
+            request_info        TEXT,
+            requested_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            approved_at         TIMESTAMP,
+            language            TEXT DEFAULT NULL,
+            active_workspace_id TEXT DEFAULT NULL,
+            PRIMARY KEY (chat_id, boss_chat_id)
         );
 
         CREATE TABLE IF NOT EXISTS group_map (
-            group_chat_id INTEGER PRIMARY KEY,
-            boss_chat_id  INTEGER NOT NULL REFERENCES bosses(chat_id),
-            group_name    TEXT DEFAULT ''
+            group_chat_id TEXT PRIMARY KEY,
+            boss_chat_id  TEXT NOT NULL,
+            group_name    TEXT DEFAULT '',
+            project_id    TEXT DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS messages (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id    INTEGER NOT NULL,
-            sender_id  INTEGER,
+            chat_id    TEXT NOT NULL,
+            sender_id  TEXT,
             role       TEXT NOT NULL,
             content    TEXT NOT NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -77,7 +119,7 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS notes (
             id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            boss_chat_id INTEGER NOT NULL REFERENCES bosses(chat_id),
+            boss_chat_id TEXT NOT NULL,
             type         TEXT NOT NULL CHECK (type IN ('personal', 'project', 'group')),
             ref_id       TEXT NOT NULL,
             content      TEXT NOT NULL,
@@ -87,8 +129,8 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS reminders (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            boss_chat_id    INTEGER NOT NULL REFERENCES bosses(chat_id),
-            target_chat_id  INTEGER,
+            boss_chat_id    TEXT NOT NULL,
+            target_chat_id  TEXT,
             target_name     TEXT DEFAULT '',
             content         TEXT NOT NULL,
             remind_at       TIMESTAMP NOT NULL,
@@ -98,7 +140,7 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
 
         CREATE TABLE IF NOT EXISTS token_usage (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
-            boss_chat_id      INTEGER NOT NULL,
+            boss_chat_id      TEXT NOT NULL,
             source            TEXT NOT NULL,
             prompt_tokens     INTEGER DEFAULT 0,
             completion_tokens INTEGER DEFAULT 0,
@@ -108,25 +150,7 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS idx_token_usage_boss_created
             ON token_usage (boss_chat_id, created_at);
-    """)
 
-    # New tables for many-to-many memberships and additional features
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS memberships (
-            chat_id         TEXT NOT NULL,
-            boss_chat_id    TEXT NOT NULL,
-            person_type     TEXT NOT NULL,
-            name            TEXT,
-            lark_record_id  TEXT,
-            status          TEXT DEFAULT 'pending',
-            request_info    TEXT,
-            requested_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            approved_at     TIMESTAMP,
-            PRIMARY KEY (chat_id, boss_chat_id)
-        )
-    """)
-
-    await db.execute("""
         CREATE TABLE IF NOT EXISTS pending_approvals (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
             boss_chat_id    TEXT NOT NULL,
@@ -137,10 +161,8 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             status          TEXT DEFAULT 'pending',
             created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             expires_at      TIMESTAMP
-        )
-    """)
+        );
 
-    await db.execute("""
         CREATE TABLE IF NOT EXISTS task_notifications (
             task_record_id      TEXT NOT NULL,
             boss_chat_id        TEXT NOT NULL,
@@ -148,11 +170,11 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             notified_assigned   INTEGER DEFAULT 0,
             notified_24h        INTEGER DEFAULT 0,
             notified_2h         INTEGER DEFAULT 0,
+            notified_overdue    INTEGER DEFAULT 0,
+            notified_overdue_at TIMESTAMP,
             PRIMARY KEY (task_record_id, boss_chat_id)
-        )
-    """)
+        );
 
-    await db.execute("""
         CREATE TABLE IF NOT EXISTS scheduled_reviews (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             owner_id      TEXT NOT NULL,
@@ -161,203 +183,57 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             custom_prompt TEXT,
             enabled       INTEGER DEFAULT 1,
             timezone      TEXT DEFAULT 'Asia/Ho_Chi_Minh',
-            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            group_chat_id TEXT DEFAULT NULL
+        );
 
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS external_identity (
-            internal_id   TEXT PRIMARY KEY,
-            provider      TEXT NOT NULL,
-            external_id   TEXT NOT NULL,
-            name          TEXT DEFAULT '',
-            username      TEXT DEFAULT '',
-            created_at    INTEGER NOT NULL,
-            UNIQUE(provider, external_id)
-        )
-    """)
-
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS conversation (
-            internal_chat_id  TEXT PRIMARY KEY,
-            provider          TEXT NOT NULL,
-            external_chat_id  TEXT NOT NULL,
-            chat_type         TEXT NOT NULL,
-            title             TEXT DEFAULT '',
-            created_at        INTEGER NOT NULL,
-            UNIQUE(provider, external_chat_id)
-        )
-    """)
-
-    await db.execute("""
-        CREATE INDEX IF NOT EXISTS idx_external_identity_provider_external
-            ON external_identity (provider, external_id)
-    """)
-
-    await db.execute("""
-        CREATE INDEX IF NOT EXISTS idx_conversation_provider_external
-            ON conversation (provider, external_chat_id)
-    """)
-
-    await _migrate_schema(db)
-    await db.commit()
-
-
-async def _migrate_schema(db: aiosqlite.Connection) -> None:
-    """Apply additive SQLite migrations (CREATE IF NOT EXISTS does not alter old tables)."""
-    async with db.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='messages'"
-    ) as cur:
-        if not await cur.fetchone():
-            return
-    async with db.execute("PRAGMA table_info(messages)") as cur:
-        rows = await cur.fetchall()
-    col_names = {r[1] for r in rows}
-    if "sender_id" not in col_names:
-        await db.execute("ALTER TABLE messages ADD COLUMN sender_id INTEGER")
-
-    # Add new columns to bosses
-    for col, definition in [
-        ("lark_table_reminders", "TEXT DEFAULT ''"),
-        ("lark_table_notes",     "TEXT DEFAULT ''"),
-    ]:
-        try:
-            await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
-            await db.commit()
-        except Exception as exc:
-            if "duplicate column name" not in str(exc):
-                raise
-
-    # Migrate existing people_map -> memberships
-    try:
-        await db.execute("""
-            INSERT OR IGNORE INTO memberships (chat_id, boss_chat_id, person_type, name, status)
-            SELECT chat_id, boss_chat_id, type, name, 'active'
-            FROM people_map
-        """)
-        await db.commit()
-    except Exception as exc:
-        # Only suppress if people_map doesn't exist yet (fresh install)
-        if "no such table" not in str(exc).lower():
-            raise
-
-    # Add language + email to bosses
-    for col, definition in [
-        ("language", "TEXT DEFAULT 'en'"),
-        ("email",    "TEXT DEFAULT ''"),
-    ]:
-        try:
-            # f-string safe: col/definition are hardcoded above, SQLite doesn't support parameterized DDL
-            await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
-            await db.commit()
-        except Exception as exc:
-            if "duplicate column name" not in str(exc):
-                raise
-
-    # Add language to memberships
-    try:
-        await db.execute("ALTER TABLE memberships ADD COLUMN language TEXT DEFAULT NULL")
-        await db.commit()
-    except Exception as exc:
-        if "duplicate column name" not in str(exc):
-            raise
-
-    # Sessions table (workspace preference + reset flow state)
-    await db.execute("""
-        CREATE TABLE IF NOT EXISTS sessions (
-            user_id     INTEGER NOT NULL,
-            key         TEXT NOT NULL,
-            value       TEXT NOT NULL,
-            expires_at  TEXT NOT NULL,
-            PRIMARY KEY (user_id, key)
-        )
-    """)
-
-    # Add project_id to group_map
-    try:
-        await db.execute("ALTER TABLE group_map ADD COLUMN project_id TEXT DEFAULT NULL")
-        await db.commit()
-    except Exception as exc:
-        if "duplicate column name" not in str(exc):
-            raise
-
-    # Add group_chat_id to scheduled_reviews
-    try:
-        await db.execute("ALTER TABLE scheduled_reviews ADD COLUMN group_chat_id INTEGER DEFAULT NULL")
-        await db.commit()
-    except Exception as exc:
-        if "duplicate column name" not in str(exc):
-            raise
-
-    # outbound_messages — log all bot-initiated DMs
-    await db.execute("""
         CREATE TABLE IF NOT EXISTS outbound_messages (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            boss_chat_id  INTEGER NOT NULL,
+            boss_chat_id  TEXT NOT NULL,
             workspace_id  TEXT,
-            to_chat_id    INTEGER NOT NULL,
+            to_chat_id    TEXT NOT NULL,
             to_name       TEXT,
             content       TEXT NOT NULL,
             trigger_type  TEXT DEFAULT 'manual',
             task_id       TEXT,
             project       TEXT,
             created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    await db.execute("""
-        CREATE INDEX IF NOT EXISTS idx_outbound_boss_to
-            ON outbound_messages (boss_chat_id, to_chat_id, created_at DESC)
-    """)
+        );
 
-    # onboarding_state — replaces in-memory _onboarding dict
-    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_outbound_boss_to
+            ON outbound_messages (boss_chat_id, to_chat_id, created_at DESC);
+
         CREATE TABLE IF NOT EXISTS onboarding_state (
-            chat_id    INTEGER PRIMARY KEY,
+            chat_id    TEXT PRIMARY KEY,
             state_json TEXT NOT NULL DEFAULT '{}',
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
+        );
 
-    # seen_contacts — passive index of observed chat_ids via Telegram updates
-    await db.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            user_id     TEXT NOT NULL,
+            key         TEXT NOT NULL,
+            value       TEXT NOT NULL,
+            expires_at  TEXT NOT NULL,
+            PRIMARY KEY (user_id, key)
+        );
+
         CREATE TABLE IF NOT EXISTS seen_contacts (
-            chat_id          INTEGER PRIMARY KEY,
+            chat_id          TEXT PRIMARY KEY,
             display_name     TEXT,
             username         TEXT,
             first_seen_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             last_seen_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            last_seen_chat   INTEGER,
+            last_seen_chat   TEXT,
             seen_count       INTEGER DEFAULT 1
-        )
-    """)
-    await db.execute("""
+        );
+
         CREATE INDEX IF NOT EXISTS idx_seen_contacts_name
-            ON seen_contacts (display_name)
-    """)
-    await db.execute("""
+            ON seen_contacts (display_name);
         CREATE INDEX IF NOT EXISTS idx_seen_contacts_username
-            ON seen_contacts (username)
+            ON seen_contacts (username);
     """)
 
-    # notified_overdue columns on task_notifications
-    for col, definition in [
-        ("notified_overdue",    "INTEGER DEFAULT 0"),
-        ("notified_overdue_at", "TIMESTAMP"),
-    ]:
-        try:
-            await db.execute(f"ALTER TABLE task_notifications ADD COLUMN {col} {definition}")
-            await db.commit()
-        except Exception as exc:
-            if "duplicate column name" not in str(exc):
-                raise
-
-    # active_workspace_id on memberships
-    try:
-        await db.execute("ALTER TABLE memberships ADD COLUMN active_workspace_id TEXT DEFAULT NULL")
-        await db.commit()
-    except Exception as exc:
-        if "duplicate column name" not in str(exc):
-            raise
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
