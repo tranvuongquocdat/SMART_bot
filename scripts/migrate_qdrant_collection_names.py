@@ -14,7 +14,7 @@ import sys
 
 from qdrant_client import AsyncQdrantClient
 from qdrant_client.http.models import (
-    Distance, SparseVectorParams, VectorParams,
+    Distance, PointStruct, SparseVectorParams, VectorParams,
 )
 from qdrant_client.http import models
 
@@ -59,7 +59,12 @@ async def _copy_collection(
         )
         if not points:
             break
-        await client.upsert(collection_name=new_name, points=points)
+        # `scroll` returns Record objects; `upsert` requires PointStruct.
+        struct_points = [
+            PointStruct(id=p.id, vector=p.vector, payload=p.payload or {})
+            for p in points
+        ]
+        await client.upsert(collection_name=new_name, points=struct_points)
         total += len(points)
         if next_offset is None:
             break
