@@ -87,7 +87,7 @@ class TelegramMessenger(BaseMessenger):
                 updates = resp.json().get("result", [])
                 for update in updates:
                     offset = update["update_id"] + 1
-                    incoming = self._parse_update(update)
+                    incoming = await self._parse_update(update)
                     if incoming is None:
                         continue
                     logger.info(
@@ -109,7 +109,27 @@ class TelegramMessenger(BaseMessenger):
             await self._client.aclose()
             self._client = None
 
-    def _parse_update(self, update: dict) -> IncomingMessage | None:
+    async def _resolve_external_chat(self, internal_id: str) -> str | None:
+        """internal_chat_id → external Telegram chat id (string of int).
+        Returns None if not found."""
+        from src import db
+        ext = await db.lookup_external_for_conversation(internal_id)
+        if not ext:
+            logger.warning("no conversation row for internal_id=%s", internal_id)
+            return None
+        return ext[1]
+
+    async def _resolve_external_user(self, internal_id: str) -> str | None:
+        """internal person_id → external Telegram user id (string of int).
+        Returns None if not found."""
+        from src import db
+        ext = await db.lookup_external_for_person(internal_id)
+        if not ext:
+            logger.warning("no external_identity for internal_id=%s", internal_id)
+            return None
+        return ext[1]
+
+    async def _parse_update(self, update: dict) -> IncomingMessage | None:
         message = update.get("message", {})
         text = message.get("text", "")
         chat = message.get("chat", {})
@@ -186,11 +206,42 @@ class TelegramMessenger(BaseMessenger):
                 size_bytes=doc.get("file_size", 0),
             ))
 
+        # Resolve external chat_id / sender_id → internal ids (UUID).
+        # In Phase 5 this moves to MessageRouter; for now we do it inline so
+        # downstream code (agent, tools, db) sees only internal ids. The
+        # original payload stays on `raw` for the harvester.
+        from src import db
+        internal_chat_id = await db.resolve_or_create_conversation(
+            "telegram", str(chat_id), chat_type, group_name,
+        )
+        internal_sender_id = ""
+        if sender_id:
+            internal_sender_id = await db.resolve_or_create_person(
+                "telegram", str(sender_id),
+                full_name(from_user), from_user.get("username", "") or "",
+            )
+
+        if reply_to_sender_id:
+            reply_to_sender_id = await db.resolve_or_create_person(
+                "telegram", reply_to_sender_id, "", "",
+            )
+
+        for m in mentions:
+            m["id"] = await db.resolve_or_create_person(
+                "telegram", str(m["id"]),
+                m.get("name", ""), m.get("username", ""),
+            )
+        for m in new_members:
+            m["id"] = await db.resolve_or_create_person(
+                "telegram", str(m["id"]),
+                m.get("name", ""), m.get("username", ""),
+            )
+
         return IncomingMessage(
             channel="telegram",
-            chat_id=str(chat_id),
+            chat_id=internal_chat_id,
             chat_type=chat_type,
-            sender_id=str(sender_id) if sender_id else "",
+            sender_id=internal_sender_id,
             sender_name=full_name(from_user),
             text=text or "",
             attachments=attachments,
@@ -221,16 +272,20 @@ class TelegramMessenger(BaseMessenger):
 
     async def send_message(
         self,
-        chat_id: str,
+        chat_id: str,                  # internal_chat_id (UUID)
         text: str,
         *,
         format: str = "markdown",
         save_history: bool = True,
         reply_to_message_id: str | None = None,
     ) -> OutgoingMessage:
+        external_chat_id = await self._resolve_external_chat(chat_id)
+        if not external_chat_id:
+            return OutgoingMessage(message_id="", chat_id=chat_id)
+
         client = await self._ensure_client()
         parse_mode = self._map_format(format)
-        payload: dict = {"chat_id": int(chat_id), "text": text}
+        payload: dict = {"chat_id": int(external_chat_id), "text": text}
         if parse_mode:
             payload["parse_mode"] = parse_mode
         if reply_to_message_id:
@@ -260,7 +315,7 @@ class TelegramMessenger(BaseMessenger):
         if ok and save_history and chat_id and text:
             try:
                 from src import db
-                await db.save_message(int(chat_id), "assistant", text)
+                await db.save_message(chat_id, "assistant", text)
             except Exception:
                 logger.warning("save_message after send failed", exc_info=True)
 
@@ -271,16 +326,20 @@ class TelegramMessenger(BaseMessenger):
 
     async def edit_message(
         self,
-        chat_id: str,
+        chat_id: str,                  # internal_chat_id (UUID)
         message_id: str,
         text: str,
         *,
         format: str = "markdown",
     ) -> None:
+        external_chat_id = await self._resolve_external_chat(chat_id)
+        if not external_chat_id:
+            return
+
         client = await self._ensure_client()
         parse_mode = self._map_format(format)
         payload: dict = {
-            "chat_id": int(chat_id),
+            "chat_id": int(external_chat_id),
             "message_id": int(message_id),
             "text": text,
         }
@@ -316,47 +375,64 @@ class TelegramMessenger(BaseMessenger):
     # --- Group admin -------------------------------------------------------
 
     async def get_chat_member(self, chat_id: str, user_id: str) -> dict:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        ext_user = await self._resolve_external_user(user_id)
+        if not ext_chat or not ext_user:
+            return {}
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/getChatMember",
-                json={"chat_id": int(chat_id), "user_id": int(user_id)},
+                json={"chat_id": int(ext_chat), "user_id": int(ext_user)},
                 timeout=10,
             )
         return r.json().get("result", {})
 
     async def add_chat_member(self, chat_id: str, user_id: str) -> bool:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        ext_user = await self._resolve_external_user(user_id)
+        if not ext_chat or not ext_user:
+            return False
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/addChatMember",
-                json={"chat_id": int(chat_id), "user_id": int(user_id)},
+                json={"chat_id": int(ext_chat), "user_id": int(ext_user)},
                 timeout=10,
             )
         return r.json().get("ok", False)
 
     async def set_chat_title(self, chat_id: str, title: str) -> bool:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        if not ext_chat:
+            return False
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/setChatTitle",
-                json={"chat_id": int(chat_id), "title": title},
+                json={"chat_id": int(ext_chat), "title": title},
                 timeout=10,
             )
         return r.json().get("ok", False)
 
     async def set_chat_description(self, chat_id: str, description: str) -> bool:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        if not ext_chat:
+            return False
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/setChatDescription",
-                json={"chat_id": int(chat_id), "description": description},
+                json={"chat_id": int(ext_chat), "description": description},
                 timeout=10,
             )
         return r.json().get("ok", False)
 
     async def pin_chat_message(self, chat_id: str, message_id: str) -> bool:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        if not ext_chat:
+            return False
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/pinChatMessage",
                 json={
-                    "chat_id": int(chat_id),
+                    "chat_id": int(ext_chat),
                     "message_id": int(message_id),
                     "disable_notification": False,
                 },
@@ -365,30 +441,41 @@ class TelegramMessenger(BaseMessenger):
         return r.json().get("ok", False)
 
     async def unpin_all_chat_messages(self, chat_id: str) -> bool:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        if not ext_chat:
+            return False
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/unpinAllChatMessages",
-                json={"chat_id": int(chat_id)},
+                json={"chat_id": int(ext_chat)},
                 timeout=10,
             )
         return r.json().get("ok", False)
 
     async def ban_chat_member(self, chat_id: str, user_id: str) -> bool:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        ext_user = await self._resolve_external_user(user_id)
+        if not ext_chat or not ext_user:
+            return False
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/banChatMember",
-                json={"chat_id": int(chat_id), "user_id": int(user_id)},
+                json={"chat_id": int(ext_chat), "user_id": int(ext_user)},
                 timeout=10,
             )
         return r.json().get("ok", False)
 
     async def unban_chat_member(self, chat_id: str, user_id: str) -> bool:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        ext_user = await self._resolve_external_user(user_id)
+        if not ext_chat or not ext_user:
+            return False
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/unbanChatMember",
                 json={
-                    "chat_id": int(chat_id),
-                    "user_id": int(user_id),
+                    "chat_id": int(ext_chat),
+                    "user_id": int(ext_user),
                     "only_if_banned": True,
                 },
                 timeout=10,
@@ -398,12 +485,15 @@ class TelegramMessenger(BaseMessenger):
     async def create_invite_link(
         self, chat_id: str, *, member_limit: int = 1, expire_hours: int = 24
     ) -> str:
+        ext_chat = await self._resolve_external_chat(chat_id)
+        if not ext_chat:
+            return ""
         expire_date = int(_time.time()) + expire_hours * 3600
         async with httpx.AsyncClient() as client:
             r = await client.post(
                 f"{API}/bot{self._token}/createChatInviteLink",
                 json={
-                    "chat_id": int(chat_id),
+                    "chat_id": int(ext_chat),
                     "member_limit": member_limit,
                     "expire_date": expire_date,
                 },
@@ -412,15 +502,23 @@ class TelegramMessenger(BaseMessenger):
         return r.json().get("result", {}).get("invite_link", "")
 
     async def get_chat_administrators(self, chat_id: str) -> list[dict]:
+        """Returns admin list. `user_id` in each entry is **internal** (resolved
+        by Telegram payload through resolve_or_create_person), so callers can
+        compare against ChatContext.boss_chat_id directly.
+        """
         now = _time.time()
         cached = self._admins_cache.get(chat_id)
         if cached and now - cached[0] < _ADMIN_TTL:
             return cached[1]
 
+        ext_chat = await self._resolve_external_chat(chat_id)
+        if not ext_chat:
+            return []
+
         client = await self._ensure_client()
         resp = await client.post(
             f"{API}/bot{self._token}/getChatAdministrators",
-            json={"chat_id": int(chat_id)},
+            json={"chat_id": int(ext_chat)},
             timeout=10,
         )
         data = resp.json()
@@ -428,13 +526,19 @@ class TelegramMessenger(BaseMessenger):
             logger.warning("getChatAdministrators failed for %s: %s", chat_id, data)
             return []
 
+        from src import db
         result = []
         for m in data.get("result", []):
             user = m.get("user", {})
             if user.get("is_bot"):
                 continue
+            ext_user_id = user.get("id")
+            internal_user_id = await db.resolve_or_create_person(
+                "telegram", str(ext_user_id),
+                full_name(user), user.get("username", "") or "",
+            )
             result.append({
-                "user_id": user.get("id"),
+                "user_id": internal_user_id,
                 "name": full_name(user),
                 "username": user.get("username", ""),
                 "status": m.get("status", ""),
