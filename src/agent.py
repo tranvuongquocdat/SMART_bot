@@ -16,6 +16,17 @@ from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
 from src.infrastructure import openai_client
 from src.tools import TOOL_DEFINITIONS, execute_tool
+from src.agent_pkg.tool_dispatcher import ToolDispatcher
+from src.agent_pkg.handlers.web_search import WebSearchHandler
+from src.agent_pkg.handlers.escalate import EscalateToAdvisorHandler
+
+# Phase 4b-1: ToolDispatcher with two migrated handlers; falls back to
+# `src.tools.execute_tool` for the rest. Phase 4b-2 mass-migrates the
+# remaining tools and removes the fallback.
+_dispatcher = ToolDispatcher([
+    WebSearchHandler(),
+    EscalateToAdvisorHandler(),
+])
 
 logger = logging.getLogger("agent")
 
@@ -479,7 +490,7 @@ async def handle_message(
 
                 # Run all tool calls in parallel
                 raw_results = await asyncio.gather(
-                    *(execute_tool(tc.function.name, tc.function.arguments, ctx)
+                    *(_dispatcher.execute(tc.function.name, tc.function.arguments, ctx)
                       for tc in response.tool_calls)
                 )
 
