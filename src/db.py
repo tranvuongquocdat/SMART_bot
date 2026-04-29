@@ -80,8 +80,30 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             lark_table_notes     TEXT DEFAULT '',
             language             TEXT DEFAULT 'en',
             email                TEXT DEFAULT '',
+            status               TEXT DEFAULT 'active',
+            plan                 TEXT DEFAULT NULL,
+            expires_at           TIMESTAMP DEFAULT NULL,
+            llm_provider         TEXT DEFAULT NULL,
+            llm_model            TEXT DEFAULT NULL,
+            llm_api_key_encrypted TEXT DEFAULT NULL,
+            embedding_provider   TEXT DEFAULT NULL,
+            embedding_model      TEXT DEFAULT NULL,
+            embedding_dim        INTEGER DEFAULT NULL,
             created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_internal_id  TEXT,
+            action             TEXT NOT NULL,
+            target_table       TEXT,
+            target_id          TEXT,
+            payload_json       TEXT,
+            ts                 TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_log_actor_ts
+            ON audit_log (actor_internal_id, ts DESC);
 
         CREATE TABLE IF NOT EXISTS memberships (
             chat_id             TEXT NOT NULL,
@@ -232,6 +254,24 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_seen_contacts_username
             ON seen_contacts (username);
     """)
+
+    # ---- Phase 3 forward-compat additions (idempotent ALTER for post-Phase-2 DBs) ----
+    for col, definition in [
+        ("status",                "TEXT DEFAULT 'active'"),
+        ("plan",                  "TEXT DEFAULT NULL"),
+        ("expires_at",            "TIMESTAMP DEFAULT NULL"),
+        ("llm_provider",          "TEXT DEFAULT NULL"),
+        ("llm_model",             "TEXT DEFAULT NULL"),
+        ("llm_api_key_encrypted", "TEXT DEFAULT NULL"),
+        ("embedding_provider",    "TEXT DEFAULT NULL"),
+        ("embedding_model",       "TEXT DEFAULT NULL"),
+        ("embedding_dim",         "INTEGER DEFAULT NULL"),
+    ]:
+        try:
+            await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
+        except Exception as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
 
     await db.commit()
 
