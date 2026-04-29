@@ -278,11 +278,15 @@ async def delete_people(ctx: ChatContext, search_name: str) -> str:
         # Remove from Lark
         await lark.delete_record(ctx.lark_base_token, ctx.lark_table_people, r["record_id"])
 
-        # Remove from SQLite if Chat ID present
+        # Remove from SQLite if Chat ID present. Lark stores external Telegram
+        # numeric id; memberships uses internal UUID — resolve first.
         chat_id_val = r.get("Chat ID")
         if chat_id_val:
             try:
-                await db.delete_person(int(chat_id_val))
+                internal_id = await db.resolve_or_create_person(
+                    "telegram", str(int(chat_id_val)), "", ""
+                )
+                await db.delete_person(internal_id)
             except Exception:
                 pass
         deleted += 1

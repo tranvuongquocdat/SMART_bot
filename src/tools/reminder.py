@@ -43,7 +43,13 @@ async def _resolve_target(ctx: ChatContext, target: str) -> tuple[Optional[int],
     chat_id_val = person.get("Chat ID")
     if chat_id_val:
         try:
-            return int(chat_id_val), name
+            # Lark stores external numeric. reminders.target_chat_id holds
+            # internal UUID — resolve before returning so the caller writes
+            # the right shape into the DB.
+            internal_id = await db.resolve_or_create_person(
+                "telegram", str(int(chat_id_val)), name, ""
+            )
+            return internal_id, name
         except (ValueError, TypeError):
             pass
     return None, name
