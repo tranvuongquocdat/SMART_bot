@@ -162,6 +162,40 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
         )
     """)
 
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS external_identity (
+            internal_id   TEXT PRIMARY KEY,
+            provider      TEXT NOT NULL,
+            external_id   TEXT NOT NULL,
+            name          TEXT DEFAULT '',
+            username      TEXT DEFAULT '',
+            created_at    INTEGER NOT NULL,
+            UNIQUE(provider, external_id)
+        )
+    """)
+
+    await db.execute("""
+        CREATE TABLE IF NOT EXISTS conversation (
+            internal_chat_id  TEXT PRIMARY KEY,
+            provider          TEXT NOT NULL,
+            external_chat_id  TEXT NOT NULL,
+            chat_type         TEXT NOT NULL,
+            title             TEXT DEFAULT '',
+            created_at        INTEGER NOT NULL,
+            UNIQUE(provider, external_chat_id)
+        )
+    """)
+
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_external_identity_provider_external
+            ON external_identity (provider, external_id)
+    """)
+
+    await db.execute("""
+        CREATE INDEX IF NOT EXISTS idx_conversation_provider_external
+            ON conversation (provider, external_chat_id)
+    """)
+
     await _migrate_schema(db)
     await db.commit()
 
