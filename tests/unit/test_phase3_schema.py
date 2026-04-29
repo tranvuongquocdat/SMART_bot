@@ -40,6 +40,7 @@ def test_fresh_install_has_phase3_columns(tmp_path):
 
     async def _run():
         from src.db import get_db, close_db
+        await close_db()  # reset stale singleton from prior tests
         await get_db(str(db_path))
         await close_db()
 
@@ -72,6 +73,7 @@ def test_existing_db_gets_columns_added(tmp_path):
 
     async def _run():
         from src.db import get_db, close_db
+        await close_db()  # reset stale singleton from prior tests
         await get_db(str(db_path))
         await close_db()
 
