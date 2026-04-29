@@ -19,9 +19,9 @@ _TASK_B = {"Tên task": "Task B", "Status": "Hoàn thành", "Assignee": "Bob", "
 
 @pytest.mark.asyncio
 async def test_get_summary_current_workspace():
-    from src.tools.summary import get_summary
+    from src.services.summary_service import get_summary
     ctx = _make_ctx()
-    with patch("src.tools.summary.lark.search_records", new_callable=AsyncMock,
+    with patch("src.services.summary_service.lark.search_records", new_callable=AsyncMock,
                return_value=[_TASK_A, _TASK_B]):
         result = await get_summary(ctx, summary_type="today", workspace_ids="current")
     assert "Task A" in result
@@ -29,15 +29,15 @@ async def test_get_summary_current_workspace():
 
 @pytest.mark.asyncio
 async def test_get_summary_all_workspaces_tags_workspace_name():
-    from src.tools.summary import get_summary
+    from src.services.summary_service import get_summary
     ctx = _make_ctx()
     ws = {
         "workspace_name": "Công ty X",
         "lark_base_token": "tok2",
         "lark_table_tasks": "tbl2",
     }
-    with patch("src.tools.summary.resolve_workspaces", new_callable=AsyncMock, return_value=[ws]), \
-         patch("src.tools.summary.lark.search_records", new_callable=AsyncMock,
+    with patch("src.services.summary_service.resolve_workspaces", new_callable=AsyncMock, return_value=[ws]), \
+         patch("src.services.summary_service.lark.search_records", new_callable=AsyncMock,
                return_value=[_TASK_A]):
         result = await get_summary(ctx, summary_type="today", workspace_ids="all")
     assert "[Công ty X]" in result

@@ -39,22 +39,12 @@ async def test_known_name_invokes_handler():
 
 
 @pytest.mark.asyncio
-async def test_unknown_name_falls_back_to_legacy(monkeypatch):
-    captured: dict = {}
-
-    async def _fake_legacy(name, arguments, ctx):
-        captured["name"] = name
-        captured["arguments"] = arguments
-        return "from-legacy"
-
-    import src.tools as _tools
-    monkeypatch.setattr(_tools, "execute_tool", _fake_legacy)
-
+async def test_unknown_name_returns_not_found_message():
+    """Phase 4b-2b: legacy tools.execute_tool fallback removed; unknown names
+    now return a static error string."""
     d = ToolDispatcher([])
     out = await d.execute("unknown_tool", {"x": 1}, _ctx())
-    assert out == "from-legacy"
-    assert captured["name"] == "unknown_tool"
-    assert captured["arguments"] == {"x": 1}
+    assert "không tồn tại" in out
 
 
 @pytest.mark.asyncio

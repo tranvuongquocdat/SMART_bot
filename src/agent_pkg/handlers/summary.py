@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from src.agent_pkg.handlers._base import ToolHandler
 from src.context import ChatContext
-from src.tools import summary
+from src.services import summary_service as summary
 
 
 class GetSummaryHandler(ToolHandler):

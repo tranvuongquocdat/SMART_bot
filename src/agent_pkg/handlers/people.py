@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from src.agent_pkg.handlers._base import ToolHandler
 from src.context import ChatContext
-from src.tools import people
+from src.services import people_service as people
 
 
 class AddPeopleHandler(ToolHandler):

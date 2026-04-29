@@ -34,7 +34,7 @@ class ToolDispatcher:
     ) -> str:
         handler = self._by_name.get(name)
         if handler is None:
-            return await self._fallback(name, arguments, ctx)
+            return f"Tool '{name}' không tồn tại."
 
         try:
             args = self._parse_args(arguments)
@@ -75,10 +75,3 @@ class ToolDispatcher:
         if isinstance(arguments, dict):
             return arguments
         return json.loads(arguments)
-
-    @staticmethod
-    async def _fallback(name: str, arguments: str | dict, ctx: ChatContext) -> str:
-        # Keep the import inside the method so unit tests can run without
-        # importing the heavy legacy tools module.
-        from src.tools import execute_tool as _legacy_execute
-        return await _legacy_execute(name, arguments, ctx)

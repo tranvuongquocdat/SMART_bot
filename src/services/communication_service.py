@@ -102,7 +102,7 @@ async def broadcast(
     Works from both group and DM context.
     Use check_team_engagement first to know who has Chat IDs.
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
     workspaces = await resolve_workspaces(ctx, workspace_ids)
 
     type_filter = None
@@ -365,7 +365,7 @@ async def link_contact_to_person(
 
     Fails loud nếu record đã có Chat ID khác (conflict) — không auto-overwrite.
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
     workspaces = await resolve_workspaces(ctx, workspace_ids)
 
     # Locate the record across resolved workspaces

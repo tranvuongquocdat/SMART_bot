@@ -108,7 +108,7 @@ async def get_person(
     Call before assigning a task: effort_score > 0.8 means near overloaded.
     If multiple people share the same name across workspaces, returns all with workspace tag.
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
 
     query = name or search_name
     if not query:
@@ -299,7 +299,7 @@ async def delete_people(ctx: ChatContext, search_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 async def search_person(ctx: ChatContext, search_name: str, workspace_ids: str = "current") -> str:
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     all_results = []
@@ -353,7 +353,7 @@ async def check_team_engagement(
 
     Gọi khi: 'ai đã/chưa kết nối bot', 'ai đang bận', trước broadcast.
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
     from src import identity as _id
     from src import db as _db
 
@@ -426,7 +426,7 @@ async def check_team_engagement(
 # ---------------------------------------------------------------------------
 
 async def check_effort(ctx: ChatContext, assignee: str, deadline: str = "", workspace_ids: str = "current") -> str:
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     all_tasks = []

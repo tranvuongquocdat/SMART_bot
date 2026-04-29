@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from src.agent_pkg.handlers._base import ToolHandler
 from src.context import ChatContext
-from src.tools import web_search as _legacy
+from src.services import web_search_service as _legacy
 
 
 class WebSearchHandler(ToolHandler):

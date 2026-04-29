@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from src.agent_pkg.handlers._base import ToolHandler
 from src.context import ChatContext
-from src.tools import search as _legacy_search
+from src.services import search_service as _legacy_search
 
 
 class SearchHistoryHandler(ToolHandler):

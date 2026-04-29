@@ -92,7 +92,7 @@ async def get_project(
     Fat return: project info + tasks by status + progress %.
     workspace_ids: "current" | "all" | specific boss_id
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     lines = []
 
@@ -135,7 +135,7 @@ async def list_projects(
     status: str = "",
     workspace_ids: str = "current",
 ) -> str:
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     all_results = []
 

@@ -6,7 +6,7 @@ Lark API calls are patched out — we verify the session logic, not actual delet
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
 
-from src.tools.reset import (
+from src.services.reset_service import (
     is_reset_trigger,
     is_reset_session,
     start_reset,

@@ -28,7 +28,7 @@ async def switch_workspace(ctx: ChatContext, workspace: str = "", boss_id: int =
     Switch active workspace. Persists active_workspace_id in memberships table.
     Accepts workspace name (fuzzy match) or boss_id integer.
     """
-    from src.tools._workspace import set_active_workspace_id, resolve_workspaces
+    from src.services._workspace_helper import set_active_workspace_id, resolve_workspaces
     all_ws = await resolve_workspaces(ctx, "all")
 
     if not all_ws:

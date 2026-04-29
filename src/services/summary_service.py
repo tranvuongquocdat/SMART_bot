@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from src.context import ChatContext
 from src.infrastructure import lark_client as lark
-from src.tools._workspace import resolve_workspaces
+from src.services._workspace_helper import resolve_workspaces
 
 
 def _deadline_ts(record: dict) -> int | None:
@@ -105,7 +105,7 @@ async def get_workload(
     Effort overview. workspace_ids defaults to "all" for accurate total load.
     Returns combined task count across all workspaces.
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     all_active = []
 
@@ -162,7 +162,7 @@ async def get_project_report(
     LLM-generated comprehensive project status report.
     Covers: progress %, tasks by status, who's blocking, upcoming deadlines.
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
     from src.infrastructure import openai_client as _oai
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)

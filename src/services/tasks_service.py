@@ -237,7 +237,7 @@ async def list_tasks(
     project: str = "",
     workspace_ids: str = "current",
 ) -> str:
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)
     all_tasks = []

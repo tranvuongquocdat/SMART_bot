@@ -15,7 +15,7 @@ from src.services import telegram
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
 from src.infrastructure import openai_client
-from src.tools import TOOL_DEFINITIONS, execute_tool
+from src.agent_pkg.tool_definitions import TOOL_DEFINITIONS
 from src.agent_pkg.tool_dispatcher import ToolDispatcher
 from src.agent_pkg.handlers.web_search import WebSearchHandler
 from src.agent_pkg.handlers.escalate import EscalateToAdvisorHandler

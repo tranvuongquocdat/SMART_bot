@@ -91,7 +91,7 @@ async def resolve_candidates(
     Order within source groups is source-priority:
       lark_people (current ws) → lark_people (other ws) → bosses → memberships → seen_contacts
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
 
     q = (query or "").strip()
     if not q:

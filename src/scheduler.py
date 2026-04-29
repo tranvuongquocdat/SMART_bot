@@ -58,7 +58,7 @@ async def _morning_review():
 
 async def _evening_summary():
     """17h: tong ket ngay."""
-    from src.tools.summary import get_summary
+    from src.services.summary_service import get_summary
     bosses = await db.get_all_bosses()
     for boss in bosses:
         try:
@@ -301,7 +301,7 @@ async def _run_dynamic_reviews():
     from datetime import datetime
     from zoneinfo import ZoneInfo
     from src.advisor import run_daily_review
-    from src.tools.summary import get_summary
+    from src.services.summary_service import get_summary
 
     reviews = await db.get_all_enabled_reviews(db._db)
     bosses_cache: dict = {}

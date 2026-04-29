@@ -11,7 +11,8 @@ from src import db
 from src.config import Settings
 from src.context import ChatContext
 from src.infrastructure import openai_client
-from src.tools import TOOL_DEFINITIONS, execute_tool
+from src.agent_pkg.tool_definitions import TOOL_DEFINITIONS
+from src.agent import _dispatcher as _agent_dispatcher  # use the same registry as agent.py
 
 logger = logging.getLogger("advisor")
 
@@ -116,7 +117,7 @@ async def _run_agent_loop(ctx: ChatContext, system_prompt: str, source: str = "a
                 logger.info(f"[advisor:{ctx.boss_chat_id}] TOOL: {tc.function.name}({tc.function.arguments})")
 
             results = await asyncio.gather(
-                *(execute_tool(tc.function.name, tc.function.arguments, ctx)
+                *(_agent_dispatcher.execute(tc.function.name, tc.function.arguments, ctx)
                   for tc in response.tool_calls)
             )
 
