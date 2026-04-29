@@ -19,13 +19,102 @@ from src.tools import TOOL_DEFINITIONS, execute_tool
 from src.agent_pkg.tool_dispatcher import ToolDispatcher
 from src.agent_pkg.handlers.web_search import WebSearchHandler
 from src.agent_pkg.handlers.escalate import EscalateToAdvisorHandler
+from src.agent_pkg.handlers.tasks import (
+    CreateTaskHandler, ListTasksHandler, UpdateTaskHandler, DeleteTaskHandler,
+    SearchTasksHandler, ApproveTaskChangeHandler, RejectTaskChangeHandler,
+)
+from src.agent_pkg.handlers.people import (
+    AddPeopleHandler, GetPersonHandler, GetPeopleAliasHandler, ListPeopleHandler,
+    UpdatePeopleHandler, DeletePeopleHandler,
+    CheckEffortHandler, CheckTeamEngagementHandler,
+)
+from src.agent_pkg.handlers.projects import (
+    CreateProjectHandler, GetProjectHandler, ListProjectsHandler,
+    UpdateProjectHandler, DeleteProjectHandler,
+)
+from src.agent_pkg.handlers.notes import (
+    GetNoteHandler, UpdateNoteHandler, AppendNoteHandler,
+)
+from src.agent_pkg.handlers.search import SearchHistoryHandler, SearchNotesHandler
+from src.agent_pkg.handlers.summary import (
+    GetSummaryHandler, GetWorkloadHandler, GetProjectReportHandler,
+)
+from src.agent_pkg.handlers.ideas import CreateIdeaHandler
+from src.agent_pkg.handlers.reminders import (
+    CreateReminderHandler, ListRemindersHandler,
+    UpdateReminderHandler, DeleteReminderHandler,
+)
+from src.agent_pkg.handlers.review import (
+    AddReviewScheduleHandler, ListReviewSchedulesHandler,
+    ToggleReviewHandler, DeleteReviewScheduleHandler,
+)
+from src.agent_pkg.handlers.memory import ListPendingApprovalsHandler
+from src.agent_pkg.handlers.join import (
+    ListAvailableWorkspacesHandler, RequestJoinHandler,
+    ApproveJoinHandler, RejectJoinHandler,
+)
+from src.agent_pkg.handlers.reset import (
+    InitiateResetHandler, ConfirmResetStep1Handler, ExecuteResetHandler,
+)
+from src.agent_pkg.handlers.group import (
+    ManageGroupHandler, SummarizeGroupConversationHandler,
+    UpdateGroupNoteHandler, BroadcastToGroupHandler,
+)
+from src.agent_pkg.handlers.communication import (
+    SendDmHandler, BroadcastHandler, GetCommunicationLogHandler,
+    ResolvePersonHandler, LinkContactToPersonHandler,
+    ListUnlinkedContactsHandler, GetGroupAdminsHandler,
+)
+from src.agent_pkg.handlers.workspace import SetLanguageHandler, SwitchWorkspaceHandler
 
-# Phase 4b-1: ToolDispatcher with two migrated handlers; falls back to
-# `src.tools.execute_tool` for the rest. Phase 4b-2 mass-migrates the
-# remaining tools and removes the fallback.
+# Phase 4b-2a: every LLM tool has a handler; the legacy fallback in the
+# dispatcher only fires for genuinely unknown names. Phase 4b-2b moves
+# logic from `src.tools.*` into `src.services.*` and the handlers
+# constructor-inject those services.
 _dispatcher = ToolDispatcher([
-    WebSearchHandler(),
-    EscalateToAdvisorHandler(),
+    # foundation (Phase 4b-1)
+    WebSearchHandler(), EscalateToAdvisorHandler(),
+    # tasks
+    CreateTaskHandler(), ListTasksHandler(), UpdateTaskHandler(),
+    DeleteTaskHandler(), SearchTasksHandler(),
+    ApproveTaskChangeHandler(), RejectTaskChangeHandler(),
+    # people
+    AddPeopleHandler(), GetPersonHandler(), GetPeopleAliasHandler(),
+    ListPeopleHandler(), UpdatePeopleHandler(), DeletePeopleHandler(),
+    CheckEffortHandler(), CheckTeamEngagementHandler(),
+    # projects
+    CreateProjectHandler(), GetProjectHandler(), ListProjectsHandler(),
+    UpdateProjectHandler(), DeleteProjectHandler(),
+    # notes
+    GetNoteHandler(), UpdateNoteHandler(), AppendNoteHandler(),
+    # search
+    SearchHistoryHandler(), SearchNotesHandler(),
+    # summary
+    GetSummaryHandler(), GetWorkloadHandler(), GetProjectReportHandler(),
+    # ideas
+    CreateIdeaHandler(),
+    # reminders
+    CreateReminderHandler(), ListRemindersHandler(),
+    UpdateReminderHandler(), DeleteReminderHandler(),
+    # review schedule
+    AddReviewScheduleHandler(), ListReviewSchedulesHandler(),
+    ToggleReviewHandler(), DeleteReviewScheduleHandler(),
+    # memory / approvals
+    ListPendingApprovalsHandler(),
+    # join
+    ListAvailableWorkspacesHandler(), RequestJoinHandler(),
+    ApproveJoinHandler(), RejectJoinHandler(),
+    # reset
+    InitiateResetHandler(), ConfirmResetStep1Handler(), ExecuteResetHandler(),
+    # group
+    ManageGroupHandler(), SummarizeGroupConversationHandler(),
+    UpdateGroupNoteHandler(), BroadcastToGroupHandler(),
+    # communication
+    SendDmHandler(), BroadcastHandler(), GetCommunicationLogHandler(),
+    ResolvePersonHandler(), LinkContactToPersonHandler(),
+    ListUnlinkedContactsHandler(), GetGroupAdminsHandler(),
+    # workspace + language
+    SetLanguageHandler(), SwitchWorkspaceHandler(),
 ])
 
 logger = logging.getLogger("agent")

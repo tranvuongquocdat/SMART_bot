@@ -45,8 +45,30 @@ class ToolDispatcher:
         try:
             return await handler.handle(args, ctx)
         except Exception as exc:  # noqa: BLE001  — uniform error envelope
-            err_type = type(exc).__name__
-            return f"[TOOL_ERROR:unknown] {name} failed ({err_type}): {exc}"
+            return self._format_error(name, exc)
+
+    @staticmethod
+    def _format_error(name: str, exc: Exception) -> str:
+        """Classify common errors so the LLM gets a recoverable hint.
+
+        Mirrors the legacy `tools.execute_tool` error envelope so prompt
+        instructions about `[TOOL_ERROR:lark]` / `[TOOL_ERROR:not_found]`
+        keep working unchanged.
+        """
+        err_type = type(exc).__name__
+        msg = str(exc)
+        low = msg.lower()
+        if any(kw in low for kw in ("lark", "base_token", "table", "record")):
+            return (
+                f"[TOOL_ERROR:lark] {name} — Lark không phản hồi hoặc cấu hình sai: {msg}. "
+                f"Thử lại hoặc báo người dùng."
+            )
+        if any(kw in low for kw in ("not found", "không tìm thấy", "no such")):
+            return (
+                f"[TOOL_ERROR:not_found] {name} — {msg}. "
+                f"Hãy hỏi lại người dùng tên chính xác."
+            )
+        return f"[TOOL_ERROR:unknown] {name} thất bại ({err_type}): {msg}"
 
     @staticmethod
     def _parse_args(arguments: str | dict) -> dict:
