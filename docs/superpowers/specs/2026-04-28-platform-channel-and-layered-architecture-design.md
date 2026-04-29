@@ -585,6 +585,32 @@ Adding a new tool requires touching **4 places** vs the current **2**:
 
 Trade-off accepted: the extra two edits are a one-time per tool and they buy mockability + clear layer separation. Auto-discovery (e.g., decorator-registered handlers) was considered and rejected as too magic for this codebase.
 
+## Forward-Compatibility for Scale
+
+The bot today is **self-hosted, single-tenant**. Some future directions — multi-LLM-provider, per-boss credentials, SaaS multi-tenant operations, observability — are intentionally **not** built now, but the changes that are *expensive to retrofit* (schema columns, boundary abstractions, ID shape) are folded into Phases 3–6 below so adding the visible features later does not require another data migration like Phase 2.
+
+**The rule:** schema + abstraction = land sooner. UI / dashboards / actual provider integrations = defer to demand.
+
+What is folded in:
+
+| Concern | Folded into | Mechanism (default no-op) |
+|---|---|---|
+| Tenant lifecycle | Phase 3 schema | `bosses.status` (default `'active'`), `plan` (NULL), `expires_at` (NULL) |
+| Per-boss LLM keys + model choice | Phase 3 schema | `bosses.llm_provider`, `llm_model`, `llm_api_key_encrypted`, `embedding_provider`, `embedding_model`, `embedding_dim` (all NULL → fall back to `Settings`) |
+| Audit trail | Phase 3 schema + Phase 4 service | `audit_log` table; `AuditService.log()` no-op until wired by callers |
+| LLM provider abstraction | Phase 4 | `LLMClient` Protocol with one impl (`OpenAILLMClient`); services depend on Protocol |
+| Embedding-dim collision (future model swap) | Phase 4 | Qdrant collection name `messages_{boss_uuid}_{embed_dim}`; old collection survives until explicit rebuild |
+| Tenant gating + observability | Phase 5 | `MessageRouter` boundary check `if boss.status != 'active'`; `infrastructure/observability.py` (OpenTelemetry tracer + structured logging context) |
+| Capability gating per plan | Phase 6 | `BossPolicy.can_use_feature(name)` hook called by services that gate features |
+
+What is **not** folded in (deferred until product needs them):
+- Admin UI / dashboard, alerting, billing — front-end of data the schema already exposes.
+- Self-serve signup — UI work.
+- Real Groq / Gemini / Anthropic adapters — Phase 4 only ships `OpenAILLMClient`; new providers are 1 file each later.
+- Suspend / resume admin commands — gated by `status` already; flipping it = future admin endpoint, no schema change.
+
+**Cost of folding:** ~20–30% extra effort on Phases 3–4–5. **Cost of retrofit (avoided):** 1–2 weeks per multi-tenant feature later, like Phase 2 was.
+
 ## Phasing (6 PRs)
 
 End-state above is the destination. The migration is split into 6 phases; each phase is a standalone PR that leaves the bot in a working state. Free-hand choice (no production users) means we can break behavior between phases as long as each merges to a green build.
@@ -605,35 +631,56 @@ End-state above is the destination. The migration is split into 6 phases; each p
 - The Telegram channel adapter is updated to look up internal ids inline. Temporary — moves to `MessageRouter` in Phase 5.
 - **Smoke test:** Phase 1 flows + group registration + reminder firing + onboarding for a fresh boss.
 
-**Phase 3 — Repositories**
+**Phase 3 — Repositories + forward-compat schema**
 - Create `src/repositories/` with one module per aggregate. Migrate functions from `db.py` (group by table). Each repo takes `Database` in `__init__`. All methods use internal ids (already done in Phase 2).
 - `src/db.py` becomes a thin facade: keeps `get_db()` + delegates remaining function-style calls to repos. Goal: zero behavior change.
 - Update direct `db.<func>` callers in tools / agent / onboarding to call repos. Where context-coupling is awkward, leave as `db.<func>` and address in Phase 4.
-- **Smoke test:** same as Phase 2 — no behavior change expected.
+- **Schema additions (forward-compat, all default-safe):**
+  - `bosses.status TEXT DEFAULT 'active'` — values: `'trial' | 'active' | 'suspended' | 'cancelled'`. No code reads it yet (Phase 5 wires the check).
+  - `bosses.plan TEXT DEFAULT NULL`, `bosses.expires_at TIMESTAMP DEFAULT NULL` — informational; no enforcement until a future admin layer.
+  - `bosses.llm_provider TEXT DEFAULT NULL`, `bosses.llm_model TEXT DEFAULT NULL`, `bosses.llm_api_key_encrypted TEXT DEFAULT NULL`, `bosses.embedding_provider TEXT DEFAULT NULL`, `bosses.embedding_model TEXT DEFAULT NULL`, `bosses.embedding_dim INTEGER DEFAULT NULL` — NULL = fall back to `Settings` (current behaviour).
+  - New `audit_log(id PK, actor_internal_id TEXT, action TEXT NOT NULL, target_table TEXT, target_id TEXT, payload_json TEXT, ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP)`.
+  - Encryption: introduce `Settings.boss_credential_encryption_key` (env, Fernet). Helper module `infrastructure/crypto.py` with `encrypt(plain) -> str` / `decrypt(cipher) -> str`. Not used yet; ready when first caller needs it.
+- **Smoke test:** same as Phase 2 — no behavior change expected. The new columns / table exist but every code path still reads from `Settings` and skips audit writes.
 
-**Phase 4 — Services + handler classes + tool dispatcher**
+**Phase 4 — Services + handler classes + tool dispatcher + LLM abstraction**
 - Create `src/services/` modules. Port logic from `tools/<x>.py` + `agent.py` reminder/advisor/onboarding helpers into services. Services use repos + infrastructure + channel registry.
 - Create `src/agent/handlers/` — one class per tool. Each wraps a service call + formats string for LLM.
 - Create `agent/tool_dispatcher.py` (registry, `execute(name, args, ctx)`) and `agent/tool_definitions.py` (data only). The current `agent.execute_tool()` in `tools/__init__.py` is replaced.
 - Create `agent/secretary_agent.py`, `agent/reminder_agent.py`, `agent/advisor_agent.py`, `agent/onboarding_agent.py`. LLM loop stays mechanically identical to today; only deps change to constructor injection.
 - Delete `tools/` folder once no callers remain.
-- **Smoke test:** end-to-end LLM tool calls — task create + list, reminder create + fire, person resolve, broadcast, group operations.
+- **LLM provider abstraction (forward-compat, single impl):**
+  - `infrastructure/llm/base.py` — `LLMClient` Protocol: `async chat_with_tools(messages, tools, model, **kwargs)`, `async embed(text) -> tuple[list[float], int]` returning `(vector, dim)`.
+  - `infrastructure/llm/openai_client.py` — only impl this phase; thin wrapper around existing `infrastructure/openai_client.py` adapting it to the Protocol.
+  - `infrastructure/llm/factory.py` — `get_llm_client(boss: Boss, settings: Settings) -> LLMClient`. Today: always returns `OpenAILLMClient` with key from `boss.llm_api_key_encrypted` (decrypted) if set, else `settings.openai_api_key`. Same lookup for model name. Future Groq/Gemini = add a file + a branch.
+  - Services that call LLM accept `LLMClient` via constructor injection — no service imports a concrete provider.
+  - `AuditService` interface added (one method: `async log(actor_id, action, target_table, target_id, payload)`). Wired but called from zero places this phase; future admin / boss-DM-trace work calls it.
+- **Embedding-dim collision avoidance:** Qdrant collection naming changes from `messages_{boss_uuid}` to `messages_{boss_uuid}_{embed_dim}` (and `tasks_{boss_uuid}_{embed_dim}`). Migration sub-step inside Phase 4: rename existing collections to include the current dim suffix (single Qdrant rename per boss).
+- **Smoke test:** end-to-end LLM tool calls — task create + list, reminder create + fire, person resolve, broadcast, group operations. Plus: boot with a boss row that has `llm_api_key_encrypted` set, confirm that key is used (decryption + per-boss client construction works).
 
-**Phase 5 — Controllers + AppContainer + delete telegram shim**
+**Phase 5 — Controllers + AppContainer + delete telegram shim + observability**
 - Create `src/container.py` with `AppContainer` dataclass + `build_container(settings)`. Construction order documented in code comments (infrastructure → repos → channels → services → agents → controllers).
 - Create `controllers/message_router.py` with `handle(incoming, container)`. Move routing logic out of `agent.py` (group-not-mentioned, group-not-registered, DM-unknown-user, normal flow). Router is the single boundary that calls `IdentityService.resolve_or_create_person` + `ConversationService.resolve_or_create_conversation`.
+- **Tenant lifecycle gate at the router boundary:** after `WorkspaceService.resolve_context`, the router checks `boss.status`. If `'suspended'` or `'cancelled'`, drop silently (or reply with a static "your workspace is paused" message — choice deferred). If `'active'` or `'trial'`, proceed. Single boundary check — no service or tool needs to know about tenant status.
 - Refactor `main.py`: call `build_container`, start messengers via the registry. Lifespan loop spawns event-loop providers as background tasks; webhook routes (none yet) registered.
+- **Observability scaffold (forward-compat, no external dep yet required):**
+  - `infrastructure/observability.py` — context-local logger that injects `boss_internal_id`, `internal_chat_id`, `request_id` (UUID per inbound message) into structured log records. The logger writes to stdout in JSON format if `Settings.log_format == 'json'`, otherwise current human-readable format.
+  - OpenTelemetry tracer setup is **optional**: if `OTEL_EXPORTER_OTLP_ENDPOINT` is set in env, install + configure the SDK; otherwise use a no-op tracer. The `MessageRouter.handle` and each `Service` method are wrapped in spans regardless — the no-op tracer makes it free.
+  - Shape the API so a Prometheus `/metrics` route can be mounted later as a sibling to `/admin` without touching services.
 - **Delete `src/services/telegram.py`** — no caller remains.
 - `agent.handle_message` is removed; entry point is `MessageRouter.handle(IncomingMessage)`.
 - `ChatContext` is rebuilt as the pure DTO described above.
-- **Smoke test:** all previous flows plus routing edge cases — group with bot un-mentioned (silent index), unknown DM (onboarding trigger), reset flow.
+- **Smoke test:** all previous flows plus routing edge cases — group with bot un-mentioned (silent index), unknown DM (onboarding trigger), reset flow. Plus: flip a boss row to `status='suspended'`, confirm router drops the message.
 
-**Phase 6 — Add Zalo provider + capability-aware messaging**
+**Phase 6 — Add Zalo provider + capability-aware messaging + plan policy hook**
 - Implement `ZaloMessenger` using chosen library (zlapi or equivalent). Session bootstrap reads cookies from `data/zalo_session.json` (gitignored); relogin path on session expiry.
 - `MessengerCapabilities` for Zalo (groups: yes; markdown: no; admin ops: per-library support; `requires_proactive_window=False`).
 - Implement `MessagingService.can_send_proactive`. Update `ReminderService` and broadcast handler to call it; log + skip when `False`.
 - Add `controllers/webhooks/` skeleton (placeholder for future Messenger / WhatsApp). Not wired this phase.
-- **Smoke test:** boss onboards on Telegram, then on Zalo (different `internal_id` because cross-platform = different person); reminder fires on whichever provider the target is on.
+- **Plan-policy hook (forward-compat, default-allow):**
+  - `services/policy.py` — `BossPolicy` with one method: `async can_use_feature(boss: Boss, feature_name: str) -> bool`. Default impl: returns `True` always. Reads `boss.plan` but treats unknown / NULL as unrestricted.
+  - Services that gate features call `policy.can_use_feature(boss, '<feature>')` before the work. Initial gating points (each one line, all return `True` today): `MessagingService.broadcast`, `ReminderService.create_reminder`, `TaskService.create_task`. Future tier limits = swap the impl, no new boundary.
+- **Smoke test:** boss onboards on Telegram, then on Zalo (different `internal_id` because cross-platform = different person); reminder fires on whichever provider the target is on. Plus: confirm `BossPolicy.can_use_feature` is called from at least one path (log line) — wiring smoke, not behavior smoke.
 
 ### Per-phase smoke-test checklist (rationale)
 
@@ -657,3 +704,9 @@ No automated tests survive the refactor. Each phase merges only after running th
 - **Tests.** Existing `tests/` will not survive the refactor (per user signal: tests don't reflect business logic). Plan: write new tests against services in Phase 4 (after services exist) and against repos in Phase 3. Channel adapters tested via `IncomingMessage` parsing fixtures in Phase 6. Smoke-test checklist is the safety net for Phases 4–5.
 - **Phase 4 + 5 are the highest-risk phases.** Phase 4 reroutes every tool through new dispatcher + handlers. Phase 5 reroutes every entry point through `MessageRouter`. If a regression slips, the smoke checklist surfaces it; if not, we'll find it later. Budget extra time for these two phases.
 - **Multi-provider in `enabled_providers`.** The system serves multiple providers concurrently in one process. Asyncio is single-threaded, so there's no thread safety concern, but a slow webhook can block the loop briefly. If this becomes real, move webhook handlers to use `asyncio.create_task` for the heavy work (router → agent) and ack the webhook immediately.
+- **Encryption key rotation (Phase 3).** `boss_credential_encryption_key` is a Fernet key in env. If lost, every encrypted `llm_api_key_encrypted` row becomes unrecoverable — bosses must re-enter keys. If rotated, existing rows must be re-encrypted. We don't build rotation tooling yet; document the constraint in `README.md` when the field is first populated. For self-hosted: just back up the env. For future SaaS: introduce a `key_id` column referencing a separate KMS-managed key.
+- **Embedding-dim mismatch on model switch (Phase 4).** Naming Qdrant collections `messages_{boss_uuid}_{embed_dim}` keeps old collection alive when boss changes embedding model — old vectors stay searchable in the old collection until a future "rebuild embeddings" admin action. We do **not** auto-migrate vectors. Acceptable trade-off: search recall on old messages drops temporarily; new messages index fine.
+- **OpenTelemetry / Prometheus opt-in (Phase 5).** Spans are always created (no-op tracer when no exporter configured), so production turn-on is just env vars. Concern: span overhead on hot paths. Sample rate config (`Settings.otel_sample_rate`, default 0.1) included from day one.
+- **`BossPolicy` default-allow risk (Phase 6).** Until a real plan-tier impl ships, `can_use_feature` returns `True` for everything. This is intentional but means a future tightening (e.g., adding a `'free'` tier with reminder cap) would silently start denying — needs a release note. Mitigation: log every call at DEBUG level so it's visible when behavior changes.
+- **Audit log volume (Phase 3 schema, Phase 4 service).** Wired but not called this round. When callers light up, `audit_log` will grow unbounded. Add a retention sweeper before turning on heavy audit writes (90-day default). Out of scope for the 6 phases.
+- **Self-hosted vs. SaaS tension.** The forward-compat layer adds ~20–30% per phase 3–6. If product direction settles on "self-hosted only forever", these are dead weight. If product moves toward SaaS, retrofit cost would have been multiples of this. Accept the bet because the schema additions are default-no-op (zero behaviour change) and the abstractions stay one-impl until a second is needed.
