@@ -76,10 +76,14 @@ async def approve_join(ctx: ChatContext, membership_chat_id: str, role: str = No
     person_type = role or membership["person_type"]
     name = membership["name"] or "Unknown"
 
-    # Write to Lark People table of THIS workspace (the boss's workspace) ← BUG FIX
+    # Lark "Chat ID" stores external Telegram numeric id. membership_chat_id
+    # is internal UUID after Phase 2 — translate.
+    target_external = await db.lookup_external_for_person(membership_chat_id)
+    chat_id_for_lark = int(target_external[1]) if target_external else 0
+
     fields = {
         "Tên": name,
-        "Chat ID": int(membership_chat_id),
+        "Chat ID": chat_id_for_lark,
         "Type": person_type,
         "Ghi chú": membership.get("request_info", ""),
     }
@@ -103,7 +107,7 @@ async def approve_join(ctx: ChatContext, membership_chat_id: str, role: str = No
     company = ctx.boss_name
     try:
         await telegram.send(
-            int(membership_chat_id),
+            membership_chat_id,
             f"Your request to join {company} has been approved as {person_type}. "
             f"You can now interact with the AI secretary for {company}.",
         )
@@ -132,7 +136,7 @@ async def reject_join(ctx: ChatContext, membership_chat_id: str) -> str:
     company = ctx.boss_name
     try:
         await telegram.send(
-            int(membership_chat_id),
+            membership_chat_id,
             f"Your request to join {company} was not approved.",
         )
     except Exception:
