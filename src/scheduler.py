@@ -360,15 +360,15 @@ async def _run_dynamic_reviews():
             else:
                 continue
 
-            # Route: group chat or boss DM
-            target_chat_id = review.get("group_chat_id") or int(owner_id)
+            # Route: group chat or boss DM. Both ids are internal UUIDs.
+            target_chat_id = review.get("group_chat_id") or owner_id
 
             # Build group context if sending to a group
             group_context_str = ""
             if review.get("group_chat_id"):
                 try:
                     from src.context_builder import build_group_context as _bgc  # noqa: PLC0415
-                    grp = await _bgc(int(review["group_chat_id"]), int(owner_id))
+                    grp = await _bgc(review["group_chat_id"], owner_id)
                     if grp:
                         group_context_str = (
                             f"\nNhóm: {grp.get('group_name', '')} | "
