@@ -44,13 +44,13 @@ async def init_qdrant(qdrant_url: str):
     _qdrant = AsyncQdrantClient(url=qdrant_url)
 
 
-async def ensure_collection(collection: str):
-    """Create collection if not exists. Dense (1536, cosine) + sparse (BM25 IDF)."""
+async def ensure_collection(collection: str, *, dim: int = 1536):
+    """Create collection if not exists. Dense (`dim`, cosine) + sparse (BM25 IDF)."""
     existing = [c.name for c in (await _qdrant.get_collections()).collections]
     if collection not in existing:
         await _qdrant.create_collection(
             collection_name=collection,
-            vectors_config={"dense": VectorParams(size=1536, distance=Distance.COSINE)},
+            vectors_config={"dense": VectorParams(size=dim, distance=Distance.COSINE)},
             sparse_vectors_config={
                 "bm25": SparseVectorParams(modifier=models.Modifier.IDF)
             },
@@ -60,10 +60,14 @@ async def ensure_collection(collection: str):
         )
 
 
-async def provision_collections(boss_chat_id: str):
-    """Create messages_{id} and tasks_{id} collections for new boss."""
-    await ensure_collection(f"messages_{boss_chat_id}")
-    await ensure_collection(f"tasks_{boss_chat_id}")
+async def provision_collections(boss_chat_id: str, embedding_dim: int = 1536):
+    """Create messages_{id}_{dim} and tasks_{id}_{dim} for new boss.
+
+    `embedding_dim` defaults to 1536 (text-embedding-3-small) for legacy
+    callers; Phase 4b services pass the boss's actual configured dim.
+    """
+    await ensure_collection(f"messages_{boss_chat_id}_{embedding_dim}", dim=embedding_dim)
+    await ensure_collection(f"tasks_{boss_chat_id}_{embedding_dim}", dim=embedding_dim)
 
 
 async def upsert(collection: str, point_id: int, chat_id: str, role: str, text: str, vector: list[float]):
