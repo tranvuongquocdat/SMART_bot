@@ -59,7 +59,12 @@ async def _embed_and_upsert(ctx: ChatContext, record_id: str, fields: dict):
 
 
 async def _find_assignee_chat_id(ctx: ChatContext, assignee_name: str) -> tuple[str | None, bool]:
-    """Search People table for assignee. Returns (chat_id_or_None, found_in_people)."""
+    """Search People table for assignee. Returns (internal_chat_id_or_None, found_in_people).
+
+    Lark's "Chat ID" field stores the external Telegram numeric id. We resolve
+    to the internal UUID here so callers can write it directly into tables that
+    use internal-id FKs (outbound_messages.to_chat_id, task_notifications.assignee_chat_id).
+    """
     if not assignee_name:
         return None, False
     records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_people)
@@ -68,7 +73,12 @@ async def _find_assignee_chat_id(ctx: ChatContext, assignee_name: str) -> tuple[
         full = (r.get("Tên", "") + " " + r.get("Tên gọi", "")).lower()
         if name_lower in full:
             raw = r.get("Chat ID")
-            return (str(int(raw)) if raw else None, True)
+            if not raw:
+                return None, True
+            internal_id = await db_mod.resolve_or_create_person(
+                "telegram", str(int(raw)), r.get("Tên", "") or "", "",
+            )
+            return internal_id, True
     return None, False
 
 
@@ -83,11 +93,11 @@ async def _notify_assignee_task(
         f"Giao bởi: {assigner_name}\n\n"
         f"Reply để xác nhận, hỏi thêm thông tin, hoặc đề xuất thay đổi nhé."
     )
-    await telegram.send(int(assignee_chat_id), msg)
+    await telegram.send(assignee_chat_id, msg)
     if boss_chat_id:
         await db_mod.log_outbound_dm(
             boss_chat_id=boss_chat_id,
-            to_chat_id=int(assignee_chat_id),
+            to_chat_id=assignee_chat_id,
             to_name="",
             content=msg,
             trigger_type="task_assigned",
@@ -361,10 +371,10 @@ async def update_task(
                     f"Giao bởi: {ctx.sender_name or ctx.boss_name}\n"
                     f"Vui lòng xác nhận nhé."
                 )
-                asyncio.create_task(telegram.send(int(achat_id), msg))
+                asyncio.create_task(telegram.send(achat_id, msg))
                 asyncio.create_task(db_mod.log_outbound_dm(
                     boss_chat_id=ctx.boss_chat_id,
-                    to_chat_id=int(achat_id),
+                    to_chat_id=achat_id,
                     to_name=new_assignee,
                     content=msg,
                     trigger_type="task_assigned",

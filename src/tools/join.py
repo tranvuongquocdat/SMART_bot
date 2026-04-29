@@ -30,7 +30,7 @@ async def list_available_workspaces(ctx: ChatContext) -> str:
     return "\n".join(lines)
 
 
-async def request_join(ctx: ChatContext, target_boss_id: int, role: str, intro: str) -> str:
+async def request_join(ctx: ChatContext, target_boss_id: str, role: str, intro: str) -> str:
     """Creates a pending membership and notifies the target boss."""
     _db = await db.get_db()
 
