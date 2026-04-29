@@ -545,7 +545,7 @@ async def handle_boss_join_decision(text: str, boss_chat_id: str) -> str | None:
     if action == "reject":
         await db.upsert_membership(_db, target_id, boss_chat_id,
                                    membership["person_type"], membership["name"], "rejected")
-        await tg.send_message(int(target_id),
+        await tg.send_message(target_id,
             f"Yêu cầu join {boss['company']} của bạn đã bị từ chối.")
         return f"Đã từ chối yêu cầu của user {target_id}."
 
@@ -557,9 +557,14 @@ async def handle_boss_join_decision(text: str, boss_chat_id: str) -> str | None:
         elif "nhân viên" in adjustments or "member" in adjustments:
             person_type = "member"
 
+    # Lark "Chat ID" field stores the external Telegram numeric id (so humans
+    # / cross-system tools can read it). target_id is internal UUID — translate.
+    target_external = await db.lookup_external_for_person(target_id)
+    target_chat_id_for_lark = int(target_external[1]) if target_external else 0
+
     fields = {
         "Tên": membership["name"],
-        "Chat ID": int(target_id),
+        "Chat ID": target_chat_id_for_lark,
         "Type": person_type,
         "Ghi chú": membership.get("request_info", ""),
     }
@@ -569,7 +574,7 @@ async def handle_boss_join_decision(text: str, boss_chat_id: str) -> str | None:
                                membership["name"], "active",
                                lark_record_id=rec.get("record_id"))
 
-    await tg.send_message(int(target_id),
+    await tg.send_message(target_id,
         f"Yêu cầu join {boss['company']} của bạn đã được chấp nhận với tư cách {person_type}. "
         f"Hãy bắt đầu trò chuyện với thư ký AI nhé!")
 

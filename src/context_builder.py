@@ -43,7 +43,7 @@ async def build(sender_id: str, chat_id: str) -> dict:
         if boss:
             resolved.append({
                 "workspace": boss.get("company", str(m["boss_chat_id"])),
-                "boss_id": int(m["boss_chat_id"]),
+                "boss_id": str(m["boss_chat_id"]),       # internal UUID
                 "role": m["person_type"],
                 "language": m.get("language"),
             })
@@ -57,12 +57,9 @@ async def build(sender_id: str, chat_id: str) -> dict:
     # Check preferred workspace from sessions (switch_workspace with TTL)
     preferred_raw = await db.get_session(sender_id, "preferred_workspace")
     if preferred_raw:
-        try:
-            preferred_id = int(preferred_raw)
-            if any(m["boss_id"] == preferred_id for m in resolved):
-                primary_id = preferred_id
-        except ValueError:
-            pass
+        preferred_id = str(preferred_raw)
+        if any(m["boss_id"] == preferred_id for m in resolved):
+            primary_id = preferred_id
 
     active_sessions = await _get_active_sessions(sender_id)
     last_5 = await db.get_recent(chat_id, limit=5)

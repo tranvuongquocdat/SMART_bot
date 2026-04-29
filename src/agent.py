@@ -687,7 +687,7 @@ async def send_reminder(reminder: dict, settings: Settings):
         await telegram.send(target_id, reply)
         await db.log_outbound_dm(
             boss_chat_id=boss_chat_id,
-            to_chat_id=int(target_id),
+            to_chat_id=target_id,
             to_name=target_name or "",
             content=reply,
             trigger_type="reminder",
