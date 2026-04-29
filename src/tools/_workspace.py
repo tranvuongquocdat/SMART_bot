@@ -75,7 +75,7 @@ async def set_active_workspace_id(sender_chat_id: str, boss_chat_id: str) -> Non
 
 def _boss_to_workspace(boss: dict, user_role: str) -> dict:
     return {
-        "boss_id": int(boss["chat_id"]),
+        "boss_id": str(boss["chat_id"]),
         "workspace_name": boss.get("company", str(boss["chat_id"])),
         "user_role": user_role,
         "lark_base_token": boss["lark_base_token"],

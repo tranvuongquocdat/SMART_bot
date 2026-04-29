@@ -450,7 +450,7 @@ async def approve_task_change(ctx: ChatContext, approval_id: int) -> str:
     changes_str = ", ".join(f"{k}: {v}" for k, v in changes.items())
     try:
         await telegram.send(
-            int(approval["requester_id"]),
+            approval["requester_id"],
             f"✅ Your update to task '{task_name}' was approved. Changes: {changes_str}",
         )
     except Exception:
@@ -500,6 +500,7 @@ async def reject_task_change(ctx: ChatContext, approval_id: int) -> str:
             approval["requester_id"],
             f"Your requested update to task '{task_name}' was not approved.",
         )
+        # (requester_id already an internal UUID — services.telegram auto-resolves)
     except Exception:
         pass
 

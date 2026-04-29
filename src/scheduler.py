@@ -173,7 +173,7 @@ async def _check_deadline_push():
                 if assignee_chat_id:
                     label = "2 tiếng" if kind == "2h" else "24 tiếng"
                     await telegram.send(
-                        int(assignee_chat_id),
+                        assignee_chat_id,
                         f"⏰ Task '{task.get('Tên task')}' còn khoảng {label} đến deadline!\n"
                         f"Hãy cập nhật tiến độ nhé.",
                     )

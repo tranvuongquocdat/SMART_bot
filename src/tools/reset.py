@@ -99,12 +99,12 @@ async def _do_reset(ctx: ChatContext) -> str:
         (str(boss_id),),
     ) as cur:
         member_rows = await cur.fetchall()
-    member_ids = [int(r["chat_id"]) for r in member_rows]
+    member_ids = [str(r["chat_id"]) for r in member_rows]
 
     # Step 1: Notify members
     company = boss.get("company", str(boss_id))
     for mid in member_ids:
-        if mid != boss_id:
+        if mid != str(boss_id):
             try:
                 await telegram.send(mid, f"The workspace '{company}' has been reset by the boss.")
             except Exception:
