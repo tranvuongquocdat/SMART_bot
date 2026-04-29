@@ -358,6 +358,113 @@ async def _migrate_schema(db: aiosqlite.Connection) -> None:
 
 
 # ---------------------------------------------------------------------------
+# external_identity / conversation — resolve external (provider, id) → internal_id
+# ---------------------------------------------------------------------------
+
+import uuid as _uuid
+import time as _time
+
+
+async def resolve_or_create_person(
+    provider: str,
+    external_id: str,
+    name: str = "",
+    username: str = "",
+    db_path: str = "data/history.db",
+) -> str:
+    """Return internal_id (UUID) for (provider, external_id). Inserts if missing."""
+    db = await get_db(db_path)
+    async with db.execute(
+        "SELECT internal_id FROM external_identity WHERE provider = ? AND external_id = ?",
+        (provider, str(external_id)),
+    ) as cur:
+        row = await cur.fetchone()
+    if row:
+        if name or username:
+            await db.execute(
+                """UPDATE external_identity
+                   SET name = COALESCE(NULLIF(?, ''), name),
+                       username = COALESCE(NULLIF(?, ''), username)
+                   WHERE internal_id = ?""",
+                (name, username, row["internal_id"]),
+            )
+            await db.commit()
+        return row["internal_id"]
+    internal_id = str(_uuid.uuid4())
+    await db.execute(
+        """INSERT INTO external_identity
+           (internal_id, provider, external_id, name, username, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (internal_id, provider, str(external_id), name or "", username or "", int(_time.time() * 1000)),
+    )
+    await db.commit()
+    return internal_id
+
+
+async def lookup_external_for_person(
+    internal_id: str,
+    db_path: str = "data/history.db",
+) -> tuple[str, str] | None:
+    """Return (provider, external_id) for an internal_id. None if not found."""
+    db = await get_db(db_path)
+    async with db.execute(
+        "SELECT provider, external_id FROM external_identity WHERE internal_id = ?",
+        (str(internal_id),),
+    ) as cur:
+        row = await cur.fetchone()
+    return (row["provider"], row["external_id"]) if row else None
+
+
+async def resolve_or_create_conversation(
+    provider: str,
+    external_chat_id: str,
+    chat_type: str,
+    title: str = "",
+    db_path: str = "data/history.db",
+) -> str:
+    """Return internal_chat_id (UUID) for (provider, external_chat_id). Inserts if missing."""
+    db = await get_db(db_path)
+    async with db.execute(
+        "SELECT internal_chat_id FROM conversation WHERE provider = ? AND external_chat_id = ?",
+        (provider, str(external_chat_id)),
+    ) as cur:
+        row = await cur.fetchone()
+    if row:
+        if title:
+            await db.execute(
+                """UPDATE conversation
+                   SET title = COALESCE(NULLIF(?, ''), title)
+                   WHERE internal_chat_id = ?""",
+                (title, row["internal_chat_id"]),
+            )
+            await db.commit()
+        return row["internal_chat_id"]
+    internal_chat_id = str(_uuid.uuid4())
+    await db.execute(
+        """INSERT INTO conversation
+           (internal_chat_id, provider, external_chat_id, chat_type, title, created_at)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (internal_chat_id, provider, str(external_chat_id), chat_type, title or "", int(_time.time() * 1000)),
+    )
+    await db.commit()
+    return internal_chat_id
+
+
+async def lookup_external_for_conversation(
+    internal_chat_id: str,
+    db_path: str = "data/history.db",
+) -> tuple[str, str] | None:
+    """Return (provider, external_chat_id) for an internal_chat_id. None if not found."""
+    db = await get_db(db_path)
+    async with db.execute(
+        "SELECT provider, external_chat_id FROM conversation WHERE internal_chat_id = ?",
+        (str(internal_chat_id),),
+    ) as cur:
+        row = await cur.fetchone()
+    return (row["provider"], row["external_chat_id"]) if row else None
+
+
+# ---------------------------------------------------------------------------
 # bosses
 # ---------------------------------------------------------------------------
 
