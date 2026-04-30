@@ -43,6 +43,12 @@ async def lifespan(_app: FastAPI):
     from src.agent_pkg.llm_for_ctx import init_llm_settings
     init_llm_settings(settings)
 
+    # Phase 5a: build AppContainer (read-only wiring snapshot).
+    # Phase 5b's MessageRouter is the first real consumer; module-level
+    # singletons keep working until then.
+    from src.container import build_container
+    _app.state.container = await build_container(settings)
+
     # Start scheduler + polling
     await scheduler.start(settings)
     polling_task = asyncio.create_task(
