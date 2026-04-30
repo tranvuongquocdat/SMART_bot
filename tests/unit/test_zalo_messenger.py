@@ -13,6 +13,15 @@ import pytest
 import src.db  # noqa: F401  — register submodule for patch("src.db.*") resolution
 from src.channels.base import IncomingMessage, Messenger, OutgoingMessage
 from src.channels.zalo import ZaloMessenger
+from src.channels.zalo_bridge.rate_limiter import ZaloRateLimiter
+
+# Tests construct ZaloMessenger via this helper to inject a no-op limiter
+# (zero spacing, zero jitter) so the suite stays fast.
+_NO_THROTTLE = ZaloRateLimiter(per_thread_interval_s=0.0, jitter_s=(0.0, 0.0))
+
+
+def _messenger() -> ZaloMessenger:
+    return ZaloMessenger("node", "/x/bridge.js", "/x/s.json", rate_limiter=_NO_THROTTLE)
 
 
 def _bridge_event(**overrides) -> dict:
@@ -37,7 +46,7 @@ def _bridge_event(**overrides) -> dict:
 
 
 def test_zalo_messenger_satisfies_messenger_protocol():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     assert isinstance(m, Messenger)
     assert m.channel == "zalo"
     assert m.capabilities.supports_groups is True
@@ -45,7 +54,7 @@ def test_zalo_messenger_satisfies_messenger_protocol():
 
 
 async def test_normalize_dm_text_message():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     ev = _bridge_event()
 
     with patch("src.db.resolve_or_create_conversation",
@@ -72,7 +81,7 @@ async def test_normalize_dm_text_message():
 
 
 async def test_normalize_group_with_mention_and_reply():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     ev = _bridge_event(
         thread_type="group",
         group_name="Team Chat",
@@ -98,7 +107,7 @@ async def test_normalize_group_with_mention_and_reply():
 
 
 async def test_normalize_photo_attachment():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     ev = _bridge_event(
         text="",
         content_type="image",
@@ -117,7 +126,7 @@ async def test_normalize_photo_attachment():
 
 
 async def test_send_message_routes_dm_via_bridge():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     bridge = MagicMock()
     bridge.call = AsyncMock(return_value={"msg_id": "OUT-1"})
     m._bridge = bridge
@@ -140,7 +149,7 @@ async def test_send_message_routes_dm_via_bridge():
 
 
 async def test_send_message_uses_group_thread_type():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     bridge = MagicMock()
     bridge.call = AsyncMock(return_value={"msg_id": "G"})
     m._bridge = bridge
@@ -156,7 +165,7 @@ async def test_send_message_uses_group_thread_type():
 
 
 async def test_send_message_skips_when_provider_not_zalo():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     bridge = MagicMock()
     bridge.call = AsyncMock()
     m._bridge = bridge
@@ -170,13 +179,13 @@ async def test_send_message_skips_when_provider_not_zalo():
 
 
 async def test_send_message_no_bridge_returns_empty():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     out = await m.send_message("INT-CHAT", "x")
     assert out.message_id == ""
 
 
 async def test_handle_event_dispatches_message_to_handler():
-    m = ZaloMessenger("node", "/x/bridge.js", "/x/s.json")
+    m = _messenger()
     received: list = []
 
     async def handler(incoming):

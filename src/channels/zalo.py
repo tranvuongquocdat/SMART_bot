@@ -18,6 +18,7 @@ from src.channels.base import (
     OutgoingMessage,
 )
 from src.channels.zalo_bridge.process import ZaloBridgeProcess
+from src.channels.zalo_bridge.rate_limiter import ZaloRateLimiter
 
 logger = logging.getLogger("channels.zalo")
 
@@ -37,13 +38,20 @@ class ZaloMessenger(BaseMessenger):
         supports_markdown=False,
     )
 
-    def __init__(self, node_path: str, bridge_js_path: str, session_path: str) -> None:
+    def __init__(
+        self,
+        node_path: str,
+        bridge_js_path: str,
+        session_path: str,
+        rate_limiter: ZaloRateLimiter | None = None,
+    ) -> None:
         self._node_path = node_path
         self._bridge_js = bridge_js_path
         self._session = session_path
         self._bridge: ZaloBridgeProcess | None = None
         self._on_message: IncomingHandler | None = None
         self._own_id: str = ""
+        self._rate_limiter = rate_limiter or ZaloRateLimiter()
 
     # --- Lifecycle ---------------------------------------------------------
 
@@ -178,6 +186,8 @@ class ZaloMessenger(BaseMessenger):
 
         kind = await db.get_conversation_kind(chat_id)
         thread_type = "group" if kind == "group" else "dm"
+
+        await self._rate_limiter.acquire(external_thread)
 
         msg_id = ""
         try:
