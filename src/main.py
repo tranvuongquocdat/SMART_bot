@@ -44,15 +44,19 @@ async def lifespan(_app: FastAPI):
     init_llm_settings(settings)
 
     # Phase 5a: build AppContainer (read-only wiring snapshot).
-    # Phase 5b's MessageRouter is the first real consumer; module-level
-    # singletons keep working until then.
     from src.container import build_container
     _app.state.container = await build_container(settings)
 
-    # Start scheduler + polling
+    # Phase 5b: MessageRouter is the single inbound boundary.
+    from src.controllers.message_router import MessageRouter
+    _router = MessageRouter(_app.state.container)
+    _app.state.router = _router
+
+    # Start scheduler + polling. Polling now feeds raw IncomingMessage to the
+    # router (skipping the legacy positional-arg bridge in services/telegram).
     await scheduler.start(settings)
     polling_task = asyncio.create_task(
-        telegram.start_polling(agent.handle_message)
+        telegram.get_messenger().start(_router.handle)
     )
 
     yield
