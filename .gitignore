@@ -1,6 +1,26 @@
-.env
-data/
+# Python
 __pycache__/
 *.pyc
 .venv/
+.pytest_cache/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# Tooling caches
+.deepeval/
+
+# Secrets + runtime data
+.env
+data/
+**/session.json
+**/qr.png
+
+# Node (Zalo bridge)
+**/node_modules/
+**/package-lock.json
+
+# Local-only material
 reference for SMART/

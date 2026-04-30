@@ -66,6 +66,14 @@ class ConversationRepo:
             row = await cur.fetchone()
         return (row["provider"], row["external_chat_id"]) if row else None
 
+    async def get_kind(self, internal_chat_id: str) -> str:
+        async with self._db.execute(
+            "SELECT chat_type FROM conversation WHERE internal_chat_id = ?",
+            (str(internal_chat_id),),
+        ) as cur:
+            row = await cur.fetchone()
+        return (row["chat_type"] if row else "") or ""
+
     # --- group_map ------------------------------------------------------------
 
     async def get_group(self, group_chat_id: str) -> Optional[dict]:

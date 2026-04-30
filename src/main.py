@@ -56,6 +56,11 @@ async def lifespan(_app: FastAPI):
     _router = MessageRouter(_app.state.container)
     _app.state.router = _router
 
+    # Channel registry — `telegram_singleton.send/edit` dispatch via this map
+    # so a chat with provider="zalo" goes to ZaloMessenger automatically.
+    from src.channels import registry as channel_registry
+    channel_registry.register("telegram", telegram.get_messenger())
+
     # Start scheduler + polling. Polling now feeds raw IncomingMessage to the
     # router (skipping the legacy positional-arg bridge in services/telegram).
     await scheduler.start(settings)
@@ -63,11 +68,36 @@ async def lifespan(_app: FastAPI):
         telegram.get_messenger().start(_router.handle)
     )
 
+    # Optional Zalo channel (demo: single account; bridge auto-loads session.json
+    # next to bridge.js unless ZALO_SESSION_PATH overrides). `start()` returns
+    # once the bridge is ready; subprocess + listener run on background tasks.
+    zalo_messenger = None
+    if settings.zalo_enabled:
+        import os as _os
+        from src.channels.zalo import ZaloMessenger
+        bridge_js = _os.path.join(
+            _os.path.dirname(__file__), "channels", "zalo_bridge", "bridge.js",
+        )
+        zalo_messenger = ZaloMessenger(
+            node_path=settings.zalo_node_path,
+            bridge_js_path=bridge_js,
+            session_path=settings.zalo_session_path,
+        )
+        try:
+            await zalo_messenger.start(_router.handle)
+            _app.state.container.messengers["zalo"] = zalo_messenger
+            channel_registry.register("zalo", zalo_messenger)
+        except Exception:
+            logging.getLogger("main").exception("Zalo bridge failed to start; continuing without it")
+            zalo_messenger = None
+
     yield
 
     # Shutdown
     telegram.stop_polling()
     polling_task.cancel()
+    if zalo_messenger is not None:
+        await zalo_messenger.stop()
     await scheduler.stop()
     await telegram.close_telegram()
     await lark.close_lark()

@@ -1,0 +1,204 @@
+"""ZaloMessenger — `Messenger` impl over the Node zca-js bridge.
+
+Demo scope: one Zalo account, session.json on disk (path from Settings).
+Multi-account, encryption, rate-limiting, circuit breaker, daily refresh —
+deferred to Phase 6b proper.
+"""
+from __future__ import annotations
+
+import asyncio
+import logging
+
+from src.channels.base import (
+    Attachment,
+    BaseMessenger,
+    IncomingHandler,
+    IncomingMessage,
+    MessengerCapabilities,
+    OutgoingMessage,
+)
+from src.channels.zalo_bridge.process import ZaloBridgeProcess
+
+logger = logging.getLogger("channels.zalo")
+
+
+class ZaloMessenger(BaseMessenger):
+    channel = "zalo"
+    capabilities = MessengerCapabilities(
+        supports_groups=True,
+        supports_group_admin=False,
+        supports_invite_links=False,
+        supports_edit=False,
+        supports_delete=False,
+        supports_typing=False,
+        supports_photos=True,
+        supports_files=True,
+        supports_voice=True,
+        supports_markdown=False,
+    )
+
+    def __init__(self, node_path: str, bridge_js_path: str, session_path: str) -> None:
+        self._node_path = node_path
+        self._bridge_js = bridge_js_path
+        self._session = session_path
+        self._bridge: ZaloBridgeProcess | None = None
+        self._on_message: IncomingHandler | None = None
+        self._own_id: str = ""
+
+    # --- Lifecycle ---------------------------------------------------------
+
+    async def start(self, on_message: IncomingHandler) -> None:
+        self._on_message = on_message
+        self._bridge = ZaloBridgeProcess(
+            self._node_path, self._bridge_js, self._session,
+            on_event=self._handle_event,
+        )
+        await self._bridge.start()
+        self._own_id = self._bridge.own_id
+        logger.info("Zalo online as uid=%s", self._own_id)
+
+    async def stop(self) -> None:
+        if self._bridge is not None:
+            await self._bridge.close()
+            self._bridge = None
+
+    # --- Inbound -----------------------------------------------------------
+
+    async def _handle_event(self, event: str, data: dict) -> None:
+        if event == "message":
+            try:
+                incoming = await self._normalize(data)
+            except Exception:
+                logger.exception("zalo: normalize failed: %s", data)
+                return
+            if self._on_message is None:
+                return
+            logger.info(
+                "[chat:%s type:%s sender:%s] Received: %s",
+                incoming.chat_id, incoming.chat_type, incoming.sender_id,
+                (incoming.text or "")[:100],
+            )
+            asyncio.create_task(self._on_message(incoming))
+        elif event == "disconnected":
+            logger.warning("zalo bridge disconnected: %s", data)
+        else:
+            logger.debug("zalo bridge event=%s data=%s", event, data)
+
+    async def _normalize(self, ev: dict) -> IncomingMessage:
+        from src import db
+
+        thread_type = "group" if ev.get("thread_type") == "group" else "dm"
+        external_thread = str(ev.get("thread_id", ""))
+        sender_uid = str(ev.get("sender_uid", ""))
+        sender_name = ev.get("sender_name", "") or ""
+        group_name = ev.get("group_name", "") or ""
+
+        internal_chat_id = await db.resolve_or_create_conversation(
+            "zalo", external_thread, thread_type, group_name,
+        )
+        internal_sender_id = ""
+        if sender_uid:
+            internal_sender_id = await db.resolve_or_create_person(
+                "zalo", sender_uid, sender_name, "",
+            )
+
+        reply_to_message_id = None
+        reply_to_sender_id = None
+        rt = ev.get("reply_to") or None
+        if rt:
+            reply_to_message_id = str(rt.get("msg_id") or "") or None
+            sup = str(rt.get("sender_uid") or "")
+            if sup:
+                reply_to_sender_id = await db.resolve_or_create_person(
+                    "zalo", sup, "", "",
+                )
+
+        attachments: list[Attachment] = []
+        for a in (ev.get("attachments") or []):
+            attachments.append(Attachment(
+                kind=a.get("kind", "file"),
+                url=a.get("href", "") or "",
+            ))
+
+        mentions: list[dict] = []
+        for m in (ev.get("mentions") or []):
+            uid = str(m.get("uid") or "")
+            if not uid:
+                continue
+            internal = await db.resolve_or_create_person("zalo", uid, "", "")
+            mentions.append({"id": internal, "name": "", "username": ""})
+
+        return IncomingMessage(
+            channel="zalo",
+            chat_id=internal_chat_id,
+            chat_type=thread_type,
+            sender_id=internal_sender_id,
+            sender_name=sender_name,
+            text=ev.get("text", "") or "",
+            attachments=attachments,
+            is_mentioned=bool(ev.get("is_mentioned")),
+            is_forwarded=bool(ev.get("is_forwarded")),
+            reply_to_message_id=reply_to_message_id,
+            reply_to_sender_id=reply_to_sender_id,
+            message_id=str(ev.get("msg_id") or ""),
+            timestamp=int((ev.get("ts_ms") or 0) // 1000),
+            group_name=group_name,
+            mentions=mentions,
+            raw=ev,
+        )
+
+    # --- Outbound ----------------------------------------------------------
+
+    async def send_message(
+        self,
+        chat_id: str,
+        text: str,
+        *,
+        format: str = "markdown",
+        save_history: bool = True,
+        reply_to_message_id: str | None = None,
+    ) -> OutgoingMessage:
+        if self._bridge is None:
+            logger.warning("zalo.send: bridge not running")
+            return OutgoingMessage(message_id="", chat_id=chat_id)
+
+        from src import db
+
+        ext = await db.lookup_external_for_conversation(chat_id)
+        if not ext:
+            logger.warning("zalo.send: no conversation row for %s", chat_id)
+            return OutgoingMessage(message_id="", chat_id=chat_id)
+        provider, external_thread = ext
+        if provider != "zalo":
+            logger.warning(
+                "zalo.send: chat %s belongs to provider=%s, not zalo",
+                chat_id, provider,
+            )
+            return OutgoingMessage(message_id="", chat_id=chat_id)
+
+        kind = await db.get_conversation_kind(chat_id)
+        thread_type = "group" if kind == "group" else "dm"
+
+        msg_id = ""
+        try:
+            res = await self._bridge.call("send", {
+                "thread_id": external_thread,
+                "thread_type": thread_type,
+                "text": text,
+            })
+            msg_id = str(res.get("msg_id") or "")
+        except Exception:
+            logger.exception("zalo.send failed for chat=%s", chat_id)
+
+        if save_history and chat_id and text:
+            try:
+                await db.save_message(chat_id, "assistant", text)
+            except Exception:
+                logger.warning("zalo.send: save_message failed", exc_info=True)
+
+        return OutgoingMessage(message_id=msg_id, chat_id=chat_id)
+
+    # --- Identity ----------------------------------------------------------
+
+    async def get_bot_id(self) -> str:
+        return self._own_id

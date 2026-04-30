@@ -1,342 +1,149 @@
 # AI Secretary — Thư ký giám đốc ảo
 
-Bot Telegram hỗ trợ giám đốc quản lý công việc, nhân sự, dự án thông qua hội thoại tự nhiên.  
-Một người dùng có thể **vừa là sếp của công ty A**, **vừa là đối tác/nhân viên của công ty B** — bot tự nhận biết ngữ cảnh tương ứng.
+Bot LLM hỗ trợ giám đốc quản lý task, nhân sự, dự án, lịch nhắc qua chat tự nhiên.
+Multi-workspace: một người có thể là sếp công ty A và đối tác công ty B — bot tự nhận biết ngữ cảnh.
 
 ---
 
-## Tính năng
-
-### Quản lý công việc (Tasks)
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| Tạo / xem / sửa / xóa task | Nhắn tự nhiên, bot phân tích và ghi vào Lark Base |
-| Tìm kiếm ngữ nghĩa | Tìm task theo nghĩa, không cần từ khóa chính xác (Qdrant) |
-| Tự động thông báo assignee | Khi tạo task, bot nhắn Telegram cho người được giao |
-| Approval flow | Member/partner muốn sửa task → cần sếp duyệt qua chat |
-| Deadline push | Nhắc assignee tự động khi còn **24h** và **2h** tới deadline |
-| Cảnh báo quá hạn | Nhắc assignee + báo sếp khi task quá hạn |
-
-### Quản lý nhân sự (People)
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| Thêm / sửa / xóa nhân sự | Lưu vào Lark Base People table |
-| Kiểm tra workload | Xem ai đang ôm bao nhiêu task, có xung đột deadline không |
-| Phân loại | member (nhân viên), partner (đối tác), customer (khách hàng) |
-
-### Multi-workspace & Membership
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| Đa workspace | Một người có thể là sếp bên này, nhân viên/đối tác bên kia |
-| Join request | Người ngoài xem danh sách công ty → gửi request vào → sếp duyệt |
-| Boss approve/reject | Sếp chấp nhận, từ chối, hoặc điều chỉnh quyền khi duyệt request |
-| Workspace isolation | Dữ liệu mỗi công ty hoàn toàn tách biệt |
-
-### Nhắc nhở (Reminders)
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| Tạo / sửa / xóa reminder | Đặt giờ, bot nhắn đúng giờ qua LLM (giọng tự nhiên) |
-| Nhắc người khác | Sếp đặt reminder cho nhân viên trong team |
-| Sync 2 chiều Lark ↔ SQLite | Reminder hiển thị ở bảng Reminders trên Lark Base; sửa trên Lark cũng tự sync về bot |
-
-### Lịch review tự động
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| Nhiều lịch | Mỗi sếp có thể đặt bao nhiêu lịch review tùy thích |
-| Loại nội dung | `morning_brief` (briefing sáng), `evening_summary` (tổng kết chiều), `custom` (prompt tuỳ chỉnh) |
-| Bật/tắt/xóa | Quản lý qua chat, không cần động vào server |
-| Giờ tuỳ ý | Đặt bất kỳ giờ nào theo định dạng HH:MM |
-
-### Chat nhóm (Group)
-
-| Tính năng | Mô tả |
-|-----------|-------|
-| Lưu tất cả tin nhắn | Mọi tin nhắn trong nhóm đều được lưu vào DB + Qdrant |
-| Chỉ phản hồi khi được tag | Bot im lặng cho đến khi được `@mention` |
-| Context thông minh | Mỗi lần trả lời: 15 tin gần nhất + 8 tin RAG liên quan |
-
-### Reset workspace
-
-Bot hỗ trợ xóa toàn bộ dữ liệu Lark Base khi cần thiết (không xóa SQLite). Cơ chế 2 bước:
-1. Gửi `/reset` → bot yêu cầu gõ tên công ty bằng **CHỮ HOA**
-2. Gõ `tôi chắc chắn` → bot xóa tất cả records trên Lark
-
-### Cố vấn chiến lược (Advisor)
-
-Khi sếp hỏi phân tích phức tạp, bot tự chuyển sang chế độ cố vấn:
-
-```
-"Sắp xếp lại nhân sự Q3 xem thế nào"
-"Phân tích workload team, ai đang quá tải?"
-"Tuần sau có 3 deadline trùng nhau, xử lý sao?"
-```
-
-### Các tính năng khác
-
-- Ghi chú nội bộ (bot tự nhớ thông tin về người/dự án/nhóm)
-- Lưu ý tưởng nhanh
-- Gửi tin nhắn Telegram thay sếp
-- Tìm kiếm lịch sử chat bằng ngữ nghĩa
-- Báo cáo workload / tổng kết ngày / tuần
-- Tra cứu web
-
----
-
-## Vai trò người dùng
-
-### Sếp (Boss)
-Toàn quyền: tạo task, giao việc, xem toàn bộ, duyệt request, cấu hình lịch review.  
-Khi nhắn bot lần đầu, bot tự động tạo Lark Base workspace và gửi link.
-
-### Thành viên (Member)
-Chỉ xem và cập nhật task **của mình**. Mọi thay đổi cần sếp duyệt.
-
-### Đối tác (Partner)
-Tương tự member — xem và cập nhật task được giao.
-
-### Trong nhóm
-Bot lưu tất cả tin nhắn, chỉ phản hồi khi được `@tag`. Quyền tùy theo người tag.
-
----
-
-## Bắt đầu sử dụng
-
-### Đăng ký làm Sếp
-
-1. Tìm bot trên Telegram và nhắn bất kỳ
-2. Bot hỏi vai trò → chọn **Sếp**
-3. Nhập tên, tên công ty
-4. Xác nhận → bot tự tạo Lark Base (vài giây), gửi link cho bạn
-
-### Đăng ký làm Thành viên / Đối tác (join company)
-
-1. Nhắn bot: *"xem danh sách công ty"* hoặc *"muốn join"*
-2. Bot liệt kê các công ty đang hỗ trợ → chọn công ty
-3. Chọn vai trò (nhân viên / đối tác) → nhập tên và thông tin
-4. Bot gửi request đến sếp của công ty đó
-5. Sếp duyệt → bạn nhận được thông báo và có thể dùng bot ngay
-
-### Thêm bot vào nhóm
-
-1. Thêm bot vào group Telegram
-2. Sếp đăng ký group với bot (bot hướng dẫn)
-3. Tag `@bot_name` trong nhóm để tương tác
-
----
-
-## Hướng dẫn sử dụng nhanh
-
-### Task
-
-```
-"Giao cho Bách thiết kế logo, deadline thứ 6"
-"Hôm nay có task gì?"
-"Task của Linh tuần này"
-"Done task thiết kế logo"
-"Dời deadline task logo sang thứ 2 tuần sau"
-"Có task nào liên quan marketing không?"
-```
-
-### Nhân sự
-
-```
-"Thêm Minh vào team, lập trình viên, nhóm Tech"
-"Bách đang ôm bao nhiêu task?"
-"Danh sách nhân sự nhóm Media"
-"Giao thêm task deadline thứ 5 cho Bách có ổn không?"
-```
-
-### Nhắc nhở
-
-```
-"Nhắc tôi 3h chiều họp với khách hàng"
-"Nhắc Bách ngày mai 9h gửi báo cáo"
-"Xem danh sách reminder"
-"Xóa reminder số 3"
-```
-
-### Lịch review
-
-```
-"Thêm lịch briefing sáng lúc 7:30"
-"Thêm lịch custom lúc 12:00: liệt kê task quá hạn và cảnh báo workload"
-"Xem lịch review của tôi"
-"Tắt lịch review số 2"
-"Xóa lịch review số 1"
-```
-
-### Reset workspace
-
-```
-/reset
-→ Bot: Gõ tên công ty bằng CHỮ HOA để xác nhận...
-→ Bạn: ACME CORP
-→ Bot: Gõ "tôi chắc chắn" để tiến hành xóa...
-→ Bạn: tôi chắc chắn
-→ Bot: Reset hoàn tất. Đã xóa X records...
-```
-
----
-
-## Lark Base
-
-Mỗi công ty có 1 Lark Base riêng với **6 bảng**:
-
-| Bảng | Nội dung | Sync |
-|------|----------|------|
-| **People** | Nhân sự: tên, Chat ID, vai trò, kỹ năng | Bot → Lark ngay lập tức |
-| **Tasks** | Công việc: assignee, deadline, priority, status | Bot → Lark ngay lập tức |
-| **Projects** | Dự án: người phụ trách, deadline, trạng thái | Bot → Lark ngay lập tức |
-| **Ideas** | Ý tưởng: nội dung, tags, project | Bot → Lark ngay lập tức |
-| **Reminders** | Nhắc nhở có giờ, người nhận | 2 chiều: Bot → Lark ngay; Lark → Bot mỗi 30 giây |
-| **Notes** | Ghi chú nội bộ (dự phòng) | Tạo sẵn, chưa dùng — dữ liệu lưu trong SQLite |
-
----
-
-## Báo cáo tự động (mặc định)
-
-| Thời gian | Nội dung |
-|-----------|----------|
-| **8:00 sáng** | Briefing: task hôm nay, deadline sắp tới, cảnh báo quá tải |
-| **9:30 sáng** | Nhắc deadline ngày mai + cảnh báo task quá hạn cho assignee |
-| **5:00 chiều** | Tổng kết cuối ngày |
-| **Mỗi phút** | Gửi reminder đến giờ |
-| **Mỗi 30 phút** | Push nhắc assignee khi task còn 24h / 2h |
-
-> Lịch mặc định (8h, 17h) có thể tắt bật hoặc thêm lịch mới qua chat bất cứ lúc nào.
-
----
-
-## Cài đặt
-
-### Yêu cầu
-
-- Docker & Docker Compose
-- Telegram Bot Token ([BotFather](https://t.me/BotFather))
-- Lark Suite App (App ID + App Secret) — [Lark Developer Console](https://open.larksuite.com/)
-- OpenAI API Key
-- Cohere API Key (reranking)
-
-### Chạy
-
-```bash
-# 1. Clone
-git clone <repo-url> && cd <repo>
-
-# 2. Setup môi trường
-./scripts/setup.sh
-
-# 3. Điền API keys
-nano .env
-
-# 4. Khởi chạy
-./scripts/start.sh
-```
-
-### Quản lý
-
-```bash
-./scripts/status.sh    # Trạng thái
-./scripts/logs.sh      # Log realtime
-./scripts/restart.sh   # Khởi động lại
-./scripts/stop.sh      # Dừng
-python scripts/backup.py  # Backup SQLite
-```
-
-### Biến môi trường (`.env`)
-
-```env
-TELEGRAM_BOT_TOKEN=...
-LARK_APP_ID=...
-LARK_APP_SECRET=...
-OPENAI_API_KEY=...
-OPENAI_CHAT_MODEL=gpt-4o
-OPENAI_EMBEDDING_MODEL=text-embedding-3-small
-COHERE_API_KEY=...
-QDRANT_URL=http://qdrant:6333
-DB_PATH=data/history.db
-TIMEZONE=Asia/Ho_Chi_Minh
-```
-
----
-
-## Kiến trúc
-
-```
-Telegram ←→ FastAPI (Polling)
-              │
-              ├── agent.py          ← Secretary Agent (33 tools)
-              ├── advisor.py        ← Advisor Agent (11 read-only tools)
-              ├── onboarding.py     ← Luồng đăng ký + join company
-              ├── scheduler.py      ← APScheduler: review, reminder, deadline push
-              │
-              ├── src/db.py         ← SQLite (aiosqlite)
-              │     bosses, memberships, people_map, group_map
-              │     messages, notes, reminders, token_usage
-              │     pending_approvals, task_notifications, scheduled_reviews
-              │
-              ├── src/services/
-              │     lark.py         ← Lark Base API (6 tables per workspace)
-              │     qdrant.py       ← Vector search (tasks + messages)
-              │     openai_client.py← Chat + embeddings
-              │     telegram.py     ← Send / edit messages
-              │
-              └── src/tools/        ← 33 tool functions
-                    tasks.py        ← CRUD + approval flow + auto-notify assignee
-                    people.py       ← CRUD + workload check
-                    projects.py     ← CRUD
-                    reminder.py     ← CRUD + sync lên Lark
-                    review_config.py← Scheduled review CRUD
-                    reset.py        ← 2-step workspace reset
-                    note.py         ← Ghi chú nội bộ (SQLite only)
-                    summary.py      ← Báo cáo ngày/tuần/workload
-                    ...
-```
-
-### Data flow
-
-```
-User message
-  → agent.py: resolve workspace context (multi-membership)
-  → save message to SQLite + Qdrant (async)
-  → build context: 15 recent + 8 RAG + people summary
-  → Claude tool loop (max 10 rounds)
-  → execute tools → read/write Lark Base
-  → reply to user
-  → save reply to SQLite + Qdrant (async)
-```
+## Tình trạng hiện tại
+
+**Channels (kênh nhắn tin):**
+
+| Kênh | Trạng thái | Ghi chú |
+|------|------------|---------|
+| Telegram | ✅ Production | Long-poll, group + DM, group admin ops |
+| Zalo | 🟡 Demo (1 account) | QR login, DM + group, send/receive — chưa có rate-limit/multi-account |
+| Messenger / WhatsApp / Web | ⏳ Roadmap | Channel layer đã trừu tượng hóa (`src/channels/base.py`) |
+
+**Tính năng cốt lõi (channel-agnostic):**
+
+- **Tasks** — CRUD bằng tự nhiên, search ngữ nghĩa (Qdrant), approval flow, deadline push (24h / 2h / quá hạn).
+- **People** — CRUD nhân sự, kiểm tra workload, phân loại member / partner / customer.
+- **Multi-workspace** — Mỗi sếp 1 Lark Base riêng (6 bảng); join request có duyệt.
+- **Reminders** — Đặt giờ, sync 2 chiều với Lark.
+- **Scheduled review** — `morning_brief`, `evening_summary`, `custom`; tuỳ chỉnh giờ.
+- **Group** — Lưu mọi tin nhắn, chỉ trả lời khi `@mention`.
+- **Advisor mode** — Tự chuyển sang chế độ tư vấn cho phân tích phức tạp.
+- **Reset workspace** — 2 bước xác nhận, xóa Lark Base.
 
 ---
 
 ## Setup
 
-Project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+### Yêu cầu
+
+- Docker + Docker Compose, hoặc Python 3.12 + Node 22 (cho dev local)
+- Telegram Bot Token, Lark App, OpenAI key, Cohere key
+
+### Chạy nhanh (Docker)
 
 ```bash
-uv sync                  # install deps + create .venv
-uv run uvicorn src.main:app --port 8000   # run server
-uv run pytest tests/ -v                    # run tests
+cp .env.example .env       # điền các API keys vào
+docker compose up -d --build
+docker compose logs -f
 ```
 
-Python 3.12 (pinned via `.python-version`). Source of truth: `pyproject.toml` + `uv.lock`.
-
-## Tests
+### Dev local (uv)
 
 ```bash
-uv run pytest tests/ -v
-# unit (schema, context, lark, onboarding, utils) + integration (approvals, reviews, reset)
+uv sync                                          # install deps + tạo .venv
+uv run uvicorn src.main:app --port 8000          # khởi chạy
+uv run pytest tests/ -v                          # chạy tests
 ```
+
+### Bật Zalo channel
+
+```bash
+# 1. Login lần đầu (host)
+cd src/channels/zalo_bridge
+npm install
+node login.js                                    # quét QR → session.json
+
+# 2. Bật trong .env
+echo "ZALO_ENABLED=true" >> ../../../.env
+
+# 3. (Docker) — copy session vào volume
+mkdir -p data/zalo && cp src/channels/zalo_bridge/session.json data/zalo/
+# rồi set ZALO_SESSION_PATH=data/zalo/session.json trong .env
+```
+
+---
+
+## Cấu trúc code
+
+```
+src/
+├── main.py                  FastAPI lifespan: init clients, build container, start channels
+├── container.py             AppContainer (DI snapshot, frozen)
+├── config.py                Settings (pydantic-settings, đọc .env)
+├── db.py                    Facade trên SQLite (aiosqlite)
+├── scheduler.py             APScheduler: review, deadline push, reminder fire
+├── identity.py              Resolve provider+external_id → internal UUID
+├── context.py / context_builder.py    Build context cho LLM
+│
+├── agent/                   LLM loop + tool dispatch
+│   ├── secretary_agent.py     Tool-using loop
+│   ├── advisor_agent.py       Read-only analysis
+│   ├── onboarding_agent.py    Đăng ký sếp / join company
+│   ├── reminder_agent.py      Render reminder text
+│   ├── tool_dispatcher.py     Tool registry + execution
+│   └── tool_definitions.py    Schemas
+│
+├── channels/                Provider abstraction (Messenger Protocol)
+│   ├── base.py                IncomingMessage / OutgoingMessage / capabilities
+│   ├── registry.py            provider → messenger map
+│   ├── telegram.py            TelegramMessenger
+│   ├── telegram_singleton.py  Legacy shim, dispatch theo provider
+│   └── zalo_bridge/           Zalo (demo)
+│       ├── bridge.js            Long-running JSONL bridge ↔ zca-js
+│       ├── login.js             QR login → session.json
+│       ├── package.json         zca-js dep
+│       ├── process.py           ZaloBridgeProcess (async subprocess + JSONL)
+│       └── ...
+│   └── zalo.py                ZaloMessenger (Messenger impl trên bridge)
+│
+├── controllers/
+│   └── message_router.py    Single inbound boundary (tenant gate, route to agent)
+│
+├── repositories/            Tầng truy cập DB (BossRepo, TaskRepo, …)
+├── services/                Domain services (tasks, people, reminders, lark sync, …)
+├── infrastructure/          External clients (lark, openai, cohere, qdrant, observability, crypto)
+└── utils/                   Helpers (text, dates, validation)
+```
+
+**Inbound flow:** `Channel → IncomingMessage (UUIDs đã resolve) → MessageRouter → secretary_agent → tools → reply`.
+
+**Outbound (legacy):** Code cũ gọi `telegram.send(chat_id, text)` — shim tự dispatch về Zalo nếu conversation thuộc provider zalo.
+
+---
+
+## Roadmap
+
+**Phase 6b — Zalo hardening (kế tiếp demo):**
+- Multi-account: 1 process / Zalo account, table `zalo_account`, encrypted session (Fernet)
+- Rate limiter (per-thread + per-min/account + daily cap, jitter)
+- Circuit breaker + daily session refresh cron
+- QR re-login CLI, fatal disconnect → Telegram alert
+- Spec: `docs/superpowers/specs/2026-04-30-phase-6b-zalo-channel-design.md`
+
+**Phase 6c+ — kênh khác:**
+- Messenger (unofficial / Cloud API)
+- WhatsApp Cloud API
+- Web chat (FastAPI WebSocket)
+- Zalo OA (separate provider, OAuth + webhook)
+
+**Phase 7 — Admin UI:** Web UI quản lý workspace + Zalo accounts (thay CLI cho self-host SaaS).
+
+**Continuous:**
+- Voice STT (Whisper) trên file đính kèm
+- Audit log redaction + export
+- Per-boss LLM credentials (Phase 3 khung đã có)
 
 ---
 
 ## Bảo mật
 
-- Mỗi workspace hoàn toàn tách biệt — sếp A không thấy dữ liệu sếp B
-- Member/partner chỉ thao tác được task của mình, mọi thay đổi cần boss duyệt
-- Reset workspace yêu cầu 2 bước xác nhận để tránh xóa nhầm
-- SQL injection được phòng ngừa bằng whitelist cột trong các hàm dynamic UPDATE
+- Mỗi workspace tách biệt; member/partner chỉ thao tác task của mình.
+- Session Zalo lưu plaintext ở demo — Phase 6b sẽ encrypt (Fernet).
+- Reset workspace 2-step confirm.
+- SQL injection chặn bằng whitelist cột trong dynamic UPDATE.

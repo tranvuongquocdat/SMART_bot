@@ -90,20 +90,40 @@ async def _to_internal_user_id(user_id_raw: str) -> str:
     return await db.resolve_or_create_person("telegram", s, "", "")
 
 
+async def _messenger_for(internal_chat_id: str):
+    """Return the channel that owns this conversation, falling back to Telegram."""
+    from src import db
+    from src.channels import registry
+    ext = await db.lookup_external_for_conversation(internal_chat_id)
+    if ext:
+        provider = ext[0]
+        if provider != "telegram":
+            m = registry.get(provider)
+            if m is not None:
+                return m
+    return get_messenger()
+
+
 async def send(
     chat_id: str,
     text: str,
     parse_mode: str = "Markdown",
     save_history: bool = True,
-) -> int | None:
+) -> int | str | None:
     internal = await _to_internal_chat_id(chat_id)
-    out = await get_messenger().send_message(
+    messenger = await _messenger_for(internal)
+    out = await messenger.send_message(
         internal,
         text,
         format=_fmt_from_parse_mode(parse_mode),
         save_history=save_history,
     )
-    return int(out.message_id) if out.message_id else None
+    if not out.message_id:
+        return None
+    try:
+        return int(out.message_id)
+    except (TypeError, ValueError):
+        return out.message_id
 
 
 # Alias kept for code paths still using the longer name.
@@ -116,10 +136,18 @@ async def edit_message(
     text: str,
     parse_mode: str = "Markdown",
 ) -> None:
+    from src.channels.base import UnsupportedOperation
     internal = await _to_internal_chat_id(chat_id)
-    await get_messenger().edit_message(
-        internal, str(message_id), text, format=_fmt_from_parse_mode(parse_mode)
-    )
+    messenger = await _messenger_for(internal)
+    try:
+        await messenger.edit_message(
+            internal, str(message_id), text, format=_fmt_from_parse_mode(parse_mode)
+        )
+    except UnsupportedOperation:
+        # Channels without edit (e.g. Zalo) — degrade to a fresh send.
+        await messenger.send_message(
+            internal, text, format=_fmt_from_parse_mode(parse_mode), save_history=False,
+        )
 
 
 # --- Group admin (legacy int args) ------------------------------------------

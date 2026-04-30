@@ -29,4 +29,10 @@ class Settings(BaseSettings):
     # anything else uses the existing human-readable format.
     log_format: str = "human"
 
+    # Zalo channel (Phase 6b demo, single account).
+    # Disabled by default; set zalo_enabled=true + zalo_session_path to enable.
+    zalo_enabled: bool = False
+    zalo_node_path: str = "node"
+    zalo_session_path: str = ""
+
     model_config = {"env_file": ".env", "extra": "ignore"}
