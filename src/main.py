@@ -75,6 +75,7 @@ async def lifespan(_app: FastAPI):
     if settings.zalo_enabled:
         import os as _os
         from src.channels.zalo import ZaloMessenger
+        from src.channels.zalo_bridge.inbound_filter import ZaloInboundFilter
         bridge_js = _os.path.join(
             _os.path.dirname(__file__), "channels", "zalo_bridge", "bridge.js",
         )
@@ -82,6 +83,7 @@ async def lifespan(_app: FastAPI):
             node_path=settings.zalo_node_path,
             bridge_js_path=bridge_js,
             session_path=settings.zalo_session_path,
+            inbound_filter=ZaloInboundFilter(settings.zalo_onboard_phrase),
         )
         try:
             await zalo_messenger.start(_router.handle)

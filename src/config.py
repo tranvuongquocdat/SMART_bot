@@ -34,5 +34,9 @@ class Settings(BaseSettings):
     zalo_enabled: bool = False
     zalo_node_path: str = "node"
     zalo_session_path: str = ""
+    # Phrase a sếp says (DM only) to introduce themselves to the bot before
+    # they're a registered boss. Other DMs from non-bosses are dropped to
+    # keep the personal-account use case manageable.
+    zalo_onboard_phrase: str = "thư ký ơi"
 
     model_config = {"env_file": ".env", "extra": "ignore"}

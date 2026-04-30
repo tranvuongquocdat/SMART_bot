@@ -428,6 +428,20 @@ async def get_conversation_kind(
     return await repo.get_kind(internal_chat_id)
 
 
+async def lookup_person_by_external(
+    provider: str, external_id: str, db_path: str = "data/history.db",
+) -> str | None:
+    repo: IdentityRepo = await _repo("identity", IdentityRepo)
+    return await repo.lookup_person_by_external(provider, external_id)
+
+
+async def lookup_conversation_by_external(
+    provider: str, external_id: str, db_path: str = "data/history.db",
+) -> str | None:
+    repo: ConversationRepo = await _repo("conversation", ConversationRepo)
+    return await repo.lookup_conversation_by_external(provider, external_id)
+
+
 # ---------------------------------------------------------------------------
 # legacy people_map wrappers (delegate to memberships)
 # ---------------------------------------------------------------------------

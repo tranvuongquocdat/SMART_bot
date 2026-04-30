@@ -17,6 +17,7 @@ from src.channels.base import (
     MessengerCapabilities,
     OutgoingMessage,
 )
+from src.channels.zalo_bridge.inbound_filter import ZaloInboundFilter
 from src.channels.zalo_bridge.process import ZaloBridgeProcess
 from src.channels.zalo_bridge.rate_limiter import ZaloRateLimiter
 
@@ -44,6 +45,7 @@ class ZaloMessenger(BaseMessenger):
         bridge_js_path: str,
         session_path: str,
         rate_limiter: ZaloRateLimiter | None = None,
+        inbound_filter: ZaloInboundFilter | None = None,
     ) -> None:
         self._node_path = node_path
         self._bridge_js = bridge_js_path
@@ -52,6 +54,7 @@ class ZaloMessenger(BaseMessenger):
         self._on_message: IncomingHandler | None = None
         self._own_id: str = ""
         self._rate_limiter = rate_limiter or ZaloRateLimiter()
+        self._filter = inbound_filter
 
     # --- Lifecycle ---------------------------------------------------------
 
@@ -74,6 +77,17 @@ class ZaloMessenger(BaseMessenger):
 
     async def _handle_event(self, event: str, data: dict) -> None:
         if event == "message":
+            if self._filter is not None:
+                try:
+                    if not await self._filter.should_forward(data):
+                        logger.debug(
+                            "zalo: dropped (filter) thread=%s sender=%s",
+                            data.get("thread_id"), data.get("sender_uid"),
+                        )
+                        return
+                except Exception:
+                    logger.exception("zalo: filter raised; dropping to be safe")
+                    return
             try:
                 incoming = await self._normalize(data)
             except Exception:

@@ -12,7 +12,7 @@ Multi-workspace: một người có thể là sếp công ty A và đối tác c
 | Kênh | Trạng thái | Ghi chú |
 |------|------------|---------|
 | Telegram | ✅ Production | Long-poll, group + DM, group admin ops |
-| Zalo | 🟡 Demo (1 account) | QR login, DM + group, send/receive — chưa có rate-limit/multi-account |
+| Zalo | 🟡 Demo (1 account) | QR login, DM + group, throttle per-thread, inbound filter (chỉ DM boss / group đã đăng ký + onboard phrase) |
 | Messenger / WhatsApp / Web | ⏳ Roadmap | Channel layer đã trừu tượng hóa (`src/channels/base.py`) |
 
 **Tính năng cốt lõi (channel-agnostic):**

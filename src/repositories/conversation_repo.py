@@ -66,6 +66,17 @@ class ConversationRepo:
             row = await cur.fetchone()
         return (row["provider"], row["external_chat_id"]) if row else None
 
+    async def lookup_conversation_by_external(
+        self, provider: str, external_chat_id: str,
+    ) -> Optional[str]:
+        """Read-only lookup: (provider, external_chat_id) → internal_chat_id, or None."""
+        async with self._db.execute(
+            "SELECT internal_chat_id FROM conversation WHERE provider = ? AND external_chat_id = ?",
+            (provider, str(external_chat_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        return row["internal_chat_id"] if row else None
+
     async def get_kind(self, internal_chat_id: str) -> str:
         async with self._db.execute(
             "SELECT chat_type FROM conversation WHERE internal_chat_id = ?",

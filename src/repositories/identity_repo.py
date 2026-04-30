@@ -66,6 +66,17 @@ class IdentityRepo:
             row = await cur.fetchone()
         return (row["provider"], row["external_id"]) if row else None
 
+    async def lookup_person_by_external(
+        self, provider: str, external_id: str,
+    ) -> Optional[str]:
+        """Read-only lookup: (provider, external_id) → internal_id, or None."""
+        async with self._db.execute(
+            "SELECT internal_id FROM external_identity WHERE provider = ? AND external_id = ?",
+            (provider, str(external_id)),
+        ) as cur:
+            row = await cur.fetchone()
+        return row["internal_id"] if row else None
+
     # --- seen_contacts --------------------------------------------------------
 
     async def upsert_seen_contact(
