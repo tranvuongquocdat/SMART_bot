@@ -43,6 +43,10 @@ async def lifespan(_app: FastAPI):
     from src.agent_pkg.llm_for_ctx import init_llm_settings
     init_llm_settings(settings)
 
+    # Phase 5c: structured-logging context filter (boss/chat/request ids).
+    from src.infrastructure.observability import setup_logging
+    setup_logging(settings)
+
     # Phase 5a: build AppContainer (read-only wiring snapshot).
     from src.container import build_container
     _app.state.container = await build_container(settings)

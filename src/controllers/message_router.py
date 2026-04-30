@@ -29,43 +29,50 @@ class MessageRouter:
 
     async def handle(self, incoming: IncomingMessage) -> None:
         """Entry point for every inbound message from any channel."""
-        if await self._is_tenant_blocked(incoming):
-            logger.info(
-                "[router] sender=%s suspended/cancelled — drop",
-                incoming.sender_id,
-            )
-            return
+        from src.infrastructure.observability import request_context
 
-        # Phase 5b minimum: delegate to the existing secretary loop body.
-        # Phase 5b's deletion of `services/telegram.py` is scheduled for 5c —
-        # 13 outbound callers still use that shim, so the loop reaches them
-        # unchanged today.
-        from src.agent_pkg.secretary_agent import handle_message
+        # Bind structured-logging context for the whole request — every log
+        # record produced downstream gets boss_internal_id + internal_chat_id
+        # + a fresh request_id automatically.
+        with request_context(
+            boss_internal_id=incoming.sender_id or None,
+            internal_chat_id=incoming.chat_id,
+        ):
+            if await self._is_tenant_blocked(incoming):
+                logger.info(
+                    "[router] sender=%s suspended/cancelled — drop",
+                    incoming.sender_id,
+                )
+                return
 
-        reply_to = None
-        if incoming.reply_to_sender_id:
-            reply_to = {
-                "id": incoming.reply_to_sender_id,
-                "name": "",
-                "username": "",
-            }
+            # Phase 5b: delegate to the existing secretary loop body.
+            # Phase 6 will route per-channel capability checks here too.
+            from src.agent_pkg.secretary_agent import handle_message
 
-        try:
-            await handle_message(
-                incoming.text or "",
-                incoming.chat_id,
-                incoming.sender_id or None,
-                incoming.chat_type == "group",
-                incoming.is_mentioned,
-                incoming.group_name,
-                sender_name=incoming.sender_name,
-                mentions=incoming.mentions,
-                username_mentions=incoming.username_mentions,
-                reply_to=reply_to,
-                new_members=incoming.new_members,
-            )
-        except Exception:
-            logger.exception("[router] handler raised for %s", incoming.chat_id)
+            reply_to = None
+            if incoming.reply_to_sender_id:
+                reply_to = {
+                    "id": incoming.reply_to_sender_id,
+                    "name": "",
+                    "username": "",
+                }
+
+            try:
+                await handle_message(
+                    incoming.text or "",
+                    incoming.chat_id,
+                    incoming.sender_id or None,
+                    incoming.chat_type == "group",
+                    incoming.is_mentioned,
+                    incoming.group_name,
+                    sender_name=incoming.sender_name,
+                    mentions=incoming.mentions,
+                    username_mentions=incoming.username_mentions,
+                    reply_to=reply_to,
+                    new_members=incoming.new_members,
+                )
+            except Exception:
+                logger.exception("[router] handler raised for %s", incoming.chat_id)
 
     async def _is_tenant_blocked(self, incoming: IncomingMessage) -> bool:
         """Phase 3 schema added `bosses.status` (default 'active'). When the

@@ -12,10 +12,8 @@ and eventually delete this module.
 from __future__ import annotations
 
 import logging
-from typing import Callable
 
 from src.channels.telegram import TelegramMessenger
-from src.channels.base import IncomingMessage
 
 logger = logging.getLogger("telegram")
 
@@ -185,41 +183,10 @@ async def get_bot_id() -> int | None:
     return int(bid) if bid else None
 
 
-# --- Polling bridge: old positional callback → IncomingMessage --------------
-# agent.handle_message still uses the legacy signature. Convert IncomingMessage
-# back to positional args so nothing in agent.py has to change until Phase 0
-# moves all callers to the new API.
-
-async def start_polling(on_message: Callable) -> None:
-    async def _bridge(msg: IncomingMessage) -> None:
-        # After Phase 2, msg.chat_id / msg.sender_id / reply_to_sender_id are
-        # internal UUIDs (resolved by TelegramMessenger._parse_update). Pass
-        # through as strings — int() casts would crash on UUIDs.
-        reply_to = None
-        if msg.reply_to_sender_id:
-            reply_to = {
-                "id": msg.reply_to_sender_id,
-                "name": "",        # legacy callback didn't carry this reliably
-                "username": "",
-            }
-        try:
-            await on_message(
-                msg.text or "",
-                msg.chat_id,
-                msg.sender_id if msg.sender_id else None,
-                msg.chat_type == "group",
-                msg.is_mentioned,
-                msg.group_name,
-                sender_name=msg.sender_name,
-                mentions=msg.mentions,
-                username_mentions=msg.username_mentions,
-                reply_to=reply_to,
-                new_members=msg.new_members,
-            )
-        except Exception:
-            logger.exception("on_message handler failed")
-
-    await get_messenger().start(_bridge)
+# Phase 5b removed the polling bridge: main.py now wires
+# `messenger.start(router.handle)` directly. The outbound shims (send/edit
+# and group-admin helpers) above are kept until every caller migrates to the
+# messenger instance from `AppContainer.messengers["telegram"]`.
 
 
 def stop_polling() -> None:
