@@ -5,7 +5,7 @@ import logging
 
 from src import db
 from src.context import ChatContext
-from src.services import telegram
+from src.channels import telegram_singleton as telegram
 from src.agent.llm_for_ctx import get_llm_for_ctx
 
 logger = logging.getLogger("tools.group")

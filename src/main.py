@@ -12,7 +12,7 @@ logging.basicConfig(
 
 from src import agent, context, db, scheduler
 from src.config import Settings
-from src.services import telegram
+from src.channels import telegram_singleton as telegram
 from src.infrastructure import cohere_client as cohere
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark

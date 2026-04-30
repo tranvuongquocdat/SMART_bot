@@ -10,7 +10,7 @@ import logging
 from datetime import date
 
 from src import db
-from src.services import telegram
+from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
 from src.agent.llm_for_ctx import get_default_llm
 

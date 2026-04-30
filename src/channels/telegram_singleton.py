@@ -1,7 +1,7 @@
 """
 Compatibility shim — delegates to `src.channels.telegram.TelegramMessenger`.
 
-Callers across the codebase still import `from src.services import telegram`
+Callers across the codebase still import `from src.channels import telegram_singleton as telegram`
 and call `telegram.send(...)`, `telegram.start_polling(on_message)`, etc.
 That API is preserved here; under the hood it drives a singleton
 `TelegramMessenger` instance so there's exactly one HTTP client + polling loop.

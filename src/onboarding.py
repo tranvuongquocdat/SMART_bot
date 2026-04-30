@@ -24,8 +24,8 @@ from src.agent.onboarding_agent import (
     greeting as _greeting,
     ai_classify as _ai_classify,
 )
-from src.services import telegram
-from src.services import telegram as tg
+from src.channels import telegram_singleton as telegram
+from src.channels import telegram_singleton as tg
 
 logger = logging.getLogger("onboarding")
 

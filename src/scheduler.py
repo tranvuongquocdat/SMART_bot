@@ -10,7 +10,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from src import db
 from src.config import Settings
 from src.context import ChatContext
-from src.services import telegram
+from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
 
 logger = logging.getLogger("scheduler")

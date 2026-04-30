@@ -4,7 +4,7 @@ from datetime import date, datetime
 
 from src import db as db_mod
 from src.context import ChatContext
-from src.services import telegram
+from src.channels import telegram_singleton as telegram
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
 from src.utils.dates import date_to_ms, ms_to_date
@@ -432,7 +432,7 @@ async def approve_task_change(ctx: ChatContext, approval_id: int) -> str:
     """Apply a pending task change and notify the requester."""
     import json
     from src import db
-    from src.services import telegram
+    from src.channels import telegram_singleton as telegram
     from src.infrastructure import lark_client as lark
 
     _db = await db.get_db()
@@ -490,7 +490,7 @@ async def reject_task_change(ctx: ChatContext, approval_id: int) -> str:
     """Reject a pending task change and notify the requester."""
     import json
     from src import db
-    from src.services import telegram
+    from src.channels import telegram_singleton as telegram
 
     _db = await db.get_db()
     async with _db.execute(
