@@ -38,34 +38,31 @@ Multi-workspace: một người có thể là sếp công ty A và đối tác c
 ### Chạy nhanh (Docker)
 
 ```bash
-cp .env.example .env       # điền các API keys vào
-docker compose up -d --build
-docker compose logs -f
+./scripts/setup.sh         # interactive: hỏi từng API key, ghi .env, build image
+./scripts/start.sh         # docker compose up -d --build
+./scripts/logs.sh          # log realtime
 ```
+
+Quản lý: `status.sh` / `restart.sh` / `stop.sh`.
 
 ### Dev local (uv)
 
 ```bash
-uv sync                                          # install deps + tạo .venv
-uv run uvicorn src.main:app --port 8000          # khởi chạy
-uv run pytest tests/ -v                          # chạy tests
+uv sync                                       # deps + .venv
+uv run uvicorn src.main:app --port 8000       # khởi chạy
+uv run pytest tests/ -v                       # tests
+# Qdrant (nếu chưa có): docker compose up -d qdrant
 ```
 
 ### Bật Zalo channel
 
 ```bash
-# 1. Login lần đầu (host)
-cd src/channels/zalo_bridge
-npm install
-node login.js                                    # quét QR → session.json
-
-# 2. Bật trong .env
-echo "ZALO_ENABLED=true" >> ../../../.env
-
-# 3. (Docker) — copy session vào volume
-mkdir -p data/zalo && cp src/channels/zalo_bridge/session.json data/zalo/
-# rồi set ZALO_SESSION_PATH=data/zalo/session.json trong .env
+./scripts/setup_zalo.sh    # check Node, npm install, QR login,
+                           # copy session, set ZALO_ENABLED=true trong .env
+./scripts/restart.sh
 ```
+
+Re-login khi session hết hạn: chạy lại `./scripts/setup_zalo.sh`, chọn `y` khi hỏi login lại.
 
 ---
 
