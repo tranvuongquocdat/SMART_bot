@@ -52,7 +52,7 @@ async def _embed_and_upsert(ctx: ChatContext, record_id: str, fields: dict):
         fields.get("Tin nhắn gốc", ""),
         dl_str,
     ]))
-    from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+    from src.agent.llm_for_ctx import get_llm_for_ctx
     llm = await get_llm_for_ctx(ctx)
     await qdrant.ensure_collection(ctx.tasks_collection, dim=llm.embedding_dim)
     vector, _ = await llm.embed(text)
@@ -403,7 +403,7 @@ async def delete_task(ctx: ChatContext, search_keyword: str) -> str:
 
 
 async def search_tasks(ctx: ChatContext, query: str) -> str:
-    from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+    from src.agent.llm_for_ctx import get_llm_for_ctx
     llm = await get_llm_for_ctx(ctx)
     await qdrant.ensure_collection(ctx.tasks_collection, dim=llm.embedding_dim)
     query_vector, _ = await llm.embed(query)

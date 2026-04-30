@@ -12,7 +12,7 @@ from datetime import date
 from src import db
 from src.services import telegram
 from src.infrastructure import lark_client as lark
-from src.agent_pkg.llm_for_ctx import get_default_llm
+from src.agent.llm_for_ctx import get_default_llm
 
 logger = logging.getLogger("group_onboarding")
 

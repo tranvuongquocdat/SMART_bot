@@ -40,7 +40,7 @@ async def lifespan(_app: FastAPI):
     agent.init_agent(settings)
 
     # Phase 4b-3: every LLM call resolves a per-boss LLMClient via this cache.
-    from src.agent_pkg.llm_for_ctx import init_llm_settings
+    from src.agent.llm_for_ctx import init_llm_settings
     init_llm_settings(settings)
 
     # Phase 5c: structured-logging context filter (boss/chat/request ids).

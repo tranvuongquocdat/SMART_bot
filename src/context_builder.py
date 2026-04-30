@@ -215,7 +215,7 @@ async def _get_active_topic(messages: list[dict]) -> str:
     """LLM mini-call: summarize what the group is currently discussing in 1 sentence."""
     if not messages:
         return ""
-    from src.agent_pkg.llm_for_ctx import get_default_llm
+    from src.agent.llm_for_ctx import get_default_llm
     conversation = "\n".join(
         f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
     )

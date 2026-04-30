@@ -25,4 +25,8 @@ class Settings(BaseSettings):
     # Empty = encryption disabled (no boss can have an encrypted key column populated).
     boss_credential_encryption_key: str = ""
 
+    # Phase 5d: 'json' emits one JSON record per log line (for log shippers);
+    # anything else uses the existing human-readable format.
+    log_format: str = "human"
+
     model_config = {"env_file": ".env", "extra": "ignore"}

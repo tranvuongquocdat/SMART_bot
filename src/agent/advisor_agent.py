@@ -10,8 +10,8 @@ from zoneinfo import ZoneInfo
 from src import db
 from src.config import Settings
 from src.context import ChatContext
-from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
-from src.agent_pkg.tool_definitions import TOOL_DEFINITIONS
+from src.agent.llm_for_ctx import get_llm_for_ctx
+from src.agent.tool_definitions import TOOL_DEFINITIONS
 from src.agent import _dispatcher as _agent_dispatcher  # use the same registry as agent.py
 
 logger = logging.getLogger("advisor")

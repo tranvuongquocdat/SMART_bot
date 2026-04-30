@@ -5,7 +5,7 @@ The handler holds no logic; the sentinel is part of the agent contract.
 """
 from __future__ import annotations
 
-from src.agent_pkg.handlers._base import ToolHandler
+from src.agent.handlers._base import ToolHandler
 from src.context import ChatContext
 
 

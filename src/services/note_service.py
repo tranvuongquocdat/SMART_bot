@@ -10,7 +10,7 @@ async def _embed_note(ctx: ChatContext, note_type: str, ref_id: str, content: st
     """Async background: embed note to Qdrant notes_{boss_chat_id} collection."""
     try:
         from src.infrastructure import qdrant_client as qdrant
-        from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+        from src.agent.llm_for_ctx import get_llm_for_ctx
         llm = await get_llm_for_ctx(ctx)
         collection = f"notes_{ctx.boss_chat_id}_{llm.embedding_dim}"
         await qdrant.ensure_collection(collection, dim=llm.embedding_dim)

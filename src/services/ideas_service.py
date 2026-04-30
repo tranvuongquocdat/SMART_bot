@@ -23,7 +23,7 @@ async def create_idea(ctx: ChatContext, content: str, tags: str = "", project: s
     async def _embed():
         try:
             from src.infrastructure import qdrant_client as qdrant
-            from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+            from src.agent.llm_for_ctx import get_llm_for_ctx
             llm = await get_llm_for_ctx(ctx)
             collection = f"notes_{ctx.boss_chat_id}_{llm.embedding_dim}"
             await qdrant.ensure_collection(collection, dim=llm.embedding_dim)

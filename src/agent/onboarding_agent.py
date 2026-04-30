@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 from src import db
-from src.agent_pkg.llm_for_ctx import get_default_llm
+from src.agent.llm_for_ctx import get_default_llm
 
 
 PERSONA = """\

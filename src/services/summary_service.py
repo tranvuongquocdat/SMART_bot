@@ -163,7 +163,7 @@ async def get_project_report(
     Covers: progress %, tasks by status, who's blocking, upcoming deadlines.
     """
     from src.services._workspace_helper import resolve_workspaces
-    from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+    from src.agent.llm_for_ctx import get_llm_for_ctx
     _oai = await get_llm_for_ctx(ctx)
 
     workspaces = await resolve_workspaces(ctx, workspace_ids)

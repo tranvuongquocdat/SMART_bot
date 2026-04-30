@@ -91,17 +91,43 @@ class _ContextFilter(logging.Filter):
         return True
 
 
+class _JsonFormatter(logging.Formatter):
+    """Emit one JSON record per log line. Includes context-var fields the
+    `_ContextFilter` injected, plus standard logging attrs. No exception
+    formatting — the stdlib default already inlines `exc_info` reasonably."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        import json
+        payload = {
+            "ts": self.formatTime(record, "%Y-%m-%dT%H:%M:%S"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "boss_internal_id": getattr(record, "boss_internal_id", "-"),
+            "internal_chat_id": getattr(record, "internal_chat_id", "-"),
+            "request_id": getattr(record, "request_id", "-"),
+        }
+        if record.exc_info:
+            payload["exc"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False)
+
+
 def setup_logging(settings: Settings) -> None:
     """Attach the context filter to the root logger. Idempotent.
 
-    Future: when `settings.log_format == 'json'` (not in Settings yet —
-    Phase 6+), swap the formatter to JSON. Today it just adds context
-    fields to existing handlers so structured queries work in any log shipper
-    that knows the format string."""
+    When `settings.log_format == 'json'`, also swap every root handler's
+    formatter to `_JsonFormatter` so lines come out as JSON Lines. With any
+    other value the existing human-readable format is left alone — the only
+    visible change is structured attributes added by the context filter.
+    """
     root = logging.getLogger()
-    if any(isinstance(f, _ContextFilter) for f in root.filters):
-        return  # already installed
-    root.addFilter(_ContextFilter())
+    if not any(isinstance(f, _ContextFilter) for f in root.filters):
+        root.addFilter(_ContextFilter())
+
+    if (settings.log_format or "").lower() == "json":
+        json_fmt = _JsonFormatter()
+        for h in root.handlers:
+            h.setFormatter(json_fmt)
 
 
 # ---------------------------------------------------------------------------

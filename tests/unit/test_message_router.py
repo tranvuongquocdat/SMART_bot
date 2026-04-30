@@ -41,7 +41,7 @@ async def test_tenant_active_passes_through_to_secretary():
     with patch("src.controllers.message_router.db.get_boss",
                new_callable=AsyncMock,
                return_value={"chat_id": "uuid-sender", "status": "active"}), \
-         patch("src.agent_pkg.secretary_agent.handle_message",
+         patch("src.agent.secretary_agent.handle_message",
                new_callable=AsyncMock) as mock_handle:
         await router.handle(msg)
 
@@ -57,7 +57,7 @@ async def test_tenant_suspended_drops_silently():
     with patch("src.controllers.message_router.db.get_boss",
                new_callable=AsyncMock,
                return_value={"chat_id": "uuid-sender", "status": "suspended"}), \
-         patch("src.agent_pkg.secretary_agent.handle_message",
+         patch("src.agent.secretary_agent.handle_message",
                new_callable=AsyncMock) as mock_handle:
         await router.handle(msg)
 
@@ -73,7 +73,7 @@ async def test_tenant_cancelled_drops_silently():
     with patch("src.controllers.message_router.db.get_boss",
                new_callable=AsyncMock,
                return_value={"chat_id": "uuid-sender", "status": "cancelled"}), \
-         patch("src.agent_pkg.secretary_agent.handle_message",
+         patch("src.agent.secretary_agent.handle_message",
                new_callable=AsyncMock) as mock_handle:
         await router.handle(msg)
 
@@ -91,7 +91,7 @@ async def test_unknown_sender_passes_through():
     with patch("src.controllers.message_router.db.get_boss",
                new_callable=AsyncMock,
                return_value=None), \
-         patch("src.agent_pkg.secretary_agent.handle_message",
+         patch("src.agent.secretary_agent.handle_message",
                new_callable=AsyncMock) as mock_handle:
         await router.handle(msg)
 

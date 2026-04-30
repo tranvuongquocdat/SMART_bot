@@ -16,8 +16,8 @@ import logging
 from src import db
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
-from src.agent_pkg.llm_for_ctx import get_default_llm
-from src.agent_pkg.onboarding_agent import (
+from src.agent.llm_for_ctx import get_default_llm
+from src.agent.onboarding_agent import (
     PERSONA as _PERSONA,
     COLLECTOR_PROMPT as _COLLECTOR_PROMPT,  # noqa: F401  (kept for backward compat)
     collector as _collector,

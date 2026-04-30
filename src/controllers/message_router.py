@@ -9,7 +9,7 @@ Inbound flow:
        └── delegate to secretary_agent (current LLM loop)
 
 Phase 5b ships the boundary + the gate; the secretary loop body still lives
-in `agent_pkg.secretary_agent.handle_message` and is called positionally.
+in `agent.secretary_agent.handle_message` and is called positionally.
 Phase 6 will route per-channel capability checks here as well.
 """
 from __future__ import annotations
@@ -47,7 +47,7 @@ class MessageRouter:
 
             # Phase 5b: delegate to the existing secretary loop body.
             # Phase 6 will route per-channel capability checks here too.
-            from src.agent_pkg.secretary_agent import handle_message
+            from src.agent.secretary_agent import handle_message
 
             reply_to = None
             if incoming.reply_to_sender_id:

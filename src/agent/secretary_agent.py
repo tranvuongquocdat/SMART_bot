@@ -19,8 +19,8 @@ from src.context import ChatContext
 from src.services import telegram
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
-from src.agent_pkg.tool_definitions import TOOL_DEFINITIONS
-from src.agent_pkg.llm_for_ctx import get_llm_for_ctx, get_default_llm
+from src.agent.tool_definitions import TOOL_DEFINITIONS
+from src.agent.llm_for_ctx import get_llm_for_ctx, get_default_llm
 from src.infrastructure.llm.factory import get_llm_client
 
 logger = logging.getLogger("agent")

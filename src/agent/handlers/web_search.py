@@ -5,7 +5,7 @@ Phase 4b-2 migrates the underlying function to a `WebSearchService`; for
 """
 from __future__ import annotations
 
-from src.agent_pkg.handlers._base import ToolHandler
+from src.agent.handlers._base import ToolHandler
 from src.context import ChatContext
 from src.services import web_search_service as _legacy
 

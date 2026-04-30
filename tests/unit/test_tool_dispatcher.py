@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 import pytest
 
-from src.agent_pkg.tool_dispatcher import ToolDispatcher
+from src.agent.tool_dispatcher import ToolDispatcher
 from src.context import ChatContext
 
 

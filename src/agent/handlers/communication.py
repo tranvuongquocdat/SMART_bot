@@ -1,7 +1,7 @@
 """Communication-domain handlers — wrap `src.tools.communication` functions."""
 from __future__ import annotations
 
-from src.agent_pkg.handlers._base import ToolHandler
+from src.agent.handlers._base import ToolHandler
 from src.context import ChatContext
 from src.services import communication_service as communication
 

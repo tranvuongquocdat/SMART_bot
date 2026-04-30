@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 
-from src.agent_pkg.handlers._base import ToolHandler
+from src.agent.handlers._base import ToolHandler
 from src.context import ChatContext
 
 logger = logging.getLogger("agent.dispatcher")

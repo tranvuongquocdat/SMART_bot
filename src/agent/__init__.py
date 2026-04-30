@@ -14,57 +14,57 @@ from src.context import ChatContext
 from src.services import telegram
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
-from src.agent_pkg.tool_definitions import TOOL_DEFINITIONS
-from src.agent_pkg.tool_dispatcher import ToolDispatcher
-from src.agent_pkg.handlers.web_search import WebSearchHandler
-from src.agent_pkg.handlers.escalate import EscalateToAdvisorHandler
-from src.agent_pkg.handlers.tasks import (
+from src.agent.tool_definitions import TOOL_DEFINITIONS
+from src.agent.tool_dispatcher import ToolDispatcher
+from src.agent.handlers.web_search import WebSearchHandler
+from src.agent.handlers.escalate import EscalateToAdvisorHandler
+from src.agent.handlers.tasks import (
     CreateTaskHandler, ListTasksHandler, UpdateTaskHandler, DeleteTaskHandler,
     SearchTasksHandler, ApproveTaskChangeHandler, RejectTaskChangeHandler,
 )
-from src.agent_pkg.handlers.people import (
+from src.agent.handlers.people import (
     AddPeopleHandler, GetPersonHandler, GetPeopleAliasHandler, ListPeopleHandler,
     UpdatePeopleHandler, DeletePeopleHandler,
     CheckEffortHandler, CheckTeamEngagementHandler,
 )
-from src.agent_pkg.handlers.projects import (
+from src.agent.handlers.projects import (
     CreateProjectHandler, GetProjectHandler, ListProjectsHandler,
     UpdateProjectHandler, DeleteProjectHandler,
 )
-from src.agent_pkg.handlers.notes import (
+from src.agent.handlers.notes import (
     GetNoteHandler, UpdateNoteHandler, AppendNoteHandler,
 )
-from src.agent_pkg.handlers.search import SearchHistoryHandler, SearchNotesHandler
-from src.agent_pkg.handlers.summary import (
+from src.agent.handlers.search import SearchHistoryHandler, SearchNotesHandler
+from src.agent.handlers.summary import (
     GetSummaryHandler, GetWorkloadHandler, GetProjectReportHandler,
 )
-from src.agent_pkg.handlers.ideas import CreateIdeaHandler
-from src.agent_pkg.handlers.reminders import (
+from src.agent.handlers.ideas import CreateIdeaHandler
+from src.agent.handlers.reminders import (
     CreateReminderHandler, ListRemindersHandler,
     UpdateReminderHandler, DeleteReminderHandler,
 )
-from src.agent_pkg.handlers.review import (
+from src.agent.handlers.review import (
     AddReviewScheduleHandler, ListReviewSchedulesHandler,
     ToggleReviewHandler, DeleteReviewScheduleHandler,
 )
-from src.agent_pkg.handlers.memory import ListPendingApprovalsHandler
-from src.agent_pkg.handlers.join import (
+from src.agent.handlers.memory import ListPendingApprovalsHandler
+from src.agent.handlers.join import (
     ListAvailableWorkspacesHandler, RequestJoinHandler,
     ApproveJoinHandler, RejectJoinHandler,
 )
-from src.agent_pkg.handlers.reset import (
+from src.agent.handlers.reset import (
     InitiateResetHandler, ConfirmResetStep1Handler, ExecuteResetHandler,
 )
-from src.agent_pkg.handlers.group import (
+from src.agent.handlers.group import (
     ManageGroupHandler, SummarizeGroupConversationHandler,
     UpdateGroupNoteHandler, BroadcastToGroupHandler,
 )
-from src.agent_pkg.handlers.communication import (
+from src.agent.handlers.communication import (
     SendDmHandler, BroadcastHandler, GetCommunicationLogHandler,
     ResolvePersonHandler, LinkContactToPersonHandler,
     ListUnlinkedContactsHandler, GetGroupAdminsHandler,
 )
-from src.agent_pkg.handlers.workspace import SetLanguageHandler, SwitchWorkspaceHandler
+from src.agent.handlers.workspace import SetLanguageHandler, SwitchWorkspaceHandler
 
 # Phase 4b-2a: every LLM tool has a handler; the legacy fallback in the
 # dispatcher only fires for genuinely unknown names. Phase 4b-2b moves
@@ -120,14 +120,14 @@ _dispatcher = ToolDispatcher([
 import logging
 from src.config import Settings
 
-from src.agent_pkg.secretary_agent import (  # noqa: F401
+from src.agent.secretary_agent import (  # noqa: F401
     handle_message,
     SECRETARY_PROMPT,
     THINKING_MAP,
     MAX_TOOL_ROUNDS,
 )
-from src.agent_pkg.secretary_agent import init as _secretary_init
-from src.agent_pkg.reminder_agent import send_reminder, REMINDER_PROMPT  # noqa: F401
+from src.agent.secretary_agent import init as _secretary_init
+from src.agent.reminder_agent import send_reminder, REMINDER_PROMPT  # noqa: F401
 
 logger = logging.getLogger("agent")
 
