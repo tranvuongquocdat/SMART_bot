@@ -14,7 +14,6 @@ from src.context import ChatContext
 from src.services import telegram
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
-from src.infrastructure import openai_client
 from src.agent_pkg.tool_definitions import TOOL_DEFINITIONS
 from src.agent_pkg.tool_dispatcher import ToolDispatcher
 from src.agent_pkg.handlers.web_search import WebSearchHandler
@@ -441,10 +440,16 @@ async def handle_message(
                     return  # group chưa đăng ký → bỏ qua
                 boss_id = group_info["boss_chat_id"]
                 msg_id = await db.save_message(chat_id, "user", text, sender_id)
-                vector = await openai_client.embed(text)
+                # Resolve LLM via the boss row of this group's owner.
+                from src.agent_pkg.llm_for_ctx import get_default_llm
+                from src.config import Settings
+                from src.infrastructure.llm.factory import get_llm_client
+                _boss_row = await db.get_boss(boss_id) or {}
+                _llm = get_llm_client(_boss_row, Settings())
+                vector, _dim = await _llm.embed(text)
                 asyncio.create_task(
                     qdrant.upsert(
-                        collection=f"messages_{boss_id}",
+                        collection=f"messages_{boss_id}_{_dim}",
                         point_id=msg_id,
                         chat_id=chat_id,
                         role="user",
@@ -512,7 +517,9 @@ async def handle_message(
         # Step 3: Save user message to DB + Qdrant (async embed)
         # ------------------------------------------------------------------
         msg_id = await db.save_message(chat_id, "user", text, sender_id)
-        vector = await openai_client.embed(text)
+        from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+        llm = await get_llm_for_ctx(ctx)
+        vector, _ = await llm.embed(text)
         asyncio.create_task(
             qdrant.upsert(
                 collection=ctx.messages_collection,
@@ -548,7 +555,7 @@ async def handle_message(
         total_completion = 0
 
         for round_num in range(1, MAX_TOOL_ROUNDS + 1):
-            response, usage = await openai_client.chat_with_tools(messages, TOOL_DEFINITIONS)
+            response, usage = await llm.chat_with_tools(messages, TOOL_DEFINITIONS)
             total_tokens += usage.get("total_tokens", 0)
             total_prompt += usage.get("prompt_tokens", 0)
             total_completion += usage.get("completion_tokens", 0)
@@ -635,7 +642,7 @@ async def handle_message(
         # Step 10: Save assistant reply to DB + Qdrant
         # ------------------------------------------------------------------
         reply_id = await db.save_message(chat_id, "assistant", reply_text)
-        reply_vector = await openai_client.embed(reply_text)
+        reply_vector, _ = await llm.embed(reply_text)
         asyncio.create_task(
             qdrant.upsert(
                 collection=ctx.messages_collection,
@@ -761,7 +768,9 @@ async def send_reminder(reminder: dict, settings: Settings):
             {"role": "user", "content": user_msg},
         ]
 
-        response, usage = await openai_client.chat_with_tools(messages, tools=[])
+        from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+        llm = await get_llm_for_ctx(ctx)
+        response, usage = await llm.chat_with_tools(messages, tools=[])
         reply = response.content or ""
 
         logger.info("%s LLM reply (%d tokens): %s", log_prefix, usage.get("total_tokens", 0), reply[:150])

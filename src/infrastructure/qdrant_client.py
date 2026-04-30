@@ -119,9 +119,19 @@ async def delete_task(collection: str, record_id: str):
     await _qdrant.delete(collection_name=collection, points_selector=[point_id])
 
 
-async def search(collection: str, query: str, chat_id: str | None = None, top_n: int = 5) -> list[dict]:
-    """Hybrid search (dense + BM25 RRF fusion). Optional chat_id filter. Returns list of dicts with role, content, record_id keys."""
-    query_vector = await openai_client.embed(query)
+async def search(
+    collection: str, query: str, chat_id: str | None = None, top_n: int = 5,
+    *, query_vector: list[float] | None = None,
+) -> list[dict]:
+    """Hybrid search (dense + BM25 RRF fusion). Optional chat_id filter.
+
+    `query_vector` is optional: callers that already embedded the query (via
+    a per-boss LLMClient) pass it in to avoid a second embed. Legacy callers
+    (none expected after Phase 4b-3) without the vector get a global-default
+    embed via the legacy openai client.
+    """
+    if query_vector is None:
+        query_vector = await openai_client.embed(query)
     query_sparse = _tokenize_bm25(query)
 
     if chat_id is not None:

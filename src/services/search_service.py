@@ -3,6 +3,7 @@ Search tools — semantic search for notes/ideas and message history.
 """
 from src.context import ChatContext
 from src.infrastructure import qdrant_client as qdrant
+from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
 
 
 async def search_notes(
@@ -14,12 +15,16 @@ async def search_notes(
     """
     Semantic search across notes and ideas.
     note_type: "personal" | "group" | "project" | "idea" | "all"
-    Notes and ideas are embedded on write — Qdrant collection: notes_{boss_chat_id}
+    Notes and ideas are embedded on write — Qdrant collection: notes_{boss_chat_id}_{dim}
     """
-    collection = f"notes_{ctx.boss_chat_id}"
-    await qdrant.ensure_collection(collection)
+    llm = await get_llm_for_ctx(ctx)
+    collection = f"notes_{ctx.boss_chat_id}_{llm.embedding_dim}"
+    await qdrant.ensure_collection(collection, dim=llm.embedding_dim)
 
-    results = await qdrant.search(collection, query, chat_id=None, top_n=8)
+    query_vector, _ = await llm.embed(query)
+    results = await qdrant.search(
+        collection, query, chat_id=None, top_n=8, query_vector=query_vector,
+    )
 
     if note_type != "all":
         results = [r for r in results if r.get("type", "") == note_type]
@@ -47,11 +52,15 @@ async def search_history(
     Semantic search in message history.
     scope: "current_chat" (default) | "all" (searches all chats belonging to this workspace)
     """
+    llm = await get_llm_for_ctx(ctx)
     collection = ctx.messages_collection
-    await qdrant.ensure_collection(collection)
+    await qdrant.ensure_collection(collection, dim=llm.embedding_dim)
 
     chat_id_filter = ctx.chat_id if scope == "current_chat" else None
-    results = await qdrant.search(collection, query, chat_id=chat_id_filter, top_n=10)
+    query_vector, _ = await llm.embed(query)
+    results = await qdrant.search(
+        collection, query, chat_id=chat_id_filter, top_n=10, query_vector=query_vector,
+    )
 
     if not results:
         return f"Không tìm thấy lịch sử liên quan đến '{query}'."

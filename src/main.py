@@ -39,6 +39,10 @@ async def lifespan(_app: FastAPI):
     # Init agent
     agent.init_agent(settings)
 
+    # Phase 4b-3: every LLM call resolves a per-boss LLMClient via this cache.
+    from src.agent_pkg.llm_for_ctx import init_llm_settings
+    init_llm_settings(settings)
+
     # Start scheduler + polling
     await scheduler.start(settings)
     polling_task = asyncio.create_task(

@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from src import db
 from src.config import Settings
 from src.context import ChatContext
-from src.infrastructure import openai_client
+from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
 from src.agent_pkg.tool_definitions import TOOL_DEFINITIONS
 from src.agent import _dispatcher as _agent_dispatcher  # use the same registry as agent.py
 
@@ -99,8 +99,9 @@ async def _run_agent_loop(ctx: ChatContext, system_prompt: str, source: str = "a
     total_completion = 0
     total_tokens = 0
 
+    llm = await get_llm_for_ctx(ctx)
     for round_num in range(1, MAX_TOOL_ROUNDS + 1):
-        response, usage = await openai_client.chat_with_tools(messages, ADVISOR_TOOLS)
+        response, usage = await llm.chat_with_tools(messages, ADVISOR_TOOLS)
         total_prompt += usage.get("prompt_tokens", 0)
         total_completion += usage.get("completion_tokens", 0)
         total_tokens += usage.get("total_tokens", 0)

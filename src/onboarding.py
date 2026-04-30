@@ -16,7 +16,7 @@ import logging
 from src import db
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
-from src.infrastructure import openai_client
+from src.agent_pkg.llm_for_ctx import get_default_llm
 from src.services import telegram
 from src.services import telegram as tg
 
@@ -111,7 +111,7 @@ async def _collector(state: dict, text: str, boss_list: str, chat_id: str) -> di
         *history,
         {"role": "user", "content": text},
     ]
-    response, _ = await openai_client.chat_with_tools(messages, [])
+    response, _ = await get_default_llm().chat_with_tools(messages, [])
     content = (response.content or "").strip()
     try:
         return json.loads(content)
@@ -136,7 +136,7 @@ async def _greeting() -> str:
             "(2) Thành viên/Nhân viên, hoặc (3) Đối tác. Tối đa 3-4 câu."
         )},
     ]
-    resp, _ = await openai_client.chat_with_tools(messages, [])
+    resp, _ = await get_default_llm().chat_with_tools(messages, [])
     return (resp.content or "").strip()
 
 
@@ -169,7 +169,7 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
             "Nói đang tạo, chờ vài giây."
         )},
     ]
-    resp, _ = await openai_client.chat_with_tools(messages, [])
+    resp, _ = await get_default_llm().chat_with_tools(messages, [])
     await telegram.send(chat_id, (resp.content or "Đang tạo workspace...").strip())
 
     try:
@@ -231,7 +231,7 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
                 "Chúc anh/chị làm việc hiệu quả."
             )},
         ]
-        resp2, _ = await openai_client.chat_with_tools(messages2, [])
+        resp2, _ = await get_default_llm().chat_with_tools(messages2, [])
         success_reply = (resp2.content or "").strip()
 
         if public_ok:
@@ -252,7 +252,7 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
             {"role": "system", "content": _PERSONA},
             {"role": "user", "content": "Có lỗi khi tạo workspace. Xin lỗi và đề nghị thử lại sau."},
         ]
-        resp3, _ = await openai_client.chat_with_tools(messages3, [])
+        resp3, _ = await get_default_llm().chat_with_tools(messages3, [])
         await telegram.send(chat_id, (resp3.content or "Có lỗi. Vui lòng thử lại.").strip())
         return
 
@@ -314,7 +314,7 @@ async def _complete_member(chat_id: str, state: dict) -> None:
                 "Nói yêu cầu đã gửi tới sếp, sẽ nhận thông báo khi được duyệt."
             )},
         ]
-        resp, _ = await openai_client.chat_with_tools(messages, [])
+        resp, _ = await get_default_llm().chat_with_tools(messages, [])
         await telegram.send(chat_id, (resp.content or "Đã gửi yêu cầu.").strip())
 
     except Exception:
@@ -421,7 +421,7 @@ async def _ai_classify(system_prompt: str, user_text: str) -> dict:
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": user_text},
     ]
-    response, _ = await openai_client.chat_with_tools(messages, [])
+    response, _ = await get_default_llm().chat_with_tools(messages, [])
     content = response.content or ""
     try:
         return json.loads(content)

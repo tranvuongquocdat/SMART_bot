@@ -10,10 +10,11 @@ async def _embed_note(ctx: ChatContext, note_type: str, ref_id: str, content: st
     """Async background: embed note to Qdrant notes_{boss_chat_id} collection."""
     try:
         from src.infrastructure import qdrant_client as qdrant
-        from src.infrastructure import openai_client
-        collection = f"notes_{ctx.boss_chat_id}"
-        await qdrant.ensure_collection(collection)
-        vector = await openai_client.embed(content)
+        from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+        llm = await get_llm_for_ctx(ctx)
+        collection = f"notes_{ctx.boss_chat_id}_{llm.embedding_dim}"
+        await qdrant.ensure_collection(collection, dim=llm.embedding_dim)
+        vector, _ = await llm.embed(content)
         point_id = abs(hash(f"note_{ctx.boss_chat_id}_{note_type}_{ref_id}")) % (2 ** 53)
         await qdrant.upsert_note(
             collection=collection,

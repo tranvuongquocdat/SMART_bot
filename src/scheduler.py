@@ -334,7 +334,8 @@ async def _run_dynamic_reviews():
                     continue
                 text = await run_daily_review(ctx, _settings, custom_prompt=prompt)
             elif content_type == "group_brief":
-                from src.infrastructure import openai_client as _oai  # noqa: PLC0415
+                from src.agent_pkg.llm_for_ctx import get_llm_for_ctx  # noqa: PLC0415
+                _oai = await get_llm_for_ctx(ctx)
                 tasks_data = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
                 tasks_text = "\n".join(
                     f"- {t.get('Tên task', '?')} | {t.get('Assignee', '?')} | deadline: {t.get('Deadline', '?')} | status: {t.get('Status', '?')}"

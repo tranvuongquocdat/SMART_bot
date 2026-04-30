@@ -12,7 +12,7 @@ from datetime import date
 from src import db
 from src.services import telegram
 from src.infrastructure import lark_client as lark
-from src.infrastructure import openai_client
+from src.agent_pkg.llm_for_ctx import get_default_llm
 
 logger = logging.getLogger("group_onboarding")
 
@@ -102,7 +102,7 @@ async def _group_collector(
         *history,
         {"role": "user", "content": text},
     ]
-    response, _ = await openai_client.chat_with_tools(messages, [])
+    response, _ = await get_default_llm().chat_with_tools(messages, [])
     content = (response.content or "").strip()
     try:
         return json.loads(content)

@@ -6,7 +6,7 @@ import logging
 from src import db
 from src.context import ChatContext
 from src.services import telegram
-from src.infrastructure import openai_client
+from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
 
 logger = logging.getLogger("tools.group")
 
@@ -34,7 +34,8 @@ async def summarize_group_conversation(ctx: ChatContext, n_messages: int = 20) -
         for r in reversed(rows)
     )
 
-    response, _ = await openai_client.chat_with_tools(
+    llm = await get_llm_for_ctx(ctx)
+    response, _ = await llm.chat_with_tools(
         [
             {
                 "role": "system",

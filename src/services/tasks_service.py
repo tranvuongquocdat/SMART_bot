@@ -7,7 +7,6 @@ from src.context import ChatContext
 from src.services import telegram
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
-from src.infrastructure import openai_client
 from src.utils.dates import date_to_ms, ms_to_date
 from src.utils.validation import (
     TASK_PRIORITY_VALUES,
@@ -53,8 +52,10 @@ async def _embed_and_upsert(ctx: ChatContext, record_id: str, fields: dict):
         fields.get("Tin nhắn gốc", ""),
         dl_str,
     ]))
-    await qdrant.ensure_collection(ctx.tasks_collection)
-    vector = await openai_client.embed(text)
+    from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+    llm = await get_llm_for_ctx(ctx)
+    await qdrant.ensure_collection(ctx.tasks_collection, dim=llm.embedding_dim)
+    vector, _ = await llm.embed(text)
     await qdrant.upsert_task(ctx.tasks_collection, record_id, text, vector)
 
 
@@ -402,8 +403,13 @@ async def delete_task(ctx: ChatContext, search_keyword: str) -> str:
 
 
 async def search_tasks(ctx: ChatContext, query: str) -> str:
-    await qdrant.ensure_collection(ctx.tasks_collection)
-    results = await qdrant.search(ctx.tasks_collection, query, chat_id=None, top_n=10)
+    from src.agent_pkg.llm_for_ctx import get_llm_for_ctx
+    llm = await get_llm_for_ctx(ctx)
+    await qdrant.ensure_collection(ctx.tasks_collection, dim=llm.embedding_dim)
+    query_vector, _ = await llm.embed(query)
+    results = await qdrant.search(
+        ctx.tasks_collection, query, chat_id=None, top_n=10, query_vector=query_vector,
+    )
 
     record_ids = [r["record_id"] for r in results if r.get("record_id")]
     if not record_ids:
