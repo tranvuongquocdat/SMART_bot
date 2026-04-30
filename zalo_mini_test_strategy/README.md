@@ -1,39 +1,101 @@
-# Zalo Library Feasibility Probe
+# Zalo Library Feasibility Probe (zca-js bridge)
 
-Goal: lock down what `zlapi` can / can't do **before** integrating Zalo into
-the main bot codebase. Output: filled-in `FINDINGS.md`.
+Goal: verify that `zca-js` (Node) end-to-end works for our use case
+**before** building the full Python ↔ Node RPC bridge in `src/channels/zalo.py`.
 
-## Setup
+The Python `zlapi` library was rejected (no QR login → relies on phone+
+password which Zalo flags as bot behaviour). Reference implementation
+(`reference for SMART/ZaloCRM/backend`) uses `zca-js` so we follow that.
 
-```bash
-# zlapi already in the main project's deps — `uv add zlapi` (already done)
-# Run from project root so PYTHONPATH picks up:
-uv run python zalo_mini_test_strategy/probe_login.py
+## Layout
+
+```
+zalo_mini_test_strategy/
+├── README.md           — this file
+├── FINDINGS.md         — fill in as you run probes
+├── node_bridge/        — pure-Node probe
+│   ├── package.json    — zca-js ^2.0.0-beta.27 + qrcode-terminal
+│   ├── login.js        — QR login → save session.json
+│   ├── listen.js       — long-running listener, prints incoming events
+│   └── send.js         — one-shot outbound send to self/user/group
+└── python_client/      — (added once Node side is verified)
+    └── …               — subprocess.Popen + JSON-line RPC to bridge.js
 ```
 
-## Order to run
+## Prerequisites
 
-1. **`probe_login.py`** — first-time login with phone + password. Saves
-   session cookies to `session.json`. Run once.
-2. **`probe_listen.py`** — boots a listener; prints every incoming DM /
-   group message it sees. Send yourself a few messages, mention the
-   account in a group, reply to its message — confirm what gets parsed.
-3. **`probe_send.py`** — sends a self-DM (to your own Zalo id) plus a
-   message to a chosen group. Verify they land in Zalo.
-4. **`probe_group.py`** — fetches your groups + members for one group.
-   Verifies `fetchAllGroups` / `fetchGroupInfo` work.
-5. **`probe_rate.py`** *(optional)* — sends 5 messages back-to-back to
-   feel out throttling. Stop early if Zalo flags spam.
+- Node 22+ (you have v22.20.0 already)
+- `cd zalo_mini_test_strategy/node_bridge && npm install` (already done)
+- A Zalo account on your phone for QR scanning
 
-After each probe, jot results in `FINDINGS.md`.
+## Order
 
-## Files written by probes
+### 1. Login (run once)
 
-- `session.json` — session cookies after first login. **Do not commit.**
-- `FINDINGS.md` — feasibility notes you fill in. Decides whether Phase 6b
-  proceeds with `zlapi`, switches to `zca-js` subprocess, or defers Zalo.
+```bash
+cd zalo_mini_test_strategy/node_bridge
+node login.js
+```
 
-## Safety
+Expected: a QR appears in the terminal. Open the Zalo mobile app →
+Settings → "Quét mã QR" → scan it. After confirming on your phone, the
+script prints `[login] OK — user_id = <id>` and writes `session.json`.
 
-These scripts log into a real Zalo account. No production data is touched.
-But the account is yours — be aware Zalo may flag rapid sends as spam.
+If you see the QR but scanning doesn't work, try:
+- Ensure your phone's Zalo and the laptop are on the same network
+- Re-run the script (the QR rotates every ~60s)
+
+### 2. Listen
+
+Open one terminal:
+
+```bash
+node listen.js
+```
+
+It prints `[listen] online as user_id=…`. From a second device (or your
+phone), send the bot account:
+
+- A DM with text
+- A DM with a photo / file
+- Post in a group it's part of
+- @mention it in a group
+- Reply to a previous message of it
+
+Note in `FINDINGS.md` what fields populate. `Ctrl-C` to stop.
+
+### 3. Send
+
+```bash
+# From listen.js output, grab a thread_id you saw.
+node send.js self "test self DM"
+node send.js group <group_id> "hi team"
+node send.js user <user_id> "hi"
+```
+
+Verify each lands in Zalo. Note format support (Markdown? line breaks?).
+
+### 4. Verdict in FINDINGS.md
+
+Tick the verdict box at the bottom of `FINDINGS.md`. If green, we proceed
+to write the Python client (`python_client/`) that spawns the bridge as a
+subprocess and exchanges JSON-line RPC.
+
+## Why a subprocess bridge
+
+zca-js is a Node library. Two integration options:
+
+1. **subprocess + stdio JSONL** — Python spawns one Node process, sends
+   commands via stdin (one JSON object per line), reads responses + events
+   from stdout. Single connection, simple lifecycle.
+2. **HTTP/WebSocket between two services** — heavier; overkill for one
+   account in a single-process bot.
+
+We pick option 1. The bridge.js (to be written after the probes pass) will
+be a long-running script that:
+
+- Reads JSONL commands on stdin: `{"id":N,"method":"send","params":{...}}`
+- Writes JSONL responses on stdout: `{"id":N,"result":{...}}`
+- Writes JSONL events on stdout: `{"event":"message","data":{...}}`
+
+Errors and bridge logs go to stderr (not interpreted by Python).

@@ -14,7 +14,6 @@ dependencies = [
     "qdrant-client==1.14.2",
     "cryptography>=47.0.0",
     "ddgs>=9.14.1",
-    "zlapi>=1.0.3",
 ]
 
 [dependency-groups]
