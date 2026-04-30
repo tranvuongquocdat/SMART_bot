@@ -55,13 +55,26 @@ def _looks_like_uuid(s: str) -> bool:
 
 async def _to_internal_chat_id(chat_id_raw: str) -> str:
     """Accept either external Telegram numeric chat id (legacy) or internal UUID.
-    Returns the internal_chat_id. Used by the legacy send/edit shim because
-    older call sites still pass numeric ids loaded from Lark."""
+
+    Returns an `internal_chat_id` (conversation table). When the UUID is a
+    person internal id (e.g. a boss id passed by `send_reminder`), we map
+    it to the DM conversation by looking up the person's external Telegram
+    id and resolving / creating the matching DM `conversation` row.
+    """
+    from src import db
     s = str(chat_id_raw)
     if _looks_like_uuid(s):
-        return s
-    from src import db
-    # Negative external id = (super)group, positive = DM (Telegram convention).
+        # Already a conversation id?
+        if await db.lookup_external_for_conversation(s):
+            return s
+        # Person id → map to that person's DM conversation.
+        ext = await db.lookup_external_for_person(s)
+        if ext:
+            provider, external_id = ext
+            return await db.resolve_or_create_conversation(provider, external_id, "dm", "")
+        return s  # unknown UUID; let the API call fail loudly
+
+    # Numeric external id — Telegram convention: negative = (super)group, positive = DM.
     try:
         chat_type = "group" if int(s) < 0 else "dm"
     except (TypeError, ValueError):
