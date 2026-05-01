@@ -55,6 +55,15 @@ class SessionRepo:
         except Exception:
             return {}
 
+    async def has_onboarding_state(self, chat_id: str) -> bool:
+        # Row existence — not bool(state). The state can legitimately be `{}`
+        # mid-flow (e.g. after the greeting clears the "first" flag), so dict
+        # truthiness is unreliable as an "onboarding active" signal.
+        async with self._db.execute(
+            "SELECT 1 FROM onboarding_state WHERE chat_id = ?", (str(chat_id),)
+        ) as cur:
+            return (await cur.fetchone()) is not None
+
     async def save_onboarding_state(self, chat_id: str, state: dict) -> None:
         await self._db.execute(
             """INSERT INTO onboarding_state (chat_id, state_json, updated_at)

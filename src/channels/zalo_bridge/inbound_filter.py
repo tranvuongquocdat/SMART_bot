@@ -10,6 +10,9 @@ Forward-rules:
     - sender is a registered Zalo boss            → forward
     - text contains the onboard phrase            → forward (lets a sếp
                                                     introduce themselves)
+    - chat has an active onboarding_state         → forward (mid-onboarding
+                                                    replies like "1" must
+                                                    reach the agent)
     - else                                        → drop
   Group:
     - group already in `group_map`                → forward
@@ -43,6 +46,9 @@ class ZaloInboundFilter:
             if self._phrase and self._phrase in text:
                 logger.info("zalo.filter: onboard phrase matched, forwarding DM")
                 return True
+            if await self._has_active_onboarding(thread_id):
+                logger.info("zalo.filter: onboarding in progress, forwarding DM")
+                return True
             return False
 
         if thread_type == "group":
@@ -73,3 +79,13 @@ class ZaloInboundFilter:
         if not conv_id:
             return False
         return (await db.get_group(conv_id)) is not None
+
+    @staticmethod
+    async def _has_active_onboarding(zalo_thread_id: str) -> bool:
+        if not zalo_thread_id:
+            return False
+        from src import db
+        conv_id = await db.lookup_conversation_by_external("zalo", zalo_thread_id)
+        if not conv_id:
+            return False
+        return await db.has_onboarding_state(conv_id)

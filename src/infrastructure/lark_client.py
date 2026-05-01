@@ -18,7 +18,7 @@ LARK_API = "https://open.larksuite.com/open-apis"
 PEOPLE_FIELDS = [
     {"field_name": "Tên", "type": 1},
     {"field_name": "Tên gọi", "type": 1},
-    {"field_name": "Chat ID", "type": 2},
+    {"field_name": "Chat ID", "type": 1},
     {"field_name": "Username", "type": 1},
     {"field_name": "Type", "type": 1},
     {"field_name": "Nhóm", "type": 1},
@@ -39,7 +39,7 @@ TASKS_FIELDS = [
     {"field_name": "Project", "type": 1},
     {"field_name": "Giao bởi", "type": 1},
     {"field_name": "Tin nhắn gốc", "type": 1},
-    {"field_name": "Group ID", "type": 2},
+    {"field_name": "Group ID", "type": 1},
 ]
 
 PROJECTS_FIELDS = [

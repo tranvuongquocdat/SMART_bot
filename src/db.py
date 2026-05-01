@@ -82,13 +82,17 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
     to no-op values so existing flows are unchanged.
     """
     # ---- Pre-init: migrate pre-multi-provider INTEGER chat_id tables to TEXT.
-    # `onboarding_state` and `seen_contacts` were created with INTEGER PRIMARY KEY
-    # back when only Telegram (numeric chat_id) was supported. Multi-provider
-    # uses internal UUIDs (TEXT), which raise `datatype mismatch` against the old
-    # schema. Rename the legacy table out of the way; executescript below
-    # recreates it with the canonical TEXT schema, and we copy data back after.
+    # Tables below were created with INTEGER PRIMARY KEY back when only
+    # Telegram (numeric chat_id) was supported. Multi-provider uses internal
+    # UUIDs (TEXT), which raise `datatype mismatch` against rowid-aliased
+    # INTEGER PRIMARY KEY columns. Rename the legacy table out of the way;
+    # executescript below recreates it with the canonical TEXT schema, and we
+    # copy data back after.
     legacy_renamed: list[str] = []
-    for table in ("onboarding_state", "seen_contacts"):
+    for table in (
+        "onboarding_state", "seen_contacts",
+        "bosses", "people_map", "group_map",
+    ):
         cur = await db.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
         )
@@ -331,10 +335,32 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             if "duplicate column name" not in str(exc).lower():
                 raise
 
+    # `people_map` is legacy and not in the canonical schema (its responsibilities
+    # moved to `memberships`), but a few legacy code paths still hit it. If we
+    # renamed it above, recreate it with TEXT PK so legacy reads/writes stay
+    # alive instead of failing.
+    if "people_map" in legacy_renamed:
+        await db.execute("""
+            CREATE TABLE people_map (
+                chat_id      TEXT PRIMARY KEY,
+                boss_chat_id TEXT NOT NULL,
+                type         TEXT NOT NULL CHECK (type IN ('boss', 'member', 'partner')),
+                name         TEXT DEFAULT ''
+            )
+        """)
+
     # Copy data from legacy INTEGER tables into the new TEXT-typed ones, then drop.
-    # SQLite auto-converts INTEGER values to TEXT during INSERT.
+    # SQLite auto-converts INTEGER values to TEXT during INSERT. Use explicit
+    # column lists (derived from the new table) since column order can differ
+    # between legacy and canonical schemas.
     for table in legacy_renamed:
-        await db.execute(f"INSERT INTO {table} SELECT * FROM {table}_legacy_int")
+        cur = await db.execute(f"PRAGMA table_info({table})")
+        cols = [r[1] for r in await cur.fetchall()]
+        await cur.close()
+        col_list = ", ".join(cols)
+        await db.execute(
+            f"INSERT INTO {table} ({col_list}) SELECT {col_list} FROM {table}_legacy_int"
+        )
         await db.execute(f"DROP TABLE {table}_legacy_int")
 
     await db.commit()
@@ -643,6 +669,11 @@ async def delete_session(user_id: str, key: str) -> None:
 async def get_onboarding_state(chat_id: str) -> dict:
     repo: SessionRepo = await _repo("session", SessionRepo)
     return await repo.get_onboarding_state(chat_id)
+
+
+async def has_onboarding_state(chat_id: str) -> bool:
+    repo: SessionRepo = await _repo("session", SessionRepo)
+    return await repo.has_onboarding_state(chat_id)
 
 
 async def save_onboarding_state(chat_id: str, state: dict) -> None:
