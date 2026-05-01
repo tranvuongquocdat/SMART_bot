@@ -2,6 +2,10 @@ services:
   app:
     build: .
     env_file: .env
+    environment:
+      # Override khi chạy Docker — `qdrant` resolve qua Docker network DNS,
+      # bất kể .env có ghi localhost (cho dev local) hay không.
+      QDRANT_URL: http://qdrant:6333
     ports:
       - "8000:8000"
     volumes:
