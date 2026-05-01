@@ -66,6 +66,21 @@ Re-login khi session hết hạn: chạy lại `./scripts/setup_zalo.sh`, chọn
 
 ---
 
+## Quy trình lần đầu sử dụng
+
+1. **Setup hệ thống** — `./scripts/setup.sh` → điền các API key theo prompt → build image → `./scripts/start.sh`.
+2. **Onboard sếp qua Telegram** — tìm bot Telegram, nhắn bất kỳ → bot hỏi vai trò → chọn "Sếp" → nhập tên + công ty → bot tự tạo Lark Base + gửi link.
+3. **(Tuỳ chọn) Bật Zalo** — `./scripts/setup_zalo.sh` → quét QR → `./scripts/restart.sh`.
+4. **Onboard sếp qua Zalo** — DM tài khoản Zalo của bot câu chứa cụm `"khởi tạo trợ lý"` (ví dụ: *"khởi tạo trợ lý cho tôi"*). Cụm này configurable qua `ZALO_ONBOARD_PHRASE` trong `.env`.
+
+   Vì Zalo dùng tài khoản cá nhân nên bot mặc định **drop hết tin nhắn không liên quan** (rác, bạn bè, group lạ). Cụm khởi tạo là cách "mở khoá" cho người mới onboard. Sau khi đã là sếp registered, mọi DM của họ tự động qua agent — không cần lặp lại cụm.
+
+5. **Đăng ký group Zalo** — thêm bot vào group, sếp `@mention` bot kèm "đăng ký group này". Sau bước này, mọi tin trong group đều qua agent (nhưng bot chỉ trả lời khi được `@mention`, giống Telegram).
+
+> **Khi sếp quên** cách mời người khác / cách bot xử lý group, cứ hỏi tự nhiên trong chat — agent có context các quy tắc Zalo và sẽ nhắc lại đúng.
+
+---
+
 ## Cấu trúc code
 
 ```
@@ -116,12 +131,18 @@ src/
 
 ## Roadmap
 
-**Phase 6b — Zalo hardening (kế tiếp demo):**
-- Multi-account: 1 process / Zalo account, table `zalo_account`, encrypted session (Fernet)
-- Rate limiter (per-thread + per-min/account + daily cap, jitter)
-- Circuit breaker + daily session refresh cron
-- QR re-login CLI, fatal disconnect → Telegram alert
-- Spec: `docs/superpowers/specs/2026-04-30-phase-6b-zalo-channel-design.md`
+**Đã có ở demo hiện tại:**
+- ZaloMessenger trên zca-js Node bridge (JSONL stdio); registry tự dispatch outbound theo provider.
+- Rate limiter cấp tối thiểu: per-thread spacing 2s + jitter 0.2–0.8s.
+- Inbound filter: drop tin trước save/embed nếu không phải DM-từ-boss / DM-có-cụm-khởi-tạo / group-đã-đăng-ký / boss-mention-trong-group.
+- Agent biết về quy tắc Zalo qua system prompt (nhắc sếp khi quên).
+
+**Phase 6b — Zalo hardening (chưa có):**
+- Multi-account: 1 process / Zalo account, table `zalo_account`, encrypted session (Fernet).
+- Rate limiter cấp đủ: thêm per-min-per-account + daily cap, scope theo account_id.
+- Circuit breaker + daily session refresh cron.
+- Fatal disconnect → auto Telegram alert tới sếp linked.
+- Spec: `docs/superpowers/specs/2026-04-30-phase-6b-zalo-channel-design.md`.
 
 **Phase 6c+ — kênh khác:**
 - Messenger (unofficial / Cloud API)
