@@ -18,6 +18,7 @@ from src.channels.base import (
     OutgoingMessage,
 )
 from src.channels.zalo_bridge.inbound_filter import ZaloInboundFilter
+from src.channels.zalo_bridge.markdown_strip import markdown_to_plain
 from src.channels.zalo_bridge.process import ZaloBridgeProcess
 from src.channels.zalo_bridge.rate_limiter import ZaloRateLimiter
 
@@ -201,6 +202,9 @@ class ZaloMessenger(BaseMessenger):
         kind = await db.get_conversation_kind(chat_id)
         thread_type = "group" if kind == "group" else "dm"
 
+        # Zalo doesn't render markdown — strip it so users don't see literal **, #, etc.
+        plain = markdown_to_plain(text)
+
         await self._rate_limiter.acquire(external_thread)
 
         msg_id = ""
@@ -208,15 +212,15 @@ class ZaloMessenger(BaseMessenger):
             res = await self._bridge.call("send", {
                 "thread_id": external_thread,
                 "thread_type": thread_type,
-                "text": text,
+                "text": plain,
             })
             msg_id = str(res.get("msg_id") or "")
         except Exception:
             logger.exception("zalo.send failed for chat=%s", chat_id)
 
-        if save_history and chat_id and text:
+        if save_history and chat_id and plain:
             try:
-                await db.save_message(chat_id, "assistant", text)
+                await db.save_message(chat_id, "assistant", plain)
             except Exception:
                 logger.warning("zalo.send: save_message failed", exc_info=True)
 
