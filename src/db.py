@@ -81,6 +81,23 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
     `bosses` carries forward-compat columns (status, plan, llm_*) defaulted
     to no-op values so existing flows are unchanged.
     """
+    # ---- Pre-init: migrate pre-multi-provider INTEGER chat_id tables to TEXT.
+    # `onboarding_state` and `seen_contacts` were created with INTEGER PRIMARY KEY
+    # back when only Telegram (numeric chat_id) was supported. Multi-provider
+    # uses internal UUIDs (TEXT), which raise `datatype mismatch` against the old
+    # schema. Rename the legacy table out of the way; executescript below
+    # recreates it with the canonical TEXT schema, and we copy data back after.
+    legacy_renamed: list[str] = []
+    for table in ("onboarding_state", "seen_contacts"):
+        cur = await db.execute(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        )
+        row = await cur.fetchone()
+        await cur.close()
+        if row and "INTEGER PRIMARY KEY" in row[0]:
+            await db.execute(f"ALTER TABLE {table} RENAME TO {table}_legacy_int")
+            legacy_renamed.append(table)
+
     await db.executescript("""
         CREATE TABLE IF NOT EXISTS external_identity (
             internal_id   TEXT PRIMARY KEY,
@@ -313,6 +330,12 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
         except Exception as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
+
+    # Copy data from legacy INTEGER tables into the new TEXT-typed ones, then drop.
+    # SQLite auto-converts INTEGER values to TEXT during INSERT.
+    for table in legacy_renamed:
+        await db.execute(f"INSERT INTO {table} SELECT * FROM {table}_legacy_int")
+        await db.execute(f"DROP TABLE {table}_legacy_int")
 
     await db.commit()
 

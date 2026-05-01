@@ -248,7 +248,7 @@ async def search_records(base_token: str, table_id: str, filter_expr: str = "") 
     if body.get("code") != 0:
         raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
     data = body.get("data", {})
-    items = data.get("items", [])
+    items = data.get("items") or []
     return [{"record_id": r["record_id"], **r["fields"]} for r in items]
 
 

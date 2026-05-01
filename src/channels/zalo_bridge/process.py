@@ -45,7 +45,7 @@ class ZaloBridgeProcess:
         cwd = os.path.dirname(os.path.abspath(self._bridge_js))
         argv = [self._node_path, self._bridge_js]
         if self._session:
-            argv += ["--session", self._session]
+            argv += ["--session", os.path.abspath(self._session)]
         self._proc = await asyncio.create_subprocess_exec(
             *argv,
             cwd=cwd,
