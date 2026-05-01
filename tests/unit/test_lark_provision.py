@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-import src.services.lark as lark_svc
+import src.infrastructure.lark_client as lark_svc
 
 @pytest.mark.asyncio
 async def test_provision_workspace_creates_6_tables():

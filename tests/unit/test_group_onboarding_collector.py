@@ -36,8 +36,7 @@ async def test_workspace_selection_sets_boss_chat_id():
                return_value=session), \
          patch("src.group_onboarding.db.save_onboarding_state", new_callable=AsyncMock,
                side_effect=fake_save), \
-         patch("src.group_onboarding.openai_client.chat_with_tools", new_callable=AsyncMock,
-               return_value=_llm_json(extracted, "Chọn dự án nào?")), \
+         patch("src.group_onboarding.get_default_llm", return_value=MagicMock(chat_with_tools=AsyncMock(return_value=_llm_json(extracted, "Chọn dự án nào?")))), \
          patch("src.group_onboarding.lark.search_records", new_callable=AsyncMock,
                return_value=[{"Tên dự án": "Dự án X", "record_id": "rec1"}]), \
          patch("src.group_onboarding.telegram.send", new_callable=AsyncMock):
@@ -64,8 +63,7 @@ async def test_confirmation_triggers_complete_group():
 
     with patch("src.group_onboarding.db.get_onboarding_state", new_callable=AsyncMock,
                return_value=session), \
-         patch("src.group_onboarding.openai_client.chat_with_tools", new_callable=AsyncMock,
-               return_value=_llm_json(extracted, "Đang setup...")), \
+         patch("src.group_onboarding.get_default_llm", return_value=MagicMock(chat_with_tools=AsyncMock(return_value=_llm_json(extracted, "Đang setup...")))), \
          patch("src.group_onboarding.telegram.send", new_callable=AsyncMock), \
          patch("src.group_onboarding._complete_group", new_callable=AsyncMock) as mock_cg:
         await group_onboarding.handle("có", -100, "Dev Group")

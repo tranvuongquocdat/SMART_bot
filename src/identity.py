@@ -19,13 +19,13 @@ from typing import Any
 
 from src import db
 from src.context import ChatContext
-from src.services import lark
+from src.infrastructure import lark_client as lark
 
 logger = logging.getLogger("identity")
 
 
 async def harvest(
-    context_chat_id: int,
+    context_chat_id: str,
     sender: dict | None,
     mentions: list[dict] | None,
     reply_to: dict | None,
@@ -56,8 +56,10 @@ async def harvest(
                 contacts.append(m)
 
         for c in contacts:
+            # c["id"] is already an internal UUID (resolved in
+            # TelegramMessenger._parse_update for Phase 2). Pass through.
             await db.upsert_seen_contact(
-                chat_id=int(c["id"]),
+                chat_id=str(c["id"]),
                 display_name=c.get("name", ""),
                 username=c.get("username", ""),
                 last_seen_chat=context_chat_id,
@@ -89,7 +91,7 @@ async def resolve_candidates(
     Order within source groups is source-priority:
       lark_people (current ws) → lark_people (other ws) → bosses → memberships → seen_contacts
     """
-    from src.tools._workspace import resolve_workspaces
+    from src.services._workspace_helper import resolve_workspaces
 
     q = (query or "").strip()
     if not q:
@@ -134,16 +136,19 @@ async def resolve_candidates(
             full = str(r.get("Tên", ""))
             nick = str(r.get("Tên gọi", ""))
             note = str(r.get("Ghi chú", ""))
+            # Lark "Chat ID" field stores the external Telegram numeric id.
+            # We keep it as that form here so callers can write it back to
+            # Lark or pass it through services.telegram.* (auto-resolves).
             raw_id = r.get("Chat ID")
             chat_id_val = None
             if raw_id:
                 try:
-                    chat_id_val = int(raw_id)
+                    chat_id_val = str(int(raw_id))
                 except (ValueError, TypeError):
                     chat_id_val = None
 
             confidence = None
-            if is_numeric_id and chat_id_val and str(chat_id_val) == q:
+            if is_numeric_id and chat_id_val and chat_id_val == q:
                 confidence = "exact_id"
             else:
                 confidence = _name_match(full) or _name_match(nick)
@@ -176,8 +181,9 @@ async def resolve_candidates(
 
     for r in boss_rows:
         name = str(r["name"] or "")
-        cid = int(r["chat_id"])
-        if is_numeric_id and str(cid) == q:
+        # bosses.chat_id is an internal UUID after Phase 2.
+        cid = str(r["chat_id"])
+        if is_numeric_id and cid == q:
             confidence = "exact_id"
         else:
             confidence = _name_match(name)
@@ -204,23 +210,17 @@ async def resolve_candidates(
 
     for r in mem_rows:
         name = str(r["name"] or "")
-        cid_raw = r["chat_id"]
-        try:
-            cid = int(cid_raw) if cid_raw else None
-        except (ValueError, TypeError):
-            cid = None
+        # memberships.chat_id and boss_chat_id are internal UUIDs after Phase 2.
+        cid = str(r["chat_id"]) if r["chat_id"] else None
         if cid is None:
             continue
-        if is_numeric_id and str(cid) == q:
+        if is_numeric_id and cid == q:
             confidence = "exact_id"
         else:
             confidence = _name_match(name)
         if not confidence:
             continue
-        try:
-            boss_id = int(r["boss_chat_id"]) if r["boss_chat_id"] else None
-        except (ValueError, TypeError):
-            boss_id = None
+        boss_id = str(r["boss_chat_id"]) if r["boss_chat_id"] else None
         results.append({
             "chat_id": cid,
             "name": name,
@@ -232,9 +232,19 @@ async def resolve_candidates(
         })
 
     # --- Source 5: seen_contacts ---
+    # seen_contacts.chat_id is an internal UUID after Phase 2. If query is
+    # numeric (external Telegram id from human input), resolve to internal
+    # first via external_identity lookup before fetching.
     try:
         if is_numeric_id:
-            direct = await db.get_seen_contact(int(q))
+            direct = None
+            async with _db.execute(
+                "SELECT internal_id FROM external_identity WHERE provider = 'telegram' AND external_id = ?",
+                (q,),
+            ) as cur:
+                row = await cur.fetchone()
+            if row:
+                direct = await db.get_seen_contact(row["internal_id"])
             seen_rows = [direct] if direct else []
         else:
             seen_rows = await db.search_seen_contacts(q_lower, limit=20)
@@ -242,10 +252,16 @@ async def resolve_candidates(
         seen_rows = []
 
     for r in seen_rows:
-        cid = int(r["chat_id"])
+        cid = str(r["chat_id"])
         dname = str(r.get("display_name") or "")
         uname = str(r.get("username") or "")
-        if is_numeric_id and str(cid) == q:
+        # For exact_id, compare external (human-entered) id against the
+        # external_identity row this internal cid maps to.
+        is_exact_id = False
+        if is_numeric_id:
+            ext = await db.lookup_external_for_person(cid)
+            is_exact_id = bool(ext and ext[1] == q)
+        if is_exact_id:
             confidence = "exact_id"
         else:
             confidence = _name_match(dname) or _name_match(uname)

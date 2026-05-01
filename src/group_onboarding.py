@@ -10,12 +10,14 @@ import logging
 from datetime import date
 
 from src import db
-from src.services import lark, openai_client, telegram
+from src.channels import telegram_singleton as telegram
+from src.infrastructure import lark_client as lark
+from src.agent.llm_for_ctx import get_default_llm
 
 logger = logging.getLogger("group_onboarding")
 
 
-async def _send_and_save(group_chat_id: int, text: str) -> None:
+async def _send_and_save(group_chat_id: str, text: str) -> None:
     """Send reply to group. telegram.send auto-persists as assistant message so next turn has history."""
     await telegram.send(group_chat_id, text)
 
@@ -78,7 +80,7 @@ async def _group_collector(
     text: str,
     boss_list: str,
     project_list: str,
-    group_chat_id: int,
+    group_chat_id: str,
 ) -> dict:
     state_copy = {
         k: v for k, v in session.items()
@@ -100,7 +102,7 @@ async def _group_collector(
         *history,
         {"role": "user", "content": text},
     ]
-    response, _ = await openai_client.chat_with_tools(messages, [])
+    response, _ = await get_default_llm().chat_with_tools(messages, [])
     content = (response.content or "").strip()
     try:
         return json.loads(content)
@@ -119,7 +121,7 @@ async def _group_collector(
 # Completion
 # ---------------------------------------------------------------------------
 
-async def _complete_group(group_chat_id: int, group_name: str, session: dict) -> None:
+async def _complete_group(group_chat_id: str, group_name: str, session: dict) -> None:
     """Persist group registration and send intro message."""
     boss = next(
         (b for b in session.get("bosses", []) if b["chat_id"] == session["boss_chat_id"]),
@@ -155,12 +157,12 @@ async def _complete_group(group_chat_id: int, group_name: str, session: dict) ->
 # Public API
 # ---------------------------------------------------------------------------
 
-async def is_group_onboarding(group_chat_id: int) -> bool:
+async def is_group_onboarding(group_chat_id: str) -> bool:
     state = await db.get_onboarding_state(group_chat_id)
     return bool(state)
 
 
-async def start(group_chat_id: int, sender_id: int) -> None:
+async def start(group_chat_id: str, sender_id: str) -> None:
     """Entry point — check admin rights first, then begin workspace selection."""
     bot_id = await telegram.get_bot_id()
     if bot_id:
@@ -200,7 +202,7 @@ async def start(group_chat_id: int, sender_id: int) -> None:
     })
 
 
-async def handle(text: str, group_chat_id: int, group_name: str = "") -> None:
+async def handle(text: str, group_chat_id: str, group_name: str = "") -> None:
     session = await db.get_onboarding_state(group_chat_id)
     if not session:
         return

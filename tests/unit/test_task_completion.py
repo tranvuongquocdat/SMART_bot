@@ -30,16 +30,16 @@ _TASK = {
 
 @pytest.mark.asyncio
 async def test_non_boss_completion_notifies_boss():
-    from src.tools import tasks
+    from src.services import tasks_service as tasks
     ctx = _make_ctx(sender_type="member")
 
-    with patch("src.tools.tasks.lark.search_records", new_callable=AsyncMock, return_value=[_TASK]), \
-         patch("src.tools.tasks.lark.update_record", new_callable=AsyncMock), \
-         patch("src.tools.tasks.telegram.send", new_callable=AsyncMock) as mock_send, \
-         patch("src.tools.tasks.db_mod.log_outbound_dm", new_callable=AsyncMock), \
-         patch("src.tools.tasks.db_mod.get_db", new_callable=AsyncMock), \
-         patch("src.tools.tasks._embed_and_upsert", new_callable=AsyncMock), \
-         patch("src.tools.tasks._notify_group_completion", new_callable=AsyncMock), \
+    with patch("src.services.tasks_service.lark.search_records", new_callable=AsyncMock, return_value=[_TASK]), \
+         patch("src.services.tasks_service.lark.update_record", new_callable=AsyncMock), \
+         patch("src.services.tasks_service.telegram.send", new_callable=AsyncMock) as mock_send, \
+         patch("src.services.tasks_service.db_mod.log_outbound_dm", new_callable=AsyncMock), \
+         patch("src.services.tasks_service.db_mod.get_db", new_callable=AsyncMock), \
+         patch("src.services.tasks_service._embed_and_upsert", new_callable=AsyncMock), \
+         patch("src.services.tasks_service._notify_group_completion", new_callable=AsyncMock), \
          patch("asyncio.create_task", side_effect=lambda coro: (coro.close(), None)[1]):
         result = await tasks.update_task(ctx, search_keyword="báo cáo", status="Hoàn thành")
 
@@ -55,14 +55,14 @@ async def test_non_boss_completion_notifies_boss():
 
 @pytest.mark.asyncio
 async def test_boss_completion_no_cross_chat_notification():
-    from src.tools import tasks
+    from src.services import tasks_service as tasks
     ctx = _make_ctx(sender_type="boss")
 
-    with patch("src.tools.tasks.lark.search_records", new_callable=AsyncMock, return_value=[_TASK]), \
-         patch("src.tools.tasks.lark.update_record", new_callable=AsyncMock), \
-         patch("src.tools.tasks.telegram.send", new_callable=AsyncMock) as mock_send, \
-         patch("src.tools.tasks.db_mod.log_outbound_dm", new_callable=AsyncMock), \
-         patch("src.tools.tasks._embed_and_upsert", new_callable=AsyncMock), \
+    with patch("src.services.tasks_service.lark.search_records", new_callable=AsyncMock, return_value=[_TASK]), \
+         patch("src.services.tasks_service.lark.update_record", new_callable=AsyncMock), \
+         patch("src.services.tasks_service.telegram.send", new_callable=AsyncMock) as mock_send, \
+         patch("src.services.tasks_service.db_mod.log_outbound_dm", new_callable=AsyncMock), \
+         patch("src.services.tasks_service._embed_and_upsert", new_callable=AsyncMock), \
          patch("asyncio.create_task", side_effect=lambda coro: (coro.close(), None)[1]):
         result = await tasks.update_task(ctx, search_keyword="báo cáo", status="Hoàn thành")
 
@@ -74,15 +74,15 @@ async def test_boss_completion_no_cross_chat_notification():
 
 @pytest.mark.asyncio
 async def test_non_boss_other_change_still_uses_approval():
-    from src.tools import tasks
+    from src.services import tasks_service as tasks
     ctx = _make_ctx(sender_type="member")
 
-    with patch("src.tools.tasks.lark.search_records", new_callable=AsyncMock, return_value=[_TASK]), \
-         patch("src.tools.tasks.db_mod.create_approval", new_callable=AsyncMock), \
-         patch("src.tools.tasks.db_mod.get_boss", new_callable=AsyncMock,
+    with patch("src.services.tasks_service.lark.search_records", new_callable=AsyncMock, return_value=[_TASK]), \
+         patch("src.services.tasks_service.db_mod.create_approval", new_callable=AsyncMock), \
+         patch("src.services.tasks_service.db_mod.get_boss", new_callable=AsyncMock,
                return_value={"chat_id": 100, "company": "Acme"}), \
-         patch("src.tools.tasks.telegram.send", new_callable=AsyncMock), \
-         patch("src.tools.tasks.db_mod._db", MagicMock()):
+         patch("src.services.tasks_service.telegram.send", new_callable=AsyncMock), \
+         patch("src.services.tasks_service.db_mod._db", MagicMock()):
         result = await tasks.update_task(ctx, search_keyword="báo cáo", deadline="2026-05-01")
 
     assert "Yêu cầu" in result

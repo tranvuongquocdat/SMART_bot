@@ -11,7 +11,7 @@ from src import db
 logger = logging.getLogger("context_builder")
 
 
-async def build(sender_id: int, chat_id: int) -> dict:
+async def build(sender_id: str, chat_id: str) -> dict:
     """
     Returns:
     {
@@ -43,7 +43,7 @@ async def build(sender_id: int, chat_id: int) -> dict:
         if boss:
             resolved.append({
                 "workspace": boss.get("company", str(m["boss_chat_id"])),
-                "boss_id": int(m["boss_chat_id"]),
+                "boss_id": str(m["boss_chat_id"]),       # internal UUID
                 "role": m["person_type"],
                 "language": m.get("language"),
             })
@@ -57,12 +57,9 @@ async def build(sender_id: int, chat_id: int) -> dict:
     # Check preferred workspace from sessions (switch_workspace with TTL)
     preferred_raw = await db.get_session(sender_id, "preferred_workspace")
     if preferred_raw:
-        try:
-            preferred_id = int(preferred_raw)
-            if any(m["boss_id"] == preferred_id for m in resolved):
-                primary_id = preferred_id
-        except ValueError:
-            pass
+        preferred_id = str(preferred_raw)
+        if any(m["boss_id"] == preferred_id for m in resolved):
+            primary_id = preferred_id
 
     active_sessions = await _get_active_sessions(sender_id)
     last_5 = await db.get_recent(chat_id, limit=5)
@@ -78,7 +75,7 @@ async def build(sender_id: int, chat_id: int) -> dict:
     }
 
 
-async def _get_active_sessions(sender_id: int) -> dict:
+async def _get_active_sessions(sender_id: str) -> dict:
     reset_raw = await db.get_session(sender_id, "reset_step")
     reset_pending = json.loads(reset_raw) if reset_raw else None
 
@@ -115,7 +112,7 @@ async def _get_active_sessions(sender_id: int) -> dict:
     }
 
 
-def _resolve_language(memberships: list, sender_id: int, primary: dict | None) -> str:
+def _resolve_language(memberships: list, sender_id: str, primary: dict | None) -> str:
     # memberships is the raw DB rows list — each row has chat_id = sender_id by query design.
     # The synthetic boss entry also has chat_id = sender_id. So sender_m always finds a row.
     sender_m = next(
@@ -129,7 +126,7 @@ def _resolve_language(memberships: list, sender_id: int, primary: dict | None) -
     return "en"
 
 
-async def build_group_context(group_chat_id: int, boss_chat_id: int) -> dict:
+async def build_group_context(group_chat_id: str, boss_chat_id: str) -> dict:
     """
     Builds group-specific context dict:
     {
@@ -140,7 +137,7 @@ async def build_group_context(group_chat_id: int, boss_chat_id: int) -> dict:
         "active_topic": str,
     }
     """
-    from src.services import lark as _lark
+    from src.infrastructure import lark_client as _lark
 
     _db = await db.get_db()
 
@@ -218,11 +215,11 @@ async def _get_active_topic(messages: list[dict]) -> str:
     """LLM mini-call: summarize what the group is currently discussing in 1 sentence."""
     if not messages:
         return ""
-    from src.services import openai_client as _oai
+    from src.agent.llm_for_ctx import get_default_llm
     conversation = "\n".join(
         f"{m.get('role', 'user')}: {m.get('content', '')}" for m in messages
     )
-    response, _ = await _oai.chat_with_tools(
+    response, _ = await get_default_llm().chat_with_tools(
         [
             {
                 "role": "system",

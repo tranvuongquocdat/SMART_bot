@@ -2,14 +2,13 @@ import pytest
 import pytest_asyncio
 import aiosqlite
 import asyncio
-from src.db import _init_schema, _migrate_schema
+from src.db import _init_schema
 
 @pytest_asyncio.fixture
 async def db():
     async with aiosqlite.connect(":memory:") as conn:
         conn.row_factory = aiosqlite.Row
         await _init_schema(conn)
-        await _migrate_schema(conn)
         yield conn
 
 @pytest.mark.asyncio

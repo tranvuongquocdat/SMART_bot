@@ -12,7 +12,11 @@ logging.basicConfig(
 
 from src import agent, context, db, scheduler
 from src.config import Settings
-from src.services import cohere, lark, openai_client, qdrant, telegram
+from src.channels import telegram_singleton as telegram
+from src.infrastructure import cohere_client as cohere
+from src.infrastructure import qdrant_client as qdrant
+from src.infrastructure import lark_client as lark
+from src.infrastructure import openai_client
 
 
 @asynccontextmanager
@@ -35,17 +39,67 @@ async def lifespan(_app: FastAPI):
     # Init agent
     agent.init_agent(settings)
 
-    # Start scheduler + polling
+    # Phase 4b-3: every LLM call resolves a per-boss LLMClient via this cache.
+    from src.agent.llm_for_ctx import init_llm_settings
+    init_llm_settings(settings)
+
+    # Phase 5c: structured-logging context filter (boss/chat/request ids).
+    from src.infrastructure.observability import setup_logging
+    setup_logging(settings)
+
+    # Phase 5a: build AppContainer (read-only wiring snapshot).
+    from src.container import build_container
+    _app.state.container = await build_container(settings)
+
+    # Phase 5b: MessageRouter is the single inbound boundary.
+    from src.controllers.message_router import MessageRouter
+    _router = MessageRouter(_app.state.container)
+    _app.state.router = _router
+
+    # Channel registry — `telegram_singleton.send/edit` dispatch via this map
+    # so a chat with provider="zalo" goes to ZaloMessenger automatically.
+    from src.channels import registry as channel_registry
+    channel_registry.register("telegram", telegram.get_messenger())
+
+    # Start scheduler + polling. Polling now feeds raw IncomingMessage to the
+    # router (skipping the legacy positional-arg bridge in services/telegram).
     await scheduler.start(settings)
     polling_task = asyncio.create_task(
-        telegram.start_polling(agent.handle_message)
+        telegram.get_messenger().start(_router.handle)
     )
+
+    # Optional Zalo channel (demo: single account; bridge auto-loads session.json
+    # next to bridge.js unless ZALO_SESSION_PATH overrides). `start()` returns
+    # once the bridge is ready; subprocess + listener run on background tasks.
+    zalo_messenger = None
+    if settings.zalo_enabled:
+        import os as _os
+        from src.channels.zalo import ZaloMessenger
+        from src.channels.zalo_bridge.inbound_filter import ZaloInboundFilter
+        bridge_js = _os.path.join(
+            _os.path.dirname(__file__), "channels", "zalo_bridge", "bridge.js",
+        )
+        zalo_messenger = ZaloMessenger(
+            node_path=settings.zalo_node_path,
+            bridge_js_path=bridge_js,
+            session_path=settings.zalo_session_path,
+            inbound_filter=ZaloInboundFilter(settings.zalo_onboard_phrase),
+        )
+        try:
+            await zalo_messenger.start(_router.handle)
+            _app.state.container.messengers["zalo"] = zalo_messenger
+            channel_registry.register("zalo", zalo_messenger)
+        except Exception:
+            logging.getLogger("main").exception("Zalo bridge failed to start; continuing without it")
+            zalo_messenger = None
 
     yield
 
     # Shutdown
     telegram.stop_polling()
     polling_task.cancel()
+    if zalo_messenger is not None:
+        await zalo_messenger.stop()
     await scheduler.stop()
     await telegram.close_telegram()
     await lark.close_lark()

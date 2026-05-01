@@ -15,8 +15,7 @@ async def test_first_message_shows_greeting():
     with patch("src.onboarding.db.get_onboarding_state", new_callable=AsyncMock,
                return_value={"first": True}), \
          patch("src.onboarding.db.save_onboarding_state", new_callable=AsyncMock), \
-         patch("src.onboarding.openai_client.chat_with_tools", new_callable=AsyncMock,
-               return_value=_llm_response({}, "Xin chào!")), \
+         patch("src.onboarding.get_default_llm", return_value=MagicMock(chat_with_tools=AsyncMock(return_value=_llm_response({}, "Xin chào!")))), \
          patch("src.onboarding.telegram.send", new_callable=AsyncMock) as mock_send:
         await onboarding.handle_onboard_message("hi", 999)
     mock_send.assert_awaited_once()
@@ -37,8 +36,7 @@ async def test_extracts_all_boss_fields_in_one_message():
          patch("src.onboarding.db.save_onboarding_state", new_callable=AsyncMock,
                side_effect=fake_save), \
          patch("src.onboarding.db.get_all_bosses", new_callable=AsyncMock, return_value=[]), \
-         patch("src.onboarding.openai_client.chat_with_tools", new_callable=AsyncMock,
-               return_value=_llm_response(extracted, "Tuyệt! Xác nhận tạo workspace?")), \
+         patch("src.onboarding.get_default_llm", return_value=MagicMock(chat_with_tools=AsyncMock(return_value=_llm_response(extracted, "Tuyệt! Xác nhận tạo workspace?")))), \
          patch("src.onboarding.telegram.send", new_callable=AsyncMock):
         await onboarding.handle_onboard_message("tôi là sếp tên Đạt công ty ABC Corp", 999)
 
@@ -57,8 +55,7 @@ async def test_confirmation_triggers_complete_boss():
     with patch("src.onboarding.db.get_onboarding_state", new_callable=AsyncMock,
                return_value=existing_state), \
          patch("src.onboarding.db.get_all_bosses", new_callable=AsyncMock, return_value=[]), \
-         patch("src.onboarding.openai_client.chat_with_tools", new_callable=AsyncMock,
-               return_value=_llm_response(extracted, "Đang tạo workspace...")), \
+         patch("src.onboarding.get_default_llm", return_value=MagicMock(chat_with_tools=AsyncMock(return_value=_llm_response(extracted, "Đang tạo workspace...")))), \
          patch("src.onboarding.telegram.send", new_callable=AsyncMock), \
          patch("src.onboarding._complete_boss", new_callable=AsyncMock) as mock_complete:
         await onboarding.handle_onboard_message("ok tạo đi", 999)

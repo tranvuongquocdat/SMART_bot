@@ -10,7 +10,8 @@ from apscheduler.triggers.interval import IntervalTrigger
 from src import db
 from src.config import Settings
 from src.context import ChatContext
-from src.services import lark, telegram
+from src.channels import telegram_singleton as telegram
+from src.infrastructure import lark_client as lark
 
 logger = logging.getLogger("scheduler")
 
@@ -57,7 +58,7 @@ async def _morning_review():
 
 async def _evening_summary():
     """17h: tong ket ngay."""
-    from src.tools.summary import get_summary
+    from src.services.summary_service import get_summary
     bosses = await db.get_all_bosses()
     for boss in bosses:
         try:
@@ -172,7 +173,7 @@ async def _check_deadline_push():
                 if assignee_chat_id:
                     label = "2 tiếng" if kind == "2h" else "24 tiếng"
                     await telegram.send(
-                        int(assignee_chat_id),
+                        assignee_chat_id,
                         f"⏰ Task '{task.get('Tên task')}' còn khoảng {label} đến deadline!\n"
                         f"Hãy cập nhật tiến độ nhé.",
                     )
@@ -300,7 +301,7 @@ async def _run_dynamic_reviews():
     from datetime import datetime
     from zoneinfo import ZoneInfo
     from src.advisor import run_daily_review
-    from src.tools.summary import get_summary
+    from src.services.summary_service import get_summary
 
     reviews = await db.get_all_enabled_reviews(db._db)
     bosses_cache: dict = {}
@@ -333,7 +334,8 @@ async def _run_dynamic_reviews():
                     continue
                 text = await run_daily_review(ctx, _settings, custom_prompt=prompt)
             elif content_type == "group_brief":
-                from src.services import openai_client as _oai  # noqa: PLC0415
+                from src.agent.llm_for_ctx import get_llm_for_ctx  # noqa: PLC0415
+                _oai = await get_llm_for_ctx(ctx)
                 tasks_data = await lark.search_records(ctx.lark_base_token, ctx.lark_table_tasks)
                 tasks_text = "\n".join(
                     f"- {t.get('Tên task', '?')} | {t.get('Assignee', '?')} | deadline: {t.get('Deadline', '?')} | status: {t.get('Status', '?')}"
@@ -359,15 +361,15 @@ async def _run_dynamic_reviews():
             else:
                 continue
 
-            # Route: group chat or boss DM
-            target_chat_id = review.get("group_chat_id") or int(owner_id)
+            # Route: group chat or boss DM. Both ids are internal UUIDs.
+            target_chat_id = review.get("group_chat_id") or owner_id
 
             # Build group context if sending to a group
             group_context_str = ""
             if review.get("group_chat_id"):
                 try:
                     from src.context_builder import build_group_context as _bgc  # noqa: PLC0415
-                    grp = await _bgc(int(review["group_chat_id"]), int(owner_id))
+                    grp = await _bgc(review["group_chat_id"], owner_id)
                     if grp:
                         group_context_str = (
                             f"\nNhóm: {grp.get('group_name', '')} | "
@@ -380,7 +382,7 @@ async def _run_dynamic_reviews():
             if group_context_str and text:
                 text = group_context_str + "\n\n" + text
 
-            await telegram.send(int(target_chat_id), text)
+            await telegram.send(target_chat_id, text)
             logger.info("[scheduler] Dynamic review '%s' sent to %s", content_type, boss["name"])
         except Exception:
             logger.exception("[scheduler] Dynamic review failed for review_id=%s", review.get("id"))
