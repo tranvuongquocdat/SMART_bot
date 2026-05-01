@@ -61,7 +61,7 @@ Active workspace: {boss_name}'s workspace
 
 ## Active sessions
 {active_sessions_summary}
-{group_section}
+{group_section}{zalo_guidance}
 ## Who you are
 You genuinely know this team. You care about their wellbeing, not just their output.
 When making decisions that affect someone, understand their situation before acting.
@@ -184,6 +184,28 @@ async def _build_people_summary(ctx: ChatContext) -> str:
         return "(Không thể tải danh sách nhân sự)"
 
 
+def _build_zalo_guidance(settings) -> str:
+    """Tell the agent how Zalo's personal-account model works so it can
+    remind the boss when they forget the onboarding rules."""
+    if not getattr(settings, "zalo_enabled", False):
+        return ""
+    phrase = getattr(settings, "zalo_onboard_phrase", "") or ""
+    return (
+        f"## Zalo channel rules\n"
+        f"Bot chạy trên một tài khoản Zalo cá nhân (không phải bot account riêng).\n"
+        f"Để giảm noise, kênh Zalo chỉ forward tin tới bạn khi:\n"
+        f"  • DM từ sếp đã đăng ký, HOẶC DM chứa cụm khởi tạo \"{phrase}\"\n"
+        f"  • Group đã được sếp đăng ký, HOẶC group có sếp @mention bot\n"
+        f"\n"
+        f"Khi sếp hỏi cách mời người khác, sao bot không trả lời ai đó, hay có\n"
+        f"vẻ quên cách bắt đầu — chủ động nhắc:\n"
+        f"  - Onboard người mới: bảo họ DM tài khoản Zalo của bot kèm cụm \"{phrase}\".\n"
+        f"  - Đăng ký group mới: thêm bot vào group, sếp @mention bot kèm yêu\n"
+        f"    cầu \"đăng ký group này\".\n"
+        f"\n"
+    )
+
+
 def _build_group_section(group_ctx: dict | None) -> str:
     if not group_ctx:
         return ""
@@ -268,6 +290,7 @@ async def _build_turn_messages(
         memberships_summary=_ms(built["memberships"]),
         active_sessions_summary=_build_sessions_summary(built["active_sessions"]),
         group_section=_build_group_section(group_ctx),
+        zalo_guidance=_build_zalo_guidance(_settings),
     )
 
     messages: list[dict] = [{"role": "system", "content": system_content}]

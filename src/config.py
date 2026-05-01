@@ -37,6 +37,6 @@ class Settings(BaseSettings):
     # Phrase a sếp says (DM only) to introduce themselves to the bot before
     # they're a registered boss. Other DMs from non-bosses are dropped to
     # keep the personal-account use case manageable.
-    zalo_onboard_phrase: str = "thư ký ơi"
+    zalo_onboard_phrase: str = "khởi tạo trợ lý"
 
     model_config = {"env_file": ".env", "extra": "ignore"}
