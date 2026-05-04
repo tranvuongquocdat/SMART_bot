@@ -107,11 +107,18 @@ async def test_normalize_group_with_mention_and_reply():
 
 
 async def test_normalize_photo_attachment():
+    # bridge.js now downloads attachments and emits local_path + mime.
     m = _messenger()
     ev = _bridge_event(
         text="",
         content_type="image",
-        attachments=[{"kind": "image", "href": "https://cdn.zalo/x.jpg"}],
+        attachments=[{
+            "kind": "image",
+            "mime": "image/jpeg",
+            "filename": "x.jpg",
+            "local_path": "/tmp/inbound/T/123_x.jpg",
+            "size_bytes": 4096,
+        }],
     )
 
     with patch("src.db.resolve_or_create_conversation",
@@ -121,8 +128,38 @@ async def test_normalize_photo_attachment():
         incoming = await m._normalize(ev)
 
     assert len(incoming.attachments) == 1
-    assert incoming.attachments[0].kind == "image"
-    assert incoming.attachments[0].url == "https://cdn.zalo/x.jpg"
+    a = incoming.attachments[0]
+    assert a.kind == "image"
+    assert a.url == "/tmp/inbound/T/123_x.jpg"
+    assert a.mime_type == "image/jpeg"
+    assert a.filename == "x.jpg"
+    assert a.size_bytes == 4096
+
+
+async def test_normalize_attachment_download_error():
+    # When bridge.js fetch fails, attachment carries an error flag.
+    m = _messenger()
+    ev = _bridge_event(
+        text="",
+        content_type="file",
+        attachments=[{
+            "kind": "file",
+            "mime": "application/pdf",
+            "filename": "doc.pdf",
+            "error": "HTTP 403",
+        }],
+    )
+
+    with patch("src.db.resolve_or_create_conversation",
+               new_callable=AsyncMock, return_value="C"), \
+         patch("src.db.resolve_or_create_person",
+               new_callable=AsyncMock, return_value="P"):
+        incoming = await m._normalize(ev)
+
+    a = incoming.attachments[0]
+    assert a.url == ""
+    assert a.filename == "doc.pdf"
+    assert a.mime_type == "application/pdf"
 
 
 async def test_send_message_routes_dm_via_bridge():
