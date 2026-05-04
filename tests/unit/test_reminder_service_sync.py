@@ -134,3 +134,67 @@ async def test_update_reminder_lark_fail_returns_graceful_message(in_memory_db, 
         _ctx(), reminder_id=rid, content="new content",
     )
     assert "đang chờ đồng bộ" in msg.lower() or "dang cho dong bo" in msg.lower()
+
+
+async def test_delete_reminder_lark_first(in_memory_db, monkeypatch):
+    rid = await db.create_reminder(
+        boss_chat_id="b1", content="x",
+        remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
+    )
+    from src.repositories.reminder_repo import ReminderRepo
+    await ReminderRepo(in_memory_db).set_lark_record_id(rid, "rec-1")
+
+    delete_mock = AsyncMock()
+    monkeypatch.setattr(
+        "src.services.reminder_service.lark.delete_record", delete_mock
+    )
+    async def _passthrough(fn, **kw):
+        return await fn()
+    monkeypatch.setattr("src.services.reminder_service.lark.with_retry", _passthrough)
+
+    msg = await reminder_service.delete_reminder(_ctx(), reminder_id=rid)
+
+    delete_mock.assert_awaited_once()
+    assert "Da xoa" in msg
+    async with in_memory_db.execute(
+        "SELECT id FROM reminders WHERE id = ?", (rid,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is None  # DB row removed
+
+
+async def test_delete_reminder_lark_fail_keeps_db(in_memory_db, monkeypatch):
+    rid = await db.create_reminder(
+        boss_chat_id="b1", content="x",
+        remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
+    )
+    from src.repositories.reminder_repo import ReminderRepo
+    await ReminderRepo(in_memory_db).set_lark_record_id(rid, "rec-1")
+
+    monkeypatch.setattr(
+        "src.services.reminder_service.lark.with_retry",
+        AsyncMock(side_effect=Exception("Lark down")),
+    )
+
+    msg = await reminder_service.delete_reminder(_ctx(), reminder_id=rid)
+
+    assert "thu lai" in msg.lower() or "thử lại" in msg.lower()
+    async with in_memory_db.execute(
+        "SELECT id FROM reminders WHERE id = ?", (rid,)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None  # DB row preserved
+
+
+async def test_delete_reminder_no_lark_record_id_skips_lark_call(in_memory_db, monkeypatch):
+    rid = await db.create_reminder(
+        boss_chat_id="b1", content="x",
+        remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
+    )
+    delete_mock = AsyncMock()
+    monkeypatch.setattr(
+        "src.services.reminder_service.lark.delete_record", delete_mock
+    )
+    msg = await reminder_service.delete_reminder(_ctx(), reminder_id=rid)
+    delete_mock.assert_not_awaited()
+    assert "Da xoa" in msg

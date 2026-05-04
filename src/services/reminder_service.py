@@ -231,6 +231,25 @@ async def update_reminder(
 
 
 async def delete_reminder(ctx: ChatContext, reminder_id: int) -> str:
+    from src.repositories.reminder_repo import ReminderRepo
+    repo = ReminderRepo(await db.get_db())
+    row = await repo.get_by_id(reminder_id)
+    if not row or str(row.get("boss_chat_id")) != str(ctx.boss_chat_id):
+        return f"Khong tim thay nhac nho #{reminder_id}."
+
+    lark_id = row.get("lark_record_id")
+    if lark_id and ctx.lark_table_reminders:
+        try:
+            await lark.with_retry(lambda: lark.delete_record(
+                ctx.lark_base_token, ctx.lark_table_reminders, lark_id,
+            ))
+        except Exception:
+            import logging as _logging
+            _logging.getLogger("services.reminder").warning(
+                "Lark delete failed for reminder %d", reminder_id, exc_info=True,
+            )
+            return f"Lark dang loi, chua xoa duoc #{reminder_id} — anh thu lai sau."
+
     ok = await db.delete_reminder(reminder_id, ctx.boss_chat_id)
     if not ok:
         return f"Khong tim thay nhac nho #{reminder_id}."
