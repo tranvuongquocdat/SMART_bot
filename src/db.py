@@ -335,6 +335,17 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
             if "duplicate column name" not in str(exc).lower():
                 raise
 
+    # ---- Phase 6c forward-compat: lark_record_id on reminders/notes ----
+    for table, col, definition in [
+        ("reminders", "lark_record_id", "TEXT DEFAULT NULL"),
+        ("notes",     "lark_record_id", "TEXT DEFAULT NULL"),
+    ]:
+        try:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
+        except Exception as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
     # `people_map` is legacy and not in the canonical schema (its responsibilities
     # moved to `memberships`), but a few legacy code paths still hit it. If we
     # renamed it above, recreate it with TEXT PK so legacy reads/writes stay
@@ -570,9 +581,9 @@ async def get_note(
 async def update_note(
     boss_chat_id: str, note_type: str, ref_id: str, content: str,
     db_path: str = "data/history.db",
-) -> None:
+) -> int:
     repo: NoteRepo = await _repo("note", NoteRepo)
-    await repo.upsert(boss_chat_id, note_type, ref_id, content)
+    return await repo.upsert(boss_chat_id, note_type, ref_id, content)
 
 
 # ---------------------------------------------------------------------------
