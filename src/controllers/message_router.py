@@ -70,6 +70,7 @@ class MessageRouter:
                     username_mentions=incoming.username_mentions,
                     reply_to=reply_to,
                     new_members=incoming.new_members,
+                    attachments=incoming.attachments,
                 )
             except Exception:
                 logger.exception("[router] handler raised for %s", incoming.chat_id)

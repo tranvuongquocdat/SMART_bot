@@ -22,6 +22,7 @@ from src.infrastructure import lark_client as lark
 from src.agent.tool_definitions import TOOL_DEFINITIONS
 from src.agent.llm_for_ctx import get_llm_for_ctx, get_default_llm
 from src.infrastructure.llm.factory import get_llm_client
+from src.utils.sentinels import strip_sentinels
 
 logger = logging.getLogger("agent")
 
@@ -254,7 +255,7 @@ async def _build_turn_messages(
         db.get_recent(chat_id, limit=_settings.recent_messages),
         qdrant.search(
             collection=ctx.messages_collection,
-            query=text,
+            query=strip_sentinels(text),
             chat_id=chat_id,
             top_n=_settings.rag_messages,
         ),
@@ -321,6 +322,7 @@ async def handle_message(
     username_mentions: list[str] | None = None,
     reply_to: dict | None = None,
     new_members: list[dict] | None = None,
+    attachments: list | None = None,
 ):
     # Lazy import — `src.agent` imports us back, so we resolve at call time.
     from src.agent import _dispatcher
@@ -332,6 +334,20 @@ async def handle_message(
     new_members = new_members or []
 
     logger.info("%s >>> INPUT: %s", log_prefix, text[:200])
+
+    # ---- Step 0: Ingest file attachments → sentinels appended to text ----
+    if attachments:
+        from src.agent.file_ingestion import ingest as _ingest_files
+        from src.infrastructure import openai_client as _openai_client_mod
+        try:
+            ingested = await _ingest_files(
+                _openai_client_mod.get_client(), attachments, chat_id,
+            )
+            if ingested:
+                text = (text + "\n\n" + ingested).strip() if text else ingested
+                logger.info("%s file attachments ingested (%d)", log_prefix, len(attachments))
+        except Exception:
+            logger.exception("%s file_ingestion failed", log_prefix)
 
     sender_dict = {"id": sender_id, "name": sender_name, "username": ""} if sender_id else None
     asyncio.create_task(
@@ -356,14 +372,15 @@ async def handle_message(
                 msg_id = await db.save_message(chat_id, "user", text, sender_id)
                 _boss_row = await db.get_boss(boss_id) or {}
                 _llm = get_llm_client(_boss_row, _settings or Settings())
-                vector, _dim = await _llm.embed(text)
+                _clean = strip_sentinels(text)
+                vector, _dim = await _llm.embed(_clean)
                 asyncio.create_task(
                     qdrant.upsert(
                         collection=f"messages_{boss_id}_{_dim}",
                         point_id=msg_id,
                         chat_id=chat_id,
                         role="user",
-                        text=text,
+                        text=_clean,
                         vector=vector,
                     )
                 )
@@ -414,14 +431,15 @@ async def handle_message(
         # ---- Step 3: Save user message ----
         msg_id = await db.save_message(chat_id, "user", text, sender_id)
         llm = await get_llm_for_ctx(ctx)
-        vector, _ = await llm.embed(text)
+        _clean_user = strip_sentinels(text)
+        vector, _ = await llm.embed(_clean_user)
         asyncio.create_task(
             qdrant.upsert(
                 collection=ctx.messages_collection,
                 point_id=msg_id,
                 chat_id=chat_id,
                 role="user",
-                text=text,
+                text=_clean_user,
                 vector=vector,
             )
         )
