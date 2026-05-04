@@ -34,7 +34,7 @@ Out of scope for this spec — tracked separately:
 | Permanent failure after retry | Keep DB row, return tool message stating "saved locally, will sync later"; periodic reconciler re-pushes | Avoid losing user's work; avoid pretending success |
 | Reverse-sync conflict | **Lark wins** on content / timing fields | Stated intent: Lark is source of truth |
 | Manual additions in Lark | Bot pulls them into DB on next reverse-sync pass | User can author reminders/notes directly in Lark UI |
-| Lark deletion | Tombstone DB (reminders → `status='cancelled'`; notes → delete row + Qdrant point) | Match user expectation: "deleted in Lark" = "gone" |
+| Lark deletion | Tombstone DB (reminders → `status='done'` — re-uses existing CHECK values; cosmetic effect: tombstones surface under `list_reminders status='done'`. Notes → delete row + Qdrant point) | Match user expectation: "deleted in Lark" = "gone" |
 | Pagination | Loop `page_token` until `has_more=false`, hard cap 5000 records | Prevent silent truncation; cap protects against runaway tenants |
 
 ## Schema changes
@@ -110,7 +110,7 @@ For each boss with `lark_table_reminders` configured:
 3. **Lark → DB updates and inserts:**
    - For rows with `SQLite ID`: update DB `content`, `status`, and `remind_at` (parse `Thời gian nhắc` as local → UTC). Skip if parse fails (log warning).
    - For rows without `SQLite ID`: pull `Nội dung`, `Thời gian nhắc`, `Trạng thái`, `Người nhận`. If parse fails, log + skip. On success: insert DB row, then call `sync_reminder_to_lark` to write `SQLite ID` back to that Lark row.
-4. **Tombstone vanished:** `SELECT id FROM reminders WHERE boss_chat_id=? AND lark_record_id IS NOT NULL AND lark_record_id NOT IN (seen_lark_ids) AND status='pending'` → update those rows to `status='cancelled'`.
+4. **Tombstone vanished:** `SELECT id FROM reminders WHERE boss_chat_id=? AND lark_record_id IS NOT NULL AND lark_record_id NOT IN (seen_lark_ids) AND status='pending'` → update those rows to `status='done'`.
 5. **Reconcile push-failures:** `SELECT * FROM reminders WHERE boss_chat_id=? AND lark_record_id IS NULL AND status='pending'` → for each, call `sync_reminder_to_lark`; on success persist returned `record_id`.
 
 ### Note reverse-sync (every 5 min)
@@ -174,7 +174,7 @@ New unit tests in `tests/`. Mock `lark_client._client` (httpx) to control respon
 | `test_delete_reminder_removes_lark_row` | Delete with known `lark_record_id` → `delete_record` is called, then DB row gone |
 | `test_delete_reminder_lark_failure_keeps_db_row` | Lark `delete_record` raises → DB row still present; tool message says retry later |
 | `test_reverse_sync_pulls_time_change` | Lark `Thời gian nhắc` differs → DB `remind_at` updated to parsed UTC |
-| `test_reverse_sync_tombstones_vanished` | DB has `lark_record_id=X`, Lark search omits X → DB row `status='cancelled'` |
+| `test_reverse_sync_tombstones_vanished` | DB has `lark_record_id=X`, Lark search omits X → DB row `status='done'` |
 | `test_reverse_sync_pulls_manual_add` | Lark row without SQLite ID → DB row created, `sync_reminder_to_lark` called to write back |
 | `test_reverse_sync_reconciles_unsynced_db_row` | DB row with `lark_record_id IS NULL` → push to Lark, persist returned ID |
 | `test_reverse_sync_skips_unparseable_time` | Lark `Thời gian nhắc = "không phải ngày"` → skip + log; sync loop continues |
