@@ -1,3 +1,4 @@
+import logging
 import time
 
 import httpx
@@ -10,6 +11,9 @@ _tenant_token: str = ""
 _token_expires: float = 0
 
 LARK_API = "https://open.larksuite.com/open-apis"
+
+_HARD_CAP = 5000
+_logger = logging.getLogger("infrastructure.lark")
 
 # ---------------------------------------------------------------------------
 # Field definitions for provisioning
@@ -235,21 +239,38 @@ async def create_record(base_token: str, table_id: str, fields: dict) -> dict:
 
 
 async def search_records(base_token: str, table_id: str, filter_expr: str = "") -> list[dict]:
-    params = {"page_size": 100}
-    if filter_expr:
-        params["filter"] = filter_expr
-    resp = await _client.get(
-        f"{LARK_API}/bitable/v1/apps/{base_token}/tables/{table_id}/records",
-        headers=await _headers(),
-        params=params,
-    )
-    resp.raise_for_status()
-    body = resp.json()
-    if body.get("code") != 0:
-        raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
-    data = body.get("data", {})
-    items = data.get("items") or []
-    return [{"record_id": r["record_id"], **r["fields"]} for r in items]
+    items: list[dict] = []
+    page_token: str | None = None
+    while True:
+        params: dict = {"page_size": 500}
+        if page_token:
+            params["page_token"] = page_token
+        if filter_expr:
+            params["filter"] = filter_expr
+        resp = await _client.get(
+            f"{LARK_API}/bitable/v1/apps/{base_token}/tables/{table_id}/records",
+            headers=await _headers(),
+            params=params,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get("code") != 0:
+            raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
+        data = body.get("data", {})
+        for r in data.get("items") or []:
+            items.append({"record_id": r["record_id"], **r["fields"]})
+        if len(items) >= _HARD_CAP:
+            _logger.warning(
+                "search_records: hit hard cap %d for table %s — additional rows ignored",
+                _HARD_CAP, table_id,
+            )
+            break
+        if not data.get("has_more"):
+            break
+        page_token = data.get("page_token")
+        if not page_token:
+            break
+    return items
 
 
 async def update_record(base_token: str, table_id: str, record_id: str, fields: dict) -> dict:
