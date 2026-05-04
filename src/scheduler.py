@@ -3,6 +3,9 @@ Scheduler: morning review, evening summary, deadline alerts, reminders.
 Loops through all bosses for each scheduled job.
 """
 import logging
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -250,36 +253,29 @@ async def _after_deadline_check():
 
 
 async def _sync_lark_to_sqlite():
-    """Every 30s: Lark → SQLite sync for Reminders. Every 5 min: Tasks, Projects."""
-    from datetime import datetime
+    """Lark → SQLite reverse-sync.
 
+    Reminders block runs every call (every 30s). Tasks status sync + Notes block
+    run only on the every-5-min gate.
+    """
     bosses = await db.get_all_bosses()
     now = datetime.utcnow()
     do_full_sync = (now.minute % 5 == 0 and now.second < 35)
+    settings_tz = ZoneInfo(_settings.timezone) if _settings else ZoneInfo("Asia/Ho_Chi_Minh")
 
     for boss in bosses:
         try:
-            # Reminders sync (always runs)
-            tbl = boss.get("lark_table_reminders", "")
-            if tbl:
-                records = await lark.search_records(boss["lark_base_token"], tbl)
-                for rec in records:
-                    sqlite_id = rec.get("SQLite ID")
-                    if not isinstance(sqlite_id, (int, float)):
-                        continue
-                    await db.sync_reminder_from_lark(
-                        db._db,
-                        int(sqlite_id),
-                        content=rec.get("Nội dung", ""),
-                        status=rec.get("Trạng thái", "pending"),
-                    )
+            await _reverse_sync_reminders_for_boss(boss, settings_tz)
+        except Exception:
+            logger.exception("[scheduler] reminder reverse-sync failed for %s", boss.get("name"))
 
-            if not do_full_sync:
-                continue
+        if not do_full_sync:
+            continue
 
-            # Task status sync — if done/cancelled in Lark, stop future overdue pushes
-            task_tbl = boss.get("lark_table_tasks", "")
-            if task_tbl:
+        # Task terminal-state sync (existing behaviour)
+        task_tbl = boss.get("lark_table_tasks", "")
+        if task_tbl:
+            try:
                 tasks = await lark.search_records(boss["lark_base_token"], task_tbl)
                 for t in tasks:
                     record_id = t.get("record_id")
@@ -291,9 +287,129 @@ async def _sync_lark_to_sqlite():
                             (record_id, str(boss["chat_id"])),
                         )
                 await db._db.commit()
+            except Exception:
+                logger.exception("[scheduler] task terminal sync failed for %s", boss.get("name"))
 
+        try:
+            await _reverse_sync_notes_for_boss(boss)
         except Exception:
-            logger.exception("[scheduler] sync failed for %s", boss.get("name"))
+            logger.exception("[scheduler] notes reverse-sync failed for %s", boss.get("name"))
+
+
+async def _reverse_sync_reminders_for_boss(boss: dict, settings_tz: ZoneInfo) -> None:
+    from src.repositories.reminder_repo import ReminderRepo
+
+    tbl = boss.get("lark_table_reminders", "")
+    if not tbl:
+        return
+
+    repo = ReminderRepo(db._db)
+    boss_chat_id = str(boss["chat_id"])
+    base = boss["lark_base_token"]
+    records = await lark.search_records(base, tbl)
+
+    seen_lark_ids: set[str] = set()
+    for rec in records:
+        rec_id = rec.get("record_id", "")
+        if rec_id:
+            seen_lark_ids.add(rec_id)
+        sqlite_id_raw = rec.get("SQLite ID")
+
+        if isinstance(sqlite_id_raw, (int, float)) and int(sqlite_id_raw) > 0:
+            sqlite_id = int(sqlite_id_raw)
+            new_content = rec.get("Nội dung", "")
+            new_status = rec.get("Trạng thái", "pending")
+            new_status = "pending" if new_status not in ("pending", "done") else new_status
+            remind_at_str = rec.get("Thời gian nhắc", "")
+            remind_at_dt = None
+            if remind_at_str:
+                try:
+                    naive = datetime.strptime(remind_at_str, "%Y-%m-%d %H:%M")
+                    remind_at_dt = naive.replace(tzinfo=settings_tz).astimezone(
+                        ZoneInfo("UTC")
+                    ).replace(tzinfo=None)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "[scheduler] bad time '%s' on lark reminder %s",
+                        remind_at_str, rec_id,
+                    )
+            await repo.update_remind_at_and_content(
+                sqlite_id, content=new_content, remind_at=remind_at_dt,
+                status=new_status,
+            )
+        else:
+            remind_at_str = rec.get("Thời gian nhắc", "")
+            try:
+                naive = datetime.strptime(remind_at_str, "%Y-%m-%d %H:%M")
+            except (ValueError, TypeError):
+                logger.warning(
+                    "[scheduler] cannot parse time on manual-add lark reminder %s: %r",
+                    rec_id, remind_at_str,
+                )
+                continue
+            remind_dt = naive.replace(tzinfo=settings_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+            new_id = await db.create_reminder(
+                boss_chat_id=boss_chat_id,
+                content=rec.get("Nội dung", ""),
+                remind_at=remind_dt,
+                target_chat_id=None,
+                target_name=rec.get("Người nhận", "") or "",
+            )
+            if rec_id:
+                await repo.set_lark_record_id(new_id, rec_id)
+            try:
+                await lark.with_retry(lambda: lark.sync_reminder_to_lark(
+                    base, tbl,
+                    {
+                        "content": rec.get("Nội dung", ""),
+                        "remind_at_local": remind_at_str,
+                        "target_name": rec.get("Người nhận", "") or "",
+                        "status": "pending",
+                    },
+                    new_id,
+                ))
+            except Exception:
+                logger.warning(
+                    "[scheduler] could not write SQLite ID back to lark %s", rec_id,
+                    exc_info=True,
+                )
+
+    # Tombstone vanished
+    for row in await repo.list_with_lark_id(boss_chat_id):
+        if row["lark_record_id"] not in seen_lark_ids and row["status"] == "pending":
+            await repo.tombstone(row["id"])
+
+    # Reconcile push for DB rows lacking lark_record_id
+    for row in await repo.list_unsynced_pending(boss_chat_id):
+        try:
+            remind_local = row["remind_at"]
+            try:
+                dt_utc = datetime.fromisoformat(remind_local.strip()).replace(tzinfo=ZoneInfo("UTC"))
+                remind_local_str = dt_utc.astimezone(settings_tz).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                remind_local_str = remind_local
+            rec_id = await lark.with_retry(lambda r=row, rl=remind_local_str: lark.sync_reminder_to_lark(
+                base, tbl,
+                {
+                    "content": r["content"],
+                    "remind_at_local": rl,
+                    "target_name": r.get("target_name") or "",
+                    "status": r["status"],
+                },
+                r["id"],
+            ))
+            if rec_id:
+                await repo.set_lark_record_id(row["id"], rec_id)
+        except Exception:
+            logger.warning(
+                "[scheduler] reconcile push failed for reminder %d", row["id"],
+                exc_info=True,
+            )
+
+
+async def _reverse_sync_notes_for_boss(boss: dict) -> None:
+    """Wired in Task 9. Stub keeps _sync_lark_to_sqlite resolvable."""
+    return
 
 
 async def _run_dynamic_reviews():
