@@ -142,7 +142,7 @@ If `LOCAL_IMAGE` path no longer exists (window rolled / file purged): replace wi
 | Failure mode | Behaviour |
 |---|---|
 | Image > 20MB | Skip upload, sentinel `[Tệp <name> — ảnh quá to (>20MB)]` |
-| PDF > 32MB or > 100 pages | Reject pre-upload, sentinel `[Tệp <name> — PDF quá lớn]` |
+| PDF > 32MB or > 20 pages | Pre-check via `pypdf.PdfReader(path).pages`. Reject pre-upload, sentinel `[Tệp <name> — PDF dài >20 trang, em chỉ đọc được file ngắn hơn; cắt giúp anh hoặc gửi DOCX]` |
 | DOCX > 5MB file or markdown output > 20KB | Convert + truncate at 20KB chars + suffix `\n…(file dài, em chỉ đọc ~10 trang đầu)` |
 | Encrypted PDF | `pypdf.PdfReader(path).is_encrypted` pre-check → sentinel `[Tệp <name> — file có password]` |
 | Encrypted DOCX | mammoth raises → catch → same sentinel |
@@ -170,6 +170,7 @@ If `LOCAL_IMAGE` path no longer exists (window rolled / file purged): replace wi
 - Filename `Báo cáo Q1/2026.docx` → sanitized `Báo cáo Q1_2026.docx`
 - Encrypted PDF → fail fast pre-upload
 - 33MB PDF → reject pre-upload
+- 25-page PDF → reject pre-upload (>20 page cap), sentinel mentions cap
 
 `tests/utils/test_sentinels.py`
 - `strip_sentinels`: removes whole-line sentinels, leaves inline-typed ones
