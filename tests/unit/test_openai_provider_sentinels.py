@@ -56,3 +56,13 @@ def test_non_string_content_passthrough():
     msg2 = {"role": "user", "content": [{"type": "text", "text": "already parts"}]}
     assert _inject_file_parts(msg) == msg
     assert _inject_file_parts(msg2) == msg2
+
+
+def test_non_dict_message_passthrough():
+    # OpenAI returns ChatCompletionMessage Pydantic instances after a tool
+    # round; secretary_agent appends them to the messages list as-is.
+    class FakePydanticMsg:
+        role = "assistant"
+        content = "OK đã ghi"
+    obj = FakePydanticMsg()
+    assert _inject_file_parts(obj) is obj

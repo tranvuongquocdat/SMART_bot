@@ -78,8 +78,15 @@ class OpenAILLMClient(LLMClient):
         return response.data[0].embedding, self._embedding_dim
 
 
-def _inject_file_parts(msg: dict) -> dict:
-    """Replace string content with content-parts list when sentinels present."""
+def _inject_file_parts(msg):
+    """Replace string content with content-parts list when sentinels present.
+
+    Messages can be either dicts (system/user/tool) OR Pydantic
+    ChatCompletionMessage instances (assistant replies appended after a
+    tool round). The latter never carry sentinels — pass through.
+    """
+    if not isinstance(msg, dict):
+        return msg
     content = msg.get("content")
     if not isinstance(content, str):
         return msg
