@@ -8,6 +8,7 @@
     "start": "node bridge.js"
   },
   "dependencies": {
+    "node-fetch": "^3.3.2",
     "zca-js": "^2.0.0-beta.27"
   }
 }

@@ -138,10 +138,21 @@ class ZaloMessenger(BaseMessenger):
 
         attachments: list[Attachment] = []
         for a in (ev.get("attachments") or []):
-            attachments.append(Attachment(
-                kind=a.get("kind", "file"),
-                url=a.get("href", "") or "",
-            ))
+            if a.get("error"):
+                attachments.append(Attachment(
+                    kind=a.get("kind", "file"),
+                    url="",
+                    mime_type=a.get("mime", ""),
+                    filename=a.get("filename", ""),
+                ))
+            else:
+                attachments.append(Attachment(
+                    kind=a.get("kind", "file"),
+                    url=a.get("local_path", "") or "",
+                    mime_type=a.get("mime", ""),
+                    filename=a.get("filename", ""),
+                    size_bytes=int(a.get("size_bytes", 0) or 0),
+                ))
 
         mentions: list[dict] = []
         for m in (ev.get("mentions") or []):
