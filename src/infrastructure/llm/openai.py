@@ -1,16 +1,23 @@
 """OpenAI implementation of LLMClient.
 
-Each instance owns its own AsyncOpenAI client + model choices, so per-boss
-credentials work without touching globals. Phase 4b services construct one
-of these per request via `factory.get_llm_client(boss, settings)`.
+Each instance owns its own AsyncOpenAI client + model choices. At call
+time, sentinels in message content (`[OPENAI_FILE: ...]` /
+`[LOCAL_IMAGE: ...]`) are expanded into chat.completions content parts.
+Messages without sentinels pass through unchanged.
 """
 from __future__ import annotations
 
+import base64
+import logging
+from pathlib import Path
 from typing import Any
 
 from openai import AsyncOpenAI
 
 from src.infrastructure.llm.base import LLMClient
+from src.utils.sentinels import SentinelRef, parse_sentinels
+
+logger = logging.getLogger("llm.openai")
 
 
 class OpenAILLMClient(LLMClient):
@@ -47,10 +54,10 @@ class OpenAILLMClient(LLMClient):
         model: str | None = None,
         **kwargs: Any,
     ) -> tuple[Any, dict]:
-        """Returns (message, usage_dict). Same shape as legacy openai_client."""
+        processed = [_inject_file_parts(m) for m in messages]
         call_kwargs: dict[str, Any] = {
             "model": model or self._chat_model,
-            "messages": messages,
+            "messages": processed,
             **kwargs,
         }
         if tools:
@@ -69,3 +76,42 @@ class OpenAILLMClient(LLMClient):
             input=text, model=self._embedding_model,
         )
         return response.data[0].embedding, self._embedding_dim
+
+
+def _inject_file_parts(msg: dict) -> dict:
+    """Replace string content with content-parts list when sentinels present."""
+    content = msg.get("content")
+    if not isinstance(content, str):
+        return msg
+    cleaned, refs = parse_sentinels(content)
+    if not refs:
+        return msg
+    parts: list[dict] = []
+    if cleaned:
+        parts.append({"type": "text", "text": cleaned})
+    for ref in refs:
+        part = _ref_to_part(ref)
+        if part:
+            parts.append(part)
+    return {**msg, "content": parts}
+
+
+def _ref_to_part(ref: SentinelRef) -> dict | None:
+    if ref.kind == "OPENAI_FILE":
+        fid = ref.fields.get("file_id")
+        if not fid:
+            return None
+        return {"type": "file", "file": {"file_id": fid}}
+    if ref.kind == "LOCAL_IMAGE":
+        path = ref.fields.get("path")
+        mime = ref.fields.get("mime", "image/jpeg")
+        if not path or not Path(path).exists():
+            return {"type": "text", "text": "[Ảnh đã hết hạn]"}
+        try:
+            data = Path(path).read_bytes()
+        except OSError as e:
+            logger.warning("read local image %s failed: %s", path, e)
+            return {"type": "text", "text": "[Ảnh đã hết hạn]"}
+        b64 = base64.b64encode(data).decode("ascii")
+        return {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{b64}"}}
+    return None
