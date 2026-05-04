@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # Phrase a sếp says (DM only) to introduce themselves to the bot before
     # they're a registered boss. Other DMs from non-bosses are dropped to
     # keep the personal-account use case manageable.
-    zalo_onboard_phrase: str = "khởi tạo trợ lý"
+    zalo_onboard_phrase: str = "trợ lý vào việc"
 
     # Debug endpoint — when true, /debug/test_message becomes available so we
     # can drive the agent end-to-end without going through Zalo/Telegram.
