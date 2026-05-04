@@ -1,5 +1,7 @@
+import asyncio
 import logging
 import time
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -218,6 +220,40 @@ async def provision_workspace(company_name: str) -> dict:
         "table_reminders":  reminders_tbl,
         "table_notes":      notes_tbl,
     }
+
+
+# ---------------------------------------------------------------------------
+# Retry wrapper — recoverable failures only
+# ---------------------------------------------------------------------------
+
+
+def _is_transient(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return False
+
+
+async def with_retry(
+    fn: Callable[[], Awaitable[Any]],
+    attempts: int = 2,
+    backoff: float = 0.5,
+) -> Any:
+    """Retry httpx network errors and HTTP 5xx. attempts=2 means initial call + up to 2 retries.
+    Lark business errors (raised as plain Exception with 'Lark error: code') are NOT retried."""
+    last_exc: BaseException | None = None
+    for tryno in range(attempts + 1):
+        try:
+            return await fn()
+        except BaseException as exc:
+            if not _is_transient(exc):
+                raise
+            last_exc = exc
+            if tryno < attempts:
+                await asyncio.sleep(backoff * (2 ** tryno))
+    assert last_exc is not None
+    raise last_exc
 
 
 # ---------------------------------------------------------------------------
