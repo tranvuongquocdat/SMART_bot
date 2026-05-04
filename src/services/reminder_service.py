@@ -80,7 +80,6 @@ async def create_reminder(
         if not target_name:
             target_name = target
 
-    # Encode task_keyword and project as structured prefix in content
     stored_content = content
     if project:
         stored_content = f"[project:{project}] {stored_content}"
@@ -95,25 +94,39 @@ async def create_reminder(
         target_name=target_name,
     )
 
-    # Sync to Lark async (non-blocking)
-    if ctx.lark_table_reminders:
-        boss = await db.get_boss(str(ctx.boss_chat_id))
-        if boss:
-            asyncio.create_task(lark.sync_reminder_to_lark(
-                ctx.lark_base_token,
-                ctx.lark_table_reminders,
-                {
-                    "content": stored_content,
-                    "remind_at_local": remind_at,
-                    "target_name": target_name,
-                    "status": "pending",
-                },
-                reminder_id,
-            ))
+    base = (
+        f"Da tao nhac nho #{reminder_id}: '{content}' cho {target_name} luc {remind_at}."
+        if target_name and target_chat_id
+        else f"Da tao nhac nho #{reminder_id}: '{content}' luc {remind_at}."
+    )
 
-    if target_name and target_chat_id:
-        return f"Da tao nhac nho #{reminder_id}: '{content}' cho {target_name} luc {remind_at}."
-    return f"Da tao nhac nho #{reminder_id}: '{content}' luc {remind_at}."
+    if not ctx.lark_table_reminders:
+        return base
+
+    try:
+        record_id = await lark.with_retry(lambda: lark.sync_reminder_to_lark(
+            ctx.lark_base_token,
+            ctx.lark_table_reminders,
+            {
+                "content": stored_content,
+                "remind_at_local": remind_at,
+                "target_name": target_name,
+                "status": "pending",
+            },
+            reminder_id,
+        ))
+        if record_id:
+            from src.repositories.reminder_repo import ReminderRepo
+            repo = ReminderRepo(await db.get_db())
+            await repo.set_lark_record_id(reminder_id, record_id)
+        return base
+    except Exception:
+        import logging as _logging
+        _logging.getLogger("services.reminder").warning(
+            "Lark sync failed for reminder %d; reconciler will retry", reminder_id,
+            exc_info=True,
+        )
+        return base + " (đang chờ đồng bộ Lark)"
 
 
 async def list_reminders(
