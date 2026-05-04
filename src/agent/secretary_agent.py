@@ -365,15 +365,19 @@ async def handle_message(
     _sweep_expired_pending()
     attachments = attachments or []
     if attachments and _looks_like_filename(text, attachments):
-        # Bare file message — defer until the next text prompt.
-        if not await db.has_onboarding_state(chat_id):
-            _pending_attachments[chat_id] = (
-                time.monotonic() + _PENDING_TTL_SEC, list(attachments),
-            )
-            logger.info(
-                "%s file-only message stashed (%d files, TTL %ds)",
-                log_prefix, len(attachments), _PENDING_TTL_SEC,
-            )
+        # Bare file message — defer until the next text prompt. Multiple
+        # files in quick succession are accumulated; each new bare-file
+        # message extends the deadline.
+        existing = _pending_attachments.get(chat_id)
+        prior = list(existing[1]) if existing else []
+        combined = prior + list(attachments)
+        _pending_attachments[chat_id] = (
+            time.monotonic() + _PENDING_TTL_SEC, combined,
+        )
+        logger.info(
+            "%s file-only message stashed (+%d files, total %d in stash)",
+            log_prefix, len(attachments), len(combined),
+        )
         return  # silent — no reply
     if not attachments and chat_id in _pending_attachments:
         deadline, pending = _pending_attachments.pop(chat_id)

@@ -112,6 +112,12 @@ def _ref_to_part(ref: SentinelRef) -> dict | None:
     if ref.kind == "LOCAL_IMAGE":
         path = ref.fields.get("path")
         mime = ref.fields.get("mime", "image/jpeg")
+        # OpenAI Vision only accepts these image types — old conversation
+        # history may still contain sentinels with stale/wrong mime
+        # (octet-stream, heic before conversion was added). Drop those
+        # gracefully instead of letting the API call 400.
+        if mime not in {"image/jpeg", "image/png", "image/gif", "image/webp"}:
+            return {"type": "text", "text": "[Ảnh không đọc được]"}
         if not path or not Path(path).exists():
             return {"type": "text", "text": "[Ảnh đã hết hạn]"}
         try:

@@ -16,6 +16,8 @@ dependencies = [
     "ddgs>=9.14.1",
     "mammoth>=1.6",
     "pypdf>=4.0",
+    "pillow>=10.0",
+    "pillow-heif>=0.18",
 ]
 
 [dependency-groups]
