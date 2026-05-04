@@ -408,8 +408,79 @@ async def _reverse_sync_reminders_for_boss(boss: dict, settings_tz: ZoneInfo) ->
 
 
 async def _reverse_sync_notes_for_boss(boss: dict) -> None:
-    """Wired in Task 9. Stub keeps _sync_lark_to_sqlite resolvable."""
-    return
+    from src.repositories.note_repo import NoteRepo
+
+    tbl = boss.get("lark_table_notes", "")
+    if not tbl:
+        return
+
+    repo = NoteRepo(db._db)
+    boss_chat_id = str(boss["chat_id"])
+    base = boss["lark_base_token"]
+    records = await lark.search_records(base, tbl)
+
+    seen_lark_ids: set[str] = set()
+    for rec in records:
+        rec_id = rec.get("record_id", "")
+        if rec_id:
+            seen_lark_ids.add(rec_id)
+        note_type = rec.get("Loại", "")
+        ref_id = str(rec.get("Ref ID", "") or "")
+        content = rec.get("Nội dung", "")
+        if not note_type or not ref_id:
+            continue
+        sqlite_id_raw = rec.get("SQLite ID")
+
+        if isinstance(sqlite_id_raw, (int, float)) and int(sqlite_id_raw) > 0:
+            sqlite_id = int(sqlite_id_raw)
+            existing = await repo.get_by_id(sqlite_id)
+            if existing and existing.get("content") != content:
+                await repo.update_content_by_id(sqlite_id, content)
+        else:
+            new_id = await repo.upsert(boss_chat_id, note_type, ref_id, content)
+            if rec_id:
+                await repo.set_lark_record_id(new_id, rec_id)
+            try:
+                await lark.with_retry(lambda nid=new_id, c=content, nt=note_type, r=ref_id:
+                    lark.sync_note_to_lark(
+                        base, tbl,
+                        {
+                            "type": nt, "ref_id": r,
+                            "content": c,
+                            "updated_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+                        },
+                        nid,
+                    ))
+            except Exception:
+                logger.warning(
+                    "[scheduler] could not write SQLite ID back for note %s", rec_id,
+                    exc_info=True,
+                )
+
+    # Delete vanished
+    for row in await repo.list_with_lark_id(boss_chat_id):
+        if row["lark_record_id"] not in seen_lark_ids:
+            await repo.delete_by_id(row["id"])
+
+    # Reconcile push
+    for row in await repo.list_unsynced(boss_chat_id):
+        try:
+            rec_id = await lark.with_retry(lambda r=row: lark.sync_note_to_lark(
+                base, tbl,
+                {
+                    "type": r["type"], "ref_id": r["ref_id"],
+                    "content": r["content"],
+                    "updated_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+                },
+                r["id"],
+            ))
+            if rec_id:
+                await repo.set_lark_record_id(row["id"], rec_id)
+        except Exception:
+            logger.warning(
+                "[scheduler] reconcile push failed for note %d", row["id"],
+                exc_info=True,
+            )
 
 
 async def _run_dynamic_reviews():
