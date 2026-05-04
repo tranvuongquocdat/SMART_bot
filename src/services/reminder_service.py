@@ -194,7 +194,40 @@ async def update_reminder(
     )
     if not ok:
         return f"Khong tim thay nhac nho #{reminder_id} hoac khong co truong nao de cap nhat."
-    return f"Da cap nhat nhac nho #{reminder_id}."
+
+    base = f"Da cap nhat nhac nho #{reminder_id}."
+
+    if not ctx.lark_table_reminders:
+        return base
+
+    from src.repositories.reminder_repo import ReminderRepo
+    repo = ReminderRepo(await db.get_db())
+    row = await repo.get_by_id(reminder_id)
+    if not row:
+        return base
+
+    remind_at_local = remind_at or _utc_naive_stored_to_local_display(row["remind_at"])
+    try:
+        rec_id = await lark.with_retry(lambda: lark.sync_reminder_to_lark(
+            ctx.lark_base_token,
+            ctx.lark_table_reminders,
+            {
+                "content": row["content"],
+                "remind_at_local": remind_at_local,
+                "target_name": row.get("target_name") or "",
+                "status": row["status"],
+            },
+            reminder_id,
+        ))
+        if rec_id and not row.get("lark_record_id"):
+            await repo.set_lark_record_id(reminder_id, rec_id)
+        return base
+    except Exception:
+        import logging as _logging
+        _logging.getLogger("services.reminder").warning(
+            "Lark update sync failed for reminder %d", reminder_id, exc_info=True,
+        )
+        return base + " (đang chờ đồng bộ Lark)"
 
 
 async def delete_reminder(ctx: ChatContext, reminder_id: int) -> str:

@@ -93,3 +93,44 @@ async def test_create_reminder_lark_failure_keeps_db_row(in_memory_db, monkeypat
         row = await cur.fetchone()
     assert row is not None  # DB row kept
     assert row["lark_record_id"] is None  # not synced
+
+
+async def test_update_reminder_syncs_lark(in_memory_db, monkeypatch):
+    rid = await db.create_reminder(
+        boss_chat_id="b1", content="old",
+        remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
+    )
+    from src.repositories.reminder_repo import ReminderRepo
+    await ReminderRepo(in_memory_db).set_lark_record_id(rid, "rec-1")
+
+    sync_mock = AsyncMock(return_value="rec-1")
+    monkeypatch.setattr(
+        "src.services.reminder_service.lark.sync_reminder_to_lark", sync_mock
+    )
+    async def _passthrough(fn, **kw):
+        return await fn()
+    monkeypatch.setattr("src.services.reminder_service.lark.with_retry", _passthrough)
+
+    await reminder_service.update_reminder(
+        _ctx(), reminder_id=rid, content="new content",
+    )
+
+    sync_mock.assert_awaited_once()
+    fields = sync_mock.await_args.args[2]
+    assert fields["content"] == "new content"
+
+
+async def test_update_reminder_lark_fail_returns_graceful_message(in_memory_db, monkeypatch):
+    rid = await db.create_reminder(
+        boss_chat_id="b1", content="old",
+        remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
+    )
+    monkeypatch.setattr(
+        "src.services.reminder_service.lark.with_retry",
+        AsyncMock(side_effect=Exception("Lark down")),
+    )
+
+    msg = await reminder_service.update_reminder(
+        _ctx(), reminder_id=rid, content="new content",
+    )
+    assert "đang chờ đồng bộ" in msg.lower() or "dang cho dong bo" in msg.lower()
