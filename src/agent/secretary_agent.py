@@ -30,6 +30,32 @@ _settings: Settings | None = None
 
 MAX_TOOL_ROUNDS = 10
 
+# --- Pending-attachment buffer ---------------------------------------------
+# When a boss sends a file/image with no user caption (just the file), the
+# bot stays silent and stashes the attachments for a short window. The next
+# text message in the same chat picks them up and processes file + prompt
+# together — same UX as ChatGPT file uploads.
+
+_PENDING_TTL_SEC = 300  # 5 minutes
+_pending_attachments: dict[str, tuple[float, list]] = {}
+
+
+def _looks_like_filename(text: str, atts: list) -> bool:
+    """True when `text` is auto-generated from the attachment (e.g. Zalo
+    sets text=content.title which is the filename) — i.e. not a real
+    user-typed caption."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    filenames = {a.filename for a in atts if getattr(a, "filename", "")}
+    return t in filenames
+
+
+def _sweep_expired_pending() -> None:
+    now = time.monotonic()
+    for k in [k for k, (deadline, _) in _pending_attachments.items() if deadline < now]:
+        _pending_attachments.pop(k, None)
+
 
 def init(settings: Settings) -> None:
     """Wire the live Settings instance. Called from main.py lifespan via
@@ -334,6 +360,29 @@ async def handle_message(
     new_members = new_members or []
 
     logger.info("%s >>> INPUT: %s", log_prefix, text[:200])
+
+    # ---- Pending-attachment buffer (ChatGPT-style file-then-prompt) ----
+    _sweep_expired_pending()
+    attachments = attachments or []
+    if attachments and _looks_like_filename(text, attachments):
+        # Bare file message — defer until the next text prompt.
+        if not await db.has_onboarding_state(chat_id):
+            _pending_attachments[chat_id] = (
+                time.monotonic() + _PENDING_TTL_SEC, list(attachments),
+            )
+            logger.info(
+                "%s file-only message stashed (%d files, TTL %ds)",
+                log_prefix, len(attachments), _PENDING_TTL_SEC,
+            )
+        return  # silent — no reply
+    if not attachments and chat_id in _pending_attachments:
+        deadline, pending = _pending_attachments.pop(chat_id)
+        if time.monotonic() < deadline:
+            attachments = list(pending)
+            logger.info(
+                "%s merged %d pending attachments with new prompt",
+                log_prefix, len(pending),
+            )
 
     # ---- Step 0: Ingest file attachments → sentinels appended to text ----
     if attachments:

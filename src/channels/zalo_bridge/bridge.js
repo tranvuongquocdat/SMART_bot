@@ -62,10 +62,20 @@ async function downloadAttachment(href, threadId, msgId, filename) {
   const local = path.join(dir, `${msgId}_${safeName(filename)}`);
   const headers = { 'User-Agent': 'Mozilla/5.0' };
   if (cookieHeader) headers['Cookie'] = cookieHeader;
-  const resp = await fetch(href, { headers });
+  // Hard 15s timeout — Zalo CDN occasionally hangs; without this the
+  // listener handler stalls forever and new messages stop processing.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  let resp;
+  try {
+    resp = await fetch(href, { headers, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const buf = Buffer.from(await resp.arrayBuffer());
   fs.writeFileSync(local, buf);
+  console.error(`[bridge] downloaded ${filename} -> ${local} (${buf.length}B)`);
   return { local_path: local, size_bytes: buf.length };
 }
 
@@ -185,10 +195,31 @@ async function init() {
   console.error(`[bridge] logged in as uid=${ownId}`);
 
   api.listener.on('message', async (msg) => {
+    // Diagnostic: surface every incoming event so we can tell if zca-js
+    // is even firing for the message in question (especially file/photo).
+    try {
+      const summary = {
+        type: msg && msg.type,
+        msgType: msg && msg.msgType,
+        threadId: msg && (msg.threadId || (msg.data && msg.data.threadId)),
+        contentKind: typeof (msg && msg.data && msg.data.content),
+        hasHref: !!(msg && msg.data && msg.data.content && msg.data.content.href),
+      };
+      console.error('[bridge] msg event:', JSON.stringify(summary));
+    } catch (_) {}
     try {
       const norm = await normalize(msg, ownId);
+      console.error('[bridge] post-normalize:', JSON.stringify({
+        sender_uid: norm.sender_uid,
+        ownId: ownId,
+        is_self: norm.sender_uid === ownId,
+        text_len: (norm.text || '').length,
+        n_attachments: (norm.attachments || []).length,
+        first_att: (norm.attachments || [])[0] || null,
+      }));
       if (norm.sender_uid === ownId) return;
       emit({ event: 'message', data: norm });
+      console.error('[bridge] emitted message');
     } catch (err) {
       logErr('normalize', err);
     }

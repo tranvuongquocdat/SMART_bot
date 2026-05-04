@@ -65,10 +65,17 @@ class ZaloInboundFilter:
         if not zalo_uid:
             return False
         from src import db
+        # Two boss-row keying conventions exist in this codebase:
+        #   • Telegram path: boss.chat_id == person.internal_id
+        #   • Zalo onboarding: boss.chat_id == DM conversation.internal_id
+        # Check both before declaring "not a boss".
         person_id = await db.lookup_person_by_external("zalo", zalo_uid)
-        if not person_id:
-            return False
-        return (await db.get_boss(person_id)) is not None
+        if person_id and (await db.get_boss(person_id)) is not None:
+            return True
+        conv_id = await db.lookup_conversation_by_external("zalo", zalo_uid)
+        if conv_id and (await db.get_boss(conv_id)) is not None:
+            return True
+        return False
 
     @staticmethod
     async def _is_registered_group(zalo_thread_id: str) -> bool:

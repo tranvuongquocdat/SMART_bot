@@ -71,7 +71,7 @@ async def _find_assignee_chat_id(ctx: ChatContext, assignee_name: str) -> tuple[
     records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_people)
     name_lower = assignee_name.lower()
     for r in records:
-        full = (r.get("Tên", "") + " " + r.get("Tên gọi", "")).lower()
+        full = ((r.get("Tên") or "") + " " + (r.get("Tên gọi") or "")).lower()
         if name_lower in full:
             raw = r.get("Chat ID")
             if not raw:
