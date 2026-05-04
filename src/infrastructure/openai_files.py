@@ -35,12 +35,17 @@ async def upload(
             await asyncio.sleep(backoff)
         try:
             with path.open("rb") as fh:
+                # `expires_after` goes via extra_body — older openai SDKs (<1.x?)
+                # don't expose it as a typed kwarg; sending through extra_body
+                # works across versions because the server accepts it directly.
                 resp = await client.files.create(
                     file=(filename, fh, mime),
                     purpose="user_data",
-                    expires_after={
-                        "anchor": "created_at",
-                        "seconds": _EXPIRES_SECONDS,
+                    extra_body={
+                        "expires_after": {
+                            "anchor": "created_at",
+                            "seconds": _EXPIRES_SECONDS,
+                        },
                     },
                 )
             return resp.id

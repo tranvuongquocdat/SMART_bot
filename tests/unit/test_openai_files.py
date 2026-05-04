@@ -25,7 +25,9 @@ async def test_upload_returns_file_id(tmp_path):
     client.files.create.assert_awaited_once()
     kwargs = client.files.create.await_args.kwargs
     assert kwargs["purpose"] == "user_data"
-    assert kwargs["expires_after"] == {"anchor": "created_at", "seconds": 30 * 24 * 3600}
+    assert kwargs["extra_body"] == {
+        "expires_after": {"anchor": "created_at", "seconds": 30 * 24 * 3600},
+    }
 
 
 async def test_upload_retries_on_5xx(tmp_path):
