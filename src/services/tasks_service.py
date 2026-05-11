@@ -215,16 +215,12 @@ async def create_task(
                 "group announce failed for task %s", record_id, exc_info=True,
             )
 
-    # Notify each assignee
+    # Notify each assignee. Silent skip when no chat_id — group post (above) is the surface.
     notification_statuses = []
     first_assignee_chat_id = None
     for aname in assignee_list:
-        achat_id, found = await _find_assignee_chat_id(ctx, aname)
-        if not found:
-            notification_statuses.append(f"⚠️ '{aname}' không có trong danh sách nhân sự")
-        elif not achat_id:
-            notification_statuses.append(f"⚠️ '{aname}' chưa có tài khoản liên kết")
-        else:
+        achat_id, _found = await _find_assignee_chat_id(ctx, aname)
+        if achat_id:
             if first_assignee_chat_id is None:
                 first_assignee_chat_id = achat_id
             asyncio.create_task(_notify_assignee_task(
