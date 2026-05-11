@@ -26,21 +26,17 @@ Quality bar: **net `git diff --stat` must show deletions ≥ insertions** outsid
 
 ### 1.1 Drop the admin gate
 
-Currently several group flows refuse to proceed when the bot is not a chat admin (e.g. `group_onboarding`, pin/unpin paths). Replace each hard refusal with `try / except UnsupportedOperation`. The bot continues; admin-only side effects are skipped with a one-line log.
+Principle: any admin-only side effect (pin, kick, set title, etc.) raises `UnsupportedOperation` at the channel layer and is swallowed there with a one-line warning log. Callers stop checking `is_admin`. The bot continues serving every other flow.
 
-| File | Change |
-|---|---|
-| `src/group_onboarding.py` | Remove `bot_must_be_admin` precondition. Continue onboarding regardless. |
-| `src/channels/telegram_singleton.py` (`pin_chat_message`, `set_chat_title`, `set_chat_description`, `ban_chat_member`) | Wrap each call in try / except, swallow `UnsupportedOperation`, log warning. |
-| `src/services/group_service.py` | Drop any caller-side admin checks; rely on the channel layer. |
+Concretely: `group_onboarding` removes the `bot_must_be_admin` precondition; admin-only messenger methods get a uniform try/except wrapper. Implementation details are left to the plan.
 
 ### 1.2 Drop the onboard gate for assignment
 
 Today `create_task` and `create_reminder` either drop the assignee or warn `"không có trong danh sách nhân sự"` when the tagged person is not in the Lark People table. The new behavior:
 
 - Accept the assignee as a plain string. Always create the Lark row.
-- If the assignee has an `internal_id` (resolved from a mention or known person), DM them and also post a summary into the source group.
-- If the assignee has no `internal_id`, only post in the source group. The bot does not attempt to DM.
+- The bot still tries to resolve the assignee to an `internal_id` via the Lark People lookup. If found → DM the person AND post a summary into the source group.
+- If lookup misses (assignee not onboarded yet) → only post in the source group. The bot does not attempt to DM.
 
 `_find_assignee_chat_id` (the Lark People lookup) stays — it covers the case where the boss types `"giao Anh A task X"` without an `@` mention. Behavior change: when the lookup misses, return `(None, False)` silently instead of producing a warning string for the caller. The caller decides: with `internal_id` → DM + group post, without → group post only.
 
@@ -75,18 +71,6 @@ ALTER TABLE reminders ADD COLUMN source_chat_id TEXT DEFAULT NULL;
 1. `target_chat_id` set → DM that person.
 2. Else `source_chat_id` set → post into the source group.
 3. Else → DM boss (current behavior).
-
-### 1.5 Surface mentions to the LLM
-
-Mentions are already resolved to `internal_id` in `IncomingMessage.mentions` but never reach the prompt. Prepend a structured context block to the user turn whenever mentions are present:
-
-```
-[Mentioned in this message]
-- @Lan → person_id=abc-123 (known)
-- @Tân → person_id=null (not in system)
-```
-
-Add an optional `assignee_id` parameter to `create_task` and `create_reminder` in `src/agent/tool_definitions.py` (alongside the existing `assignee` name string). The LLM passes the resolved id when available; the name string remains the fallback. The Lark display name is still derived from the mention text or the LLM's parse. When `assignee_id` is set, services use it directly and skip `_find_assignee_chat_id` for that turn.
 
 ---
 
@@ -135,7 +119,7 @@ The four approval tools (`approve_join`, `reject_join`, `approve_task_change`, `
 
 **No regex parser.** Real boss replies are too varied — `"duyệt đi"`, `"ok approve"`, `"yes em ok rồi"`, replying to the notification with `"ừ"` — patterns cannot cover them and bot looks dumb when they miss. Interpretation always goes through the LLM with conversational context.
 
-Remove the existing `onboarding.handle_boss_join_decision` regex parser. Delete the file path entirely.
+Remove the existing `onboarding.handle_boss_join_decision` function and any code that calls it.
 
 Keep `approve_join`, `reject_join`, `approve_task_change`, `reject_task_change` as **tools the LLM can call**, but harden them:
 
@@ -202,9 +186,8 @@ Unit tests in `tests/unit/`. Existing patterns: in-memory aiosqlite via `_init_s
 | `test_approve_task_change_guard_refuses_when_no_pending` | Same guard pattern for tasks |
 | `test_approve_join_writes_via_activate_only` | Successful approval call routes through `membership_service.activate(source="approval")` |
 | `test_llm_always_called_with_history` | Any LLM call path includes ≥ N recent messages in the prompt (no system-prompt-only invocations allowed) |
-| `test_handle_boss_join_decision_removed` | Regex parser is deleted; the import target no longer exists |
+| `test_handle_boss_join_decision_removed` | `onboarding.handle_boss_join_decision` no longer exists (importing it raises `AttributeError`) |
 | `test_link_contact_rejects_when_pending_elsewhere` | Pending membership in workspace X → `link_contact_to_person` from workspace Y returns CONFLICT |
-| `test_mentions_in_prompt` | Mentions present → user turn contains `[Mentioned in this message]` block with resolved ids |
 
 ## Out-of-scope, captured as follow-up
 
