@@ -19,6 +19,20 @@ from src.agent.llm_for_ctx import get_llm_for_ctx
 logger = logging.getLogger("agent.reminder")
 
 
+def _destination_for(row: dict) -> tuple[str, bool]:
+    """Pick the dispatch chat for a reminder row.
+
+    Returns (chat_id, cc_boss_separately).
+    Priority: target_chat_id → source_chat_id → boss_chat_id.
+    Boss is cc'd only when the reminder went to a specific target person.
+    """
+    if row.get("target_chat_id"):
+        return row["target_chat_id"], True
+    if row.get("source_chat_id"):
+        return row["source_chat_id"], False
+    return row["boss_chat_id"], False
+
+
 REMINDER_PROMPT = """Bạn là thư ký AI của {boss_name}{company_info}.
 Language: {language}. Respond entirely in that language. Thân thiện, ngắn gọn.
 
@@ -132,8 +146,9 @@ async def send_reminder(reminder: dict, settings: Settings) -> None:
         else:
             reply = f"Nhắc nhở: {content}"
 
-    if target_id:
-        await telegram.send(target_id, reply)
+    dest_chat_id, cc_boss = _destination_for(reminder)
+    await telegram.send(dest_chat_id, reply)
+    if dest_chat_id == target_id:
         await db.log_outbound_dm(
             boss_chat_id=boss_chat_id,
             to_chat_id=target_id,
@@ -141,7 +156,6 @@ async def send_reminder(reminder: dict, settings: Settings) -> None:
             content=reply,
             trigger_type="reminder",
         )
-        # Báo sếp biết đã nhắc (raw, không cần LLM cho dòng này).
+    if cc_boss:
+        # Raw confirmation back to boss; not via LLM.
         await telegram.send(boss_chat_id, f"✓ Đã nhắc {target_name or 'người nhận'}: {content}")
-    else:
-        await telegram.send(boss_chat_id, reply)
