@@ -202,6 +202,19 @@ async def create_task(
 
     asyncio.create_task(_embed_and_upsert(ctx, record_id, fields))
 
+    # Announce in source group when this came from a group context.
+    if ctx.is_group:
+        deadline_disp = deadline or "không có deadline"
+        assignee_disp = assignee_display or "chưa giao"
+        summary = f"Task: {name} → {assignee_disp} | deadline {deadline_disp}"
+        try:
+            await telegram.send(str(ctx.chat_id), summary, save_history=False)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger("services.tasks").warning(
+                "group announce failed for task %s", record_id, exc_info=True,
+            )
+
     # Notify each assignee
     notification_statuses = []
     first_assignee_chat_id = None

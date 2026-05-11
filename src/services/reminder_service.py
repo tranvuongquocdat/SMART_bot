@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import asyncio
 
 from src import db
+from src.channels import telegram_singleton as telegram
 from src.config import Settings
 from src.context import ChatContext
 from src.infrastructure import lark_client as lark
@@ -101,6 +102,17 @@ async def create_reminder(
         if target_name and target_chat_id
         else f"Da tao nhac nho #{reminder_id}: '{content}' luc {remind_at}."
     )
+
+    if ctx.is_group:
+        target_disp = target_name or "sếp"
+        summary = f"Reminder: {content} for {target_disp} at {remind_at}"
+        try:
+            await telegram.send(str(ctx.chat_id), summary, save_history=False)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger("services.reminder").warning(
+                "group announce failed for reminder %d", reminder_id, exc_info=True,
+            )
 
     if not ctx.lark_table_reminders:
         return base
