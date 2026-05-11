@@ -8,6 +8,7 @@ from src import db
 from src.context import ChatContext
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
+from src.services import membership_service
 
 logger = logging.getLogger("tools.communication")
 
@@ -419,18 +420,36 @@ async def link_contact_to_person(
     # to internal_id before writing to memberships (whose PK is internal).
     name = target_record.get("Tên", "")
     person_type = target_record.get("Type", "member")
-    try:
-        internal_person_id = await db.resolve_or_create_person(
-            "telegram", str(chat_id), name, "",
+    internal_person_id = await db.resolve_or_create_person(
+        "telegram", str(chat_id), name, "",
+    )
+
+    # Conflict check: pending membership in a DIFFERENT workspace must be approved
+    # via the proper flow, not silently activated here.
+    _db = await db.get_db()
+    async with _db.execute(
+        "SELECT boss_chat_id FROM memberships "
+        "WHERE chat_id = ? AND status = 'pending' AND boss_chat_id != ?",
+        (internal_person_id, str(ctx.boss_chat_id)),
+    ) as cur:
+        pending_elsewhere = await cur.fetchone()
+    if pending_elsewhere:
+        return (
+            f"[CONFLICT] Contact has a pending join request in workspace "
+            f"{pending_elsewhere[0]}. Use the approval flow there instead."
         )
-        await db.add_person(
+
+    try:
+        await membership_service.activate(
             chat_id=internal_person_id,
-            boss_chat_id=ctx.boss_chat_id,
+            boss_chat_id=str(ctx.boss_chat_id),
             person_type=person_type,
             name=name,
+            source="link_contact",
+            lark_record_id=lark_record_id,
         )
     except Exception:
-        logger.warning("link_contact_to_person: add_person failed (non-fatal)", exc_info=True)
+        logger.warning("link_contact_to_person: activate failed", exc_info=True)
 
     return f"Đã gắn chat_id={chat_id} vào Lark record '{lark_record_id}' ({name})."
 

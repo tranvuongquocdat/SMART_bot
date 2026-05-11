@@ -516,8 +516,15 @@ async def add_person(
     chat_id: str, boss_chat_id: str, person_type: str, name: str = "",
     db_path: str = "data/history.db",
 ) -> None:
-    repo: MembershipRepo = await _repo("membership", MembershipRepo)
-    await repo.upsert(chat_id, boss_chat_id, person_type, name, status="active")
+    """Legacy facade. New code must call `services.membership_service.activate()` directly."""
+    from src.services import membership_service
+    await membership_service.activate(
+        chat_id=str(chat_id),
+        boss_chat_id=str(boss_chat_id),
+        person_type=person_type,
+        name=name or "",
+        source="boss_add",
+    )
 
 
 async def delete_person(chat_id: str, db_path: str = "data/history.db") -> None:
