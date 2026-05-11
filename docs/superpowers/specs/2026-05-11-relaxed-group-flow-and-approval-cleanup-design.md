@@ -42,6 +42,8 @@ Today `create_task` and `create_reminder` either drop the assignee or warn `"kh�
 - If the assignee has an `internal_id` (resolved from a mention or known person), DM them and also post a summary into the source group.
 - If the assignee has no `internal_id`, only post in the source group. The bot does not attempt to DM.
 
+`_find_assignee_chat_id` (the Lark People lookup) stays — it covers the case where the boss types `"giao Anh A task X"` without an `@` mention. Behavior change: when the lookup misses, return `(None, False)` silently instead of producing a warning string for the caller. The caller decides: with `internal_id` → DM + group post, without → group post only.
+
 No new validation. No new "pending assignee" concept. The Lark `Assignee` field is the source of truth; the bot's job is to surface activity to whoever is around.
 
 ### 1.3 Announce in the source group
@@ -84,7 +86,7 @@ Mentions are already resolved to `internal_id` in `IncomingMessage.mentions` but
 - @Tân → person_id=null (not in system)
 ```
 
-Add an optional `assignee_id` parameter to `create_task` and `create_reminder`. The LLM passes the resolved id when available; the name string remains the fallback. The Lark display name is still derived from the mention text or the LLM's parse.
+Add an optional `assignee_id` parameter to `create_task` and `create_reminder` in `src/agent/tool_definitions.py` (alongside the existing `assignee` name string). The LLM passes the resolved id when available; the name string remains the fallback. The Lark display name is still derived from the mention text or the LLM's parse. When `assignee_id` is set, services use it directly and skip `_find_assignee_chat_id` for that turn.
 
 ---
 
@@ -138,14 +140,16 @@ The underlying functions in `services/join_service.py` and `services/tasks_servi
 
 ### 2.3 Generalize the deterministic boss-reply parser
 
-`onboarding.handle_boss_join_decision` already parses `"approve <id>"` / `"reject <id>"`. Generalize and move into `src/agent/boss_decision_parser.py`:
+`onboarding.handle_boss_join_decision` already parses `"approve <id>"` / `"reject <id>"`. Generalize and move into `src/agent/boss_decision_parser.py`. Each pattern is a strict regex; both English and Vietnamese decision keywords are accepted to match real boss usage:
 
-```
-approve <id>            → activate via join
-reject <id>             → reject_join
-ok task <name>          → approve_task_change(approval_id)
-no task <name>          → reject_task_change(approval_id)
-```
+| Pattern (English / Vietnamese) | Action |
+|---|---|
+| `approve <id>` / `duyet <id>` | activate via join |
+| `reject <id>` / `tu choi <id>` | reject_join |
+| `ok task <name>` / `duyet task <name>` | approve_task_change(approval_id) |
+| `reject task <name>` / `tu choi task <name>` | reject_task_change(approval_id) |
+
+Patterns are anchored (`^…$` after `strip()`) so natural-language messages like `"ok let me approve that task later"` do not trigger.
 
 Wired in `controllers/message_router.py` as a pre-LLM step:
 
