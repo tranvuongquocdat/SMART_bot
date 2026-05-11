@@ -198,3 +198,48 @@ async def test_delete_reminder_no_lark_record_id_skips_lark_call(in_memory_db, m
     msg = await reminder_service.delete_reminder(_ctx(), reminder_id=rid)
     delete_mock.assert_not_awaited()
     assert "Da xoa" in msg
+
+
+async def test_create_reminder_persists_source_chat_id_in_group(in_memory_db, monkeypatch):
+    """When ctx.is_group is True, source_chat_id = ctx.chat_id."""
+    async def _passthrough(fn, **kw):
+        return await fn()
+    monkeypatch.setattr("src.services.reminder_service.lark.with_retry", _passthrough)
+    monkeypatch.setattr(
+        "src.services.reminder_service.lark.sync_reminder_to_lark",
+        AsyncMock(return_value="rec-1"),
+    )
+
+    ctx = _ctx()
+    object.__setattr__(ctx, "is_group", True)
+    object.__setattr__(ctx, "chat_id", "group-xyz")
+
+    await reminder_service.create_reminder(
+        ctx, content="standup tomorrow", remind_at="2026-05-12 09:00",
+    )
+
+    async with in_memory_db.execute(
+        "SELECT source_chat_id FROM reminders WHERE boss_chat_id='b1'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row["source_chat_id"] == "group-xyz"
+
+
+async def test_create_reminder_no_source_chat_id_in_dm(in_memory_db, monkeypatch):
+    async def _passthrough(fn, **kw):
+        return await fn()
+    monkeypatch.setattr("src.services.reminder_service.lark.with_retry", _passthrough)
+    monkeypatch.setattr(
+        "src.services.reminder_service.lark.sync_reminder_to_lark",
+        AsyncMock(return_value="rec-1"),
+    )
+
+    await reminder_service.create_reminder(
+        _ctx(), content="ping me", remind_at="2026-05-12 09:00",
+    )
+
+    async with in_memory_db.execute(
+        "SELECT source_chat_id FROM reminders WHERE boss_chat_id='b1'"
+    ) as cur:
+        row = await cur.fetchone()
+    assert row["source_chat_id"] is None

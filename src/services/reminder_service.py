@@ -86,12 +86,14 @@ async def create_reminder(
     if task_keyword:
         stored_content = f"[task:{task_keyword}] {stored_content}"
 
+    source_chat_id = str(ctx.chat_id) if ctx.is_group else None
     reminder_id = await db.create_reminder(
         boss_chat_id=ctx.boss_chat_id,
         content=stored_content,
         remind_at=remind_dt,
         target_chat_id=target_chat_id,
         target_name=target_name,
+        source_chat_id=source_chat_id,
     )
 
     base = (
