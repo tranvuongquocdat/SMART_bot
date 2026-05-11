@@ -163,20 +163,8 @@ async def is_group_onboarding(group_chat_id: str) -> bool:
 
 
 async def start(group_chat_id: str, sender_id: str) -> None:
-    """Entry point — check admin rights first, then begin workspace selection."""
-    bot_id = await telegram.get_bot_id()
-    if bot_id:
-        member = await telegram.get_chat_member(group_chat_id, bot_id)
-        status = member.get("status", "")
-        if status not in ("administrator", "creator"):
-            await _send_and_save(
-                group_chat_id,
-                "Để em hoạt động đầy đủ trong nhóm, nhờ admin promote em lên làm *Administrator*:\n"
-                "Settings → Administrators → Add Administrator → chọn @bot\n\n"
-                "Sau khi xong, tag em lại để tiếp tục nhé.",
-            )
-            return
-
+    """Entry point — begin workspace selection. Admin rights are optional; if the bot
+    lacks them, admin-only operations will degrade gracefully at the channel layer."""
     bosses = await db.get_all_bosses()
     if not bosses:
         await _send_and_save(
