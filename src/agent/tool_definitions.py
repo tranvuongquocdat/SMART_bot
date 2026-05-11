@@ -746,7 +746,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "approve_task_change",
-            "description": "Approve a pending task change request from a member. Use list_pending_approvals to get the approval_id first.",
+            "description": (
+                "Approve a pending task-change request. Only call when the boss is replying "
+                "to an approval prompt AND the supplied approval_id matches an existing pending "
+                "task-change row in this workspace. The function refuses (no write) if no "
+                "matching pending row exists."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -760,7 +765,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "reject_task_change",
-            "description": "Reject a pending task change request from a member.",
+            "description": (
+                "Reject a pending task-change request. Only call when the boss is replying to "
+                "an approval prompt AND the supplied approval_id matches an existing pending "
+                "task-change row in this workspace. The function refuses (no write) if no "
+                "matching pending row exists."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -789,7 +799,7 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "target_boss_id": {"type": "integer", "description": "Boss ID from list_available_workspaces"},
+                    "target_boss_id": {"type": "string", "description": "Boss ID from list_available_workspaces (the value AFTER 'boss_id:', not the list number)"},
                     "role": {"type": "string", "enum": ["member", "partner"], "description": "Role being requested"},
                     "intro": {"type": "string", "description": "Brief introduction / reason for joining"},
                 },
@@ -801,7 +811,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "approve_join",
-            "description": "Approve a join request to this workspace. The person will be added to the team and written to the People table.",
+            "description": (
+                "Activate a pending join request as the boss of THIS workspace. Only call when "
+                "the boss is replying to an approval prompt AND the supplied membership_chat_id "
+                "matches an existing pending row in this workspace. The function refuses (no "
+                "write) if no matching pending row exists."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -816,7 +831,12 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "reject_join",
-            "description": "Reject a join request. The person will be notified.",
+            "description": (
+                "Reject a pending join request as the boss of THIS workspace. Only call when "
+                "the boss is replying to an approval prompt AND the supplied membership_chat_id "
+                "matches an existing pending row. The function refuses (no write) if no "
+                "matching pending row exists."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
