@@ -140,16 +140,16 @@ The underlying functions in `services/join_service.py` and `services/tasks_servi
 
 ### 2.3 Generalize the deterministic boss-reply parser
 
-`onboarding.handle_boss_join_decision` already parses `"approve <id>"` / `"reject <id>"`. Generalize and move into `src/agent/boss_decision_parser.py`. Each pattern is a strict regex; both English and Vietnamese decision keywords are accepted to match real boss usage:
+`onboarding.handle_boss_join_decision` already parses `"approve <id>"` / `"reject <id>"`. Generalize and move into `src/agent/boss_decision_parser.py`:
 
-| Pattern (English / Vietnamese) | Action |
+| Pattern | Action |
 |---|---|
-| `approve <id>` / `duyet <id>` | activate via join |
-| `reject <id>` / `tu choi <id>` | reject_join |
-| `ok task <name>` / `duyet task <name>` | approve_task_change(approval_id) |
-| `reject task <name>` / `tu choi task <name>` | reject_task_change(approval_id) |
+| `approve <id>` | activate via join |
+| `reject <id>` | reject_join |
+| `ok task <name>` | approve_task_change(approval_id) |
+| `reject task <name>` | reject_task_change(approval_id) |
 
-Patterns are anchored (`^…$` after `strip()`) so natural-language messages like `"ok let me approve that task later"` do not trigger.
+Patterns are anchored (`^…$` after `strip()`) so natural-language messages like `"ok let me approve that task later"` do not trigger. English-only keywords match what the bot's notification message already instructs the boss to type. A boss typing Vietnamese falls through to the LLM, which handles it and prompts the correct phrasing.
 
 Wired in `controllers/message_router.py` as a pre-LLM step:
 
