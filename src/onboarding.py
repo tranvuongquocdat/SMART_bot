@@ -116,7 +116,20 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
         await _db.commit()
         logger.info("[onboarding] boss language='%s' saved for chat_id=%s", language, chat_id)
 
-        await db.add_person(chat_id, chat_id, "boss", name)
+        # Membership-of-self: must be keyed by the person UUID (sender_id),
+        # not the workspace UUID (chat_id). Phase 1 had sender_id == chat_id
+        # so add_person(chat_id, chat_id, ...) worked by coincidence; after
+        # the Phase 2 ID split, that creates a workspace→workspace row that
+        # context.resolve() can never find via get_memberships(sender_id).
+        person_id = str(state.get("sender_id") or chat_id)
+        from src.services import membership_service
+        await membership_service.activate(
+            chat_id=person_id,
+            boss_chat_id=chat_id,
+            person_type="boss",
+            name=name,
+            source="self_boss",
+        )
         await qdrant.provision_collections(chat_id)
         logger.info("[onboarding] Qdrant collections provisioned for chat_id=%s", chat_id)
 
@@ -185,9 +198,11 @@ async def _complete_member(chat_id: str, state: dict) -> None:
 
     try:
         _db = await db.get_db()
+        # See _complete_boss for why we key the membership by sender_id, not chat_id.
+        person_id = str(state.get("sender_id") or chat_id)
         await db.upsert_membership(
             _db,
-            chat_id=str(chat_id),
+            chat_id=person_id,
             boss_chat_id=str(boss["chat_id"]),
             person_type=person_type,
             name=name,
@@ -196,7 +211,7 @@ async def _complete_member(chat_id: str, state: dict) -> None:
         )
         await _db.execute(
             "UPDATE memberships SET language = ? WHERE chat_id = ? AND boss_chat_id = ?",
-            (language, str(chat_id), str(boss["chat_id"])),
+            (language, person_id, str(boss["chat_id"])),
         )
         await _db.commit()
         logger.info(
@@ -243,15 +258,20 @@ async def is_onboarding(chat_id: str) -> bool:
     return await db.has_onboarding_state(chat_id)
 
 
-async def start_onboarding(chat_id: str) -> None:
+async def start_onboarding(chat_id: str, sender_id: str | None = None) -> None:
     """Begin onboarding for a new user."""
-    await db.save_onboarding_state(chat_id, {"first": True})
-    logger.info("[onboarding] started for chat_id=%s", chat_id)
+    state: dict = {"first": True}
+    if sender_id:
+        state["sender_id"] = str(sender_id)
+    await db.save_onboarding_state(chat_id, state)
+    logger.info("[onboarding] started for chat_id=%s sender_id=%s", chat_id, sender_id)
 
 
-async def handle_onboard_message(text: str, chat_id: str) -> None:
+async def handle_onboard_message(text: str, chat_id: str, sender_id: str | None = None) -> None:
     """Route onboarding message through the LLM collector."""
     state = await db.get_onboarding_state(chat_id) or {}
+    if sender_id and not state.get("sender_id"):
+        state["sender_id"] = str(sender_id)
     is_first = state.pop("first", False)
 
     if is_first:
