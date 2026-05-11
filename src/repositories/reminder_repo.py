@@ -14,12 +14,15 @@ class ReminderRepo:
     async def create(
         self, boss_chat_id: str, content: str, remind_at: datetime,
         target_chat_id: Optional[str] = None, target_name: str = "",
+        source_chat_id: Optional[str] = None,
     ) -> int:
         remind_at_str = remind_at.isoformat(sep=" ", timespec="seconds")
         cur = await self._db.execute(
-            "INSERT INTO reminders (boss_chat_id, target_chat_id, target_name, content, remind_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (str(boss_chat_id), target_chat_id, target_name, content, remind_at_str),
+            "INSERT INTO reminders "
+            "(boss_chat_id, target_chat_id, target_name, content, remind_at, source_chat_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(boss_chat_id), target_chat_id, target_name, content, remind_at_str,
+             source_chat_id),
         )
         await self._db.commit()
         return cur.lastrowid

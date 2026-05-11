@@ -339,6 +339,7 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
     for table, col, definition in [
         ("reminders", "lark_record_id", "TEXT DEFAULT NULL"),
         ("notes",     "lark_record_id", "TEXT DEFAULT NULL"),
+        ("reminders", "source_chat_id", "TEXT DEFAULT NULL"),
     ]:
         try:
             await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
@@ -593,10 +594,14 @@ async def update_note(
 async def create_reminder(
     boss_chat_id: str, content: str, remind_at: datetime,
     target_chat_id: Optional[str] = None, target_name: str = "",
+    source_chat_id: Optional[str] = None,
     db_path: str = "data/history.db",
 ) -> int:
     repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    return await repo.create(boss_chat_id, content, remind_at, target_chat_id, target_name)
+    return await repo.create(
+        boss_chat_id, content, remind_at, target_chat_id, target_name,
+        source_chat_id,
+    )
 
 
 async def get_due_reminders(
