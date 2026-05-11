@@ -9,7 +9,7 @@
 Strip friction from two flows the boss hits most:
 
 1. **Group task / reminder assignment** — let the bot work even when not group admin, accept assignees who have never onboarded, and post the result back into the group it came from.
-2. **Membership approvals** — make it impossible for the LLM to grant access. Boss approval becomes a single deterministic state transition with one write path.
+2. **Membership approvals** — collapse every active-membership write into one chokepoint (`activate()`), and harden the LLM-callable approval tools with strict preconditions and guards so the bot stops hallucinating approvals. The LLM still owns intent interpretation (with conversational history), but it cannot bypass the guard or scatter writes across the codebase.
 
 Quality bar: **net `git diff --stat` must show deletions ≥ insertions** outside schema migration. Removing code is the point.
 
@@ -94,12 +94,12 @@ Add an optional `assignee_id` parameter to `create_task` and `create_reminder` i
 
 ### 2.1 One canonical `activate()` function
 
-Today five callsites write `memberships.status='active'`:
+Today active-membership writes are scattered across these callsites:
 
-| Callsite | Caller | Gate |
+| Callsite | Caller | Gate today |
 |---|---|---|
 | `join_service.approve_join` | LLM tool | pending check |
-| `onboarding.handle_boss_join_decision` | regex parser | pending check |
+| `onboarding.handle_boss_join_decision` | regex parser | pending check — **deleted in §2.3** |
 | `services.people_service.add_person` → `db.add_person` | LLM tool | none |
 | `services.communication_service.link_contact_to_person` → `db.add_person` | LLM tool | none |
 | `onboarding._complete_boss` | self-onboard | own workspace only |
@@ -127,36 +127,31 @@ Inside:
 
 All five callsites delegate to this. Direct `repo.upsert(..., status='active')` calls outside this function are removed. Pending → active transitions notify the user the same way, no matter which path the boss used.
 
-### 2.2 Remove approval gates from LLM tool surface
+### 2.2 Harden the approval tools (do not remove them)
 
-Delete from `src/agent/tool_definitions.py` and `src/agent/handlers/`:
+The four approval tools (`approve_join`, `reject_join`, `approve_task_change`, `reject_task_change`) remain LLM-callable. The bug is not that they exist — it is that they are loose. Tighten them per §2.3: precondition wording in descriptions, runtime guards inside the functions, and `activate()` as the sole write path. The LLM still owns interpretation, with conversational history as context; the function refuses obviously wrong calls.
 
-- `approve_join`
-- `reject_join`
-- `approve_task_change`
-- `reject_task_change`
+### 2.3 Approval flow: LLM semantic intent, gated tools
 
-The underlying functions in `services/join_service.py` and `services/tasks_service.py` stay — they are invoked only by the deterministic boss-reply parser.
+**No regex parser.** Real boss replies are too varied — `"duyệt đi"`, `"ok approve"`, `"yes em ok rồi"`, replying to the notification with `"ừ"` — patterns cannot cover them and bot looks dumb when they miss. Interpretation always goes through the LLM with conversational context.
 
-### 2.3 Generalize the deterministic boss-reply parser
+Remove the existing `onboarding.handle_boss_join_decision` regex parser. Delete the file path entirely.
 
-`onboarding.handle_boss_join_decision` already parses `"approve <id>"` / `"reject <id>"`. Generalize and move into `src/agent/boss_decision_parser.py`:
+Keep `approve_join`, `reject_join`, `approve_task_change`, `reject_task_change` as **tools the LLM can call**, but harden them:
 
-| Pattern | Action |
-|---|---|
-| `approve <id>` | activate via join |
-| `reject <id>` | reject_join |
-| `ok task <name>` | approve_task_change(approval_id) |
-| `reject task <name>` | reject_task_change(approval_id) |
+1. **Tool description rewrite.** Each tool's description spells out the precondition: a pending row must exist for the supplied id, AND the immediately-preceding bot message must have been a request for that decision. The LLM enforces this implicitly by reading context.
 
-Patterns are anchored (`^…$` after `strip()`) so natural-language messages like `"ok let me approve that task later"` do not trigger. English-only keywords match what the bot's notification message already instructs the boss to type. A boss typing Vietnamese falls through to the LLM, which handles it and prompts the correct phrasing.
+2. **Tool-level guard.** Inside each function, refuse to act when:
+   - The supplied id has no `status='pending'` row, OR
+   - The pending row's `boss_chat_id` is not `ctx.boss_chat_id`.
 
-Wired in `controllers/message_router.py` as a pre-LLM step:
+   Refusal returns a short string the LLM relays to the boss (`"No pending approval matches <id>."`). The LLM cannot bypass this — the guard runs in Python before any Lark/DB write.
 
-- If the sender is a boss AND the message matches a known pattern → run the parser. On hit, reply with the parser's outcome and **skip the LLM** for this turn. On parser "no matching pending row", reply with a short error (`"No pending approval matches '<id>'"`) and skip the LLM.
-- If the message does not match any pattern → fall through to the LLM as today.
+3. **History context required.** The agent loop must include at least the last 5 messages of the current conversation when calling the LLM on a turn that could plausibly contain an approval decision (boss DM with at least one open pending approval). This is a general rule for any message-interpreting LLM call, not specific to approvals — see related test `test_llm_always_called_with_history`.
 
-The parser is intentionally regex-strict to avoid accidental triggers from natural-language messages that happen to contain `"approve"` or `"ok task"`.
+The boss's notification message is updated to invite natural replies (`"Reply naturally — e.g. 'approve', 'duyệt nhé', 'no thanks'"`) instead of dictating an exact phrase.
+
+The `activate()` chokepoint from §2.1 still owns the write. The LLM tools call into `activate()`. No path outside `activate()` flips `memberships.status` to active. The audit log distinguishes the source.
 
 ### 2.4 Consequences
 
@@ -181,10 +176,11 @@ No data backfill needed. Existing rows have `source_chat_id IS NULL` and fall th
 1. Boss tags an un-onboarded person in a group with a deadline → bot creates the Lark task, posts a summary in the group, does not DM (no `internal_id`).
 2. Scheduler reminder created in a group with no target → on fire, posts into the source group, not the boss DM.
 3. Bot added to a new group without admin rights → group onboarding completes; pin / kick attempts log warnings but do not abort.
-4. User asks to join workspace B from inside workspace A → bot calls `request_join` (LLM tool, still allowed); membership is `pending`; boss B is notified; **LLM cannot grant access** — verified by removing the tools from the schema.
-5. Boss B replies `"approve <id>"` → deterministic parser activates the membership; no LLM round trip.
-6. `git grep -n "status='active'"` on the implementation branch returns only matches inside `services/membership_service.py` and tests.
-7. `git diff --stat HEAD~..HEAD`: deletions ≥ insertions, excluding the new `membership_service.py` and `boss_decision_parser.py`.
+4. User asks to join workspace B from inside workspace A → bot calls `request_join` (LLM tool); membership is `pending`; boss B is notified.
+5. Boss B replies naturally (`"approve"`, `"ok duyệt nhé"`, `"yes"`, etc.) → LLM with recent history understands intent → calls `approve_join` → guard passes → membership active via `activate()`.
+6. Boss B replies `"approve abc-XXX"` for an id that does not have a pending row → guard refuses → bot replies `"No pending approval matches abc-XXX"`. No write.
+7. `git grep` for direct active-status writes returns only matches inside `services/membership_service.py` and tests.
+8. `git diff --stat`: deletions ≥ insertions outside the new `membership_service.py`.
 
 ## Test plan
 
@@ -201,9 +197,12 @@ Unit tests in `tests/unit/`. Existing patterns: in-memory aiosqlite via `_init_s
 | `test_pin_swallows_unsupported_operation` | `UnsupportedOperation` from messenger.pin → caller does not raise |
 | `test_membership_activate_is_single_chokepoint` | Static check: `grep -rn "status=.active." src` only matches `membership_service.py` |
 | `test_activate_via_approval_audit_tag` | `activate(source="approval", ...)` writes an audit row tagged `"approval"` |
-| `test_approve_join_tool_removed_from_definitions` | `tool_definitions.TOOL_DEFINITIONS` does not contain `approve_join` etc. |
-| `test_boss_reply_approve_runs_parser_not_llm` | Message router sees `"approve <id>"` from a boss with a pending row → parser invoked, LLM not called |
-| `test_boss_reply_ok_task_routes_to_parser` | Message router sees `"ok task <name>"` from a boss with a pending task approval → parser invoked |
+| `test_approve_join_guard_refuses_when_no_pending` | `approve_join` called with id that has no pending row → returns refusal string, no DB write |
+| `test_approve_join_guard_refuses_when_wrong_workspace` | Pending row exists but belongs to a different `boss_chat_id` → refusal, no write |
+| `test_approve_task_change_guard_refuses_when_no_pending` | Same guard pattern for tasks |
+| `test_approve_join_writes_via_activate_only` | Successful approval call routes through `membership_service.activate(source="approval")` |
+| `test_llm_always_called_with_history` | Any LLM call path includes ≥ N recent messages in the prompt (no system-prompt-only invocations allowed) |
+| `test_handle_boss_join_decision_removed` | Regex parser is deleted; the import target no longer exists |
 | `test_link_contact_rejects_when_pending_elsewhere` | Pending membership in workspace X → `link_contact_to_person` from workspace Y returns CONFLICT |
 | `test_mentions_in_prompt` | Mentions present → user turn contains `[Mentioned in this message]` block with resolved ids |
 
