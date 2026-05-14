@@ -900,6 +900,15 @@ SCENARIOS: list[Scenario] = [
         steps=[],  # built dynamically
         tags=["escalate", "fire", "group", "fallback"],
     ),
+    Scenario(
+        name="Request join: stranger gọi request_join → pending row + boss DM",
+        description=(
+            "Stranger ngữ cảnh DM bot gọi tool request_join trực tiếp → kiểm tra "
+            "membership pending được tạo + boss nhận outbound notification."
+        ),
+        steps=[],  # built dynamically
+        tags=["onboard", "request"],
+    ),
 ]
 
 
@@ -1109,6 +1118,87 @@ def _build_escalate_scenario(test_ctx: dict) -> Scenario:
     )
 
 
+def _build_request_join_scenario(test_ctx: dict) -> Scenario:
+    """Call request_join service directly with a stranger ChatContext. Verify
+    that the pending membership lands in DB and the boss receives an outbound
+    notification on whatever channel they registered with."""
+    from src.context import ChatContext
+    boss = test_ctx["boss"]
+    boss_id = test_ctx["boss_id"]
+    stranger_id = test_ctx["stranger_internal_id"]
+    stranger_conv = test_ctx["stranger_conv_id"]
+
+    # Build a minimal ChatContext shaped like what onboarding would produce for
+    # a stranger (no membership yet, chat_id == stranger DM conv).
+    stranger_ctx = ChatContext(
+        sender_chat_id=stranger_id,
+        sender_name="Khách Lạ",
+        sender_type="unknown",
+        boss_chat_id="",        # stranger has no boss yet
+        boss_name="",
+        lark_base_token="",
+        lark_table_people="",
+        lark_table_tasks="",
+        lark_table_projects="",
+        lark_table_ideas="",
+        lark_table_reminders="",
+        lark_table_notes="",
+        chat_id=stranger_conv,
+        is_group=False,
+        group_name="",
+        messages_collection="",
+        tasks_collection="",
+    )
+
+    async def _seed_clear(_step, _settings) -> None:
+        # Self-test re-runs share DB; clean any prior pending row for this
+        # stranger so the assertion is meaningful.
+        from src import db
+        _db = await db.get_db()
+        await _db.execute(
+            "DELETE FROM memberships WHERE chat_id = ? AND boss_chat_id = ?",
+            (stranger_id, str(boss_id)),
+        )
+        await _db.commit()
+
+    async def _call_request_join(_step, _settings) -> None:
+        from src.services import join_service
+        await join_service.request_join(
+            stranger_ctx,
+            target_boss_id=str(boss_id),
+            role="member",
+            intro="Em muốn vào workspace để hỗ trợ dự án 2026.",
+        )
+
+    async def _verify(_step, _settings) -> None:
+        from src import db
+        _db = await db.get_db()
+        row = await db.get_membership(_db, stranger_id, str(boss_id))
+        if not row:
+            raise AssertionError("no pending membership row after request_join")
+        if row.get("status") != "pending":
+            raise AssertionError(f"status={row.get('status')!r}, expected 'pending'")
+
+    def _check(rec: Recorder) -> str | None:
+        # request_join sends one DM to the boss's chat. Self-test capture
+        # records every outbound — at least one is required.
+        if not rec.outbound:
+            return "boss didn't receive any outbound notification of the join request"
+        return None
+
+    return Scenario(
+        name="Request join: stranger gọi request_join → pending row + boss DM",
+        description="Verify request_join service tạo pending membership + thông báo boss qua channel của boss",
+        steps=[
+            _FireFunc(_seed_clear),
+            _FireFunc(_call_request_join),
+            Expect(custom=_check),
+            _FireFunc(_verify),
+        ],
+        tags=["onboard", "request"],
+    )
+
+
 def _build_escalate_group_unknown_assignee_scenario(test_ctx: dict) -> Scenario:
     """Task from a group context with an assignee who has NO Chat ID in Lark.
     The deadline reminder must fall back to the source group, NOT just go silent."""
@@ -1231,6 +1321,7 @@ async def main_async(args) -> int:
         "Image attachment: bot nhận diện ảnh": _build_image_scenario,
         "Reminder fire: source-only (không target) → vào source group": _build_source_only_reminder_scenario,
         "Escalation: task từ group, assignee chưa join → reminder vào group": _build_escalate_group_unknown_assignee_scenario,
+        "Request join: stranger gọi request_join → pending row + boss DM": _build_request_join_scenario,
     }
     scenarios = []
     for s in SCENARIOS:
