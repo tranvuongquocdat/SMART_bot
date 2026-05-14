@@ -512,6 +512,14 @@ async def lookup_conversation_by_external(
     return await repo.lookup_conversation_by_external(provider, external_id)
 
 
+async def lookup_conversation_by_external_id(
+    external_id: str, db_path: str = "data/history.db",
+) -> tuple[str, str, str] | None:
+    """Provider-agnostic external_chat_id → (internal_chat_id, provider, chat_type)."""
+    repo: ConversationRepo = await _repo("conversation", ConversationRepo)
+    return await repo.lookup_conversation_by_external_id(external_id)
+
+
 # ---------------------------------------------------------------------------
 # legacy people_map wrappers (delegate to memberships)
 # ---------------------------------------------------------------------------

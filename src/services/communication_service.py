@@ -392,11 +392,8 @@ async def link_contact_to_person(
 
     existing = target_record.get("Chat ID")
     if existing:
-        try:
-            existing_int = int(existing)
-        except (ValueError, TypeError):
-            existing_int = None
-        if existing_int == int(chat_id):
+        # String compare so Zalo alphanum and Telegram numeric both work.
+        if str(existing).strip() == str(chat_id).strip():
             return f"Record '{lark_record_id}' ({target_record.get('Tên', '?')}) đã có Chat ID={chat_id}. Không cần thay."
         return (
             f"[CONFLICT] Record '{lark_record_id}' ({target_record.get('Tên', '?')}) "
@@ -404,25 +401,32 @@ async def link_contact_to_person(
             f"Cần xác nhận trước khi overwrite (gọi lại với chat_id này sau khi boss đồng ý)."
         )
 
-    # Perform update
+    # Perform update. Telegram column is Number; Zalo would need Text. Try
+    # int first so existing telegram-shaped bases keep working; fall back to
+    # string for Zalo and let Lark surface a schema mismatch as TOOL_ERROR.
+    try:
+        chat_id_for_lark: int | str = int(chat_id)
+    except (TypeError, ValueError):
+        chat_id_for_lark = str(chat_id)
     try:
         await lark.update_record(
             target_ws["lark_base_token"],
             target_ws["lark_table_people"],
             lark_record_id,
-            {"Chat ID": int(chat_id)},
+            {"Chat ID": chat_id_for_lark},
         )
     except Exception as e:
         return f"[TOOL_ERROR:lark] Không ghi được Chat ID vào Lark: {e}"
 
     # Also insert membership so SQLite-side flows can find this person.
-    # `chat_id` here is the external Telegram numeric id (LLM input). Resolve
-    # to internal_id before writing to memberships (whose PK is internal).
+    # Provider-agnostic resolve so Zalo alphanum lands in the right
+    # external_identity row instead of being mis-tagged as Telegram.
     name = target_record.get("Tên", "")
     person_type = target_record.get("Type", "member")
-    internal_person_id = await db.resolve_or_create_person(
-        "telegram", str(chat_id), name, "",
-    )
+    from src.utils.chat_id_resolver import resolve_lark_chat_id
+    internal_person_id = await resolve_lark_chat_id(chat_id, name)
+    if not internal_person_id:
+        return f"[TOOL_ERROR:unknown] Không resolve được chat_id={chat_id} sang internal id."
 
     # Conflict check: pending membership in a DIFFERENT workspace must be approved
     # via the proper flow, not silently activated here.

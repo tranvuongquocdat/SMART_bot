@@ -84,17 +84,19 @@ async def add_people(
 
     if chat_id and ctx.boss_chat_id:
         # Resolve external chat_id → internal UUID before membership write.
-        internal_id = await db.resolve_or_create_person(
-            "telegram", str(chat_id), name, "",
-        )
-        await membership_service.activate(
-            chat_id=internal_id,
-            boss_chat_id=str(ctx.boss_chat_id),
-            person_type=person_type,
-            name=name,
-            source="boss_add",
-            lark_record_id=lark_record_id or None,
-        )
+        # Provider-agnostic so Zalo alphanum ids land in the right channel
+        # row instead of being mis-tagged as Telegram.
+        from src.utils.chat_id_resolver import resolve_lark_chat_id
+        internal_id = await resolve_lark_chat_id(chat_id, name)
+        if internal_id:
+            await membership_service.activate(
+                chat_id=internal_id,
+                boss_chat_id=str(ctx.boss_chat_id),
+                person_type=person_type,
+                name=name,
+                source="boss_add",
+                lark_record_id=lark_record_id or None,
+            )
 
     return f"Đã thêm người: {name} (type: {person_type})"
 

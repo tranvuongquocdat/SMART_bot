@@ -48,3 +48,39 @@ async def resolve_lark_chat_id(raw: object, name: str = "") -> str | None:
         return internal_id
     provider = infer_provider(s)
     return await db.resolve_or_create_person(provider, s, name or "", "")
+
+
+async def resolve_external_conversation(
+    raw: object, *, chat_type_hint: str = "dm", title: str = "",
+) -> str | None:
+    """External chat id (any provider) → internal conversation UUID.
+
+    Mirrors `resolve_lark_chat_id` but writes to the `conversation` table.
+    Used by `telegram_singleton._to_internal_chat_id` to route outbound
+    sends to any channel without hardcoding `provider="telegram"`.
+
+    For known conversations, returns the existing internal id and ignores
+    `chat_type_hint` / `title`. For unknown ones, infers provider by shape
+    and creates a new row tagged with the hint.
+    """
+    from src import db
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    existing = await db.lookup_conversation_by_external_id(s)
+    if existing:
+        internal_id, _provider, _kind = existing
+        return internal_id
+    provider = infer_provider(s)
+    # Telegram convention: negative external_id = (super)group. Only applies
+    # to Telegram-shaped ids; for Zalo we trust the caller's hint.
+    chat_type = chat_type_hint or "dm"
+    if provider == "telegram":
+        try:
+            if int(s) < 0:
+                chat_type = "group"
+        except (TypeError, ValueError):
+            pass
+    return await db.resolve_or_create_conversation(provider, s, chat_type, title or "")

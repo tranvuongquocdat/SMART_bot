@@ -52,12 +52,12 @@ def _looks_like_uuid(s: str) -> bool:
 
 
 async def _to_internal_chat_id(chat_id_raw: str) -> str:
-    """Accept either external Telegram numeric chat id (legacy) or internal UUID.
+    """Accept either external chat id (Telegram numeric / Zalo alphanum) or
+    internal UUID. Returns an `internal_chat_id` (conversation table).
 
-    Returns an `internal_chat_id` (conversation table). When the UUID is a
-    person internal id (e.g. a boss id passed by `send_reminder`), we map
-    it to the DM conversation by looking up the person's external Telegram
-    id and resolving / creating the matching DM `conversation` row.
+    For raw external ids whose channel isn't known up-front, delegates to
+    `resolve_external_conversation` which looks up across all providers
+    before inferring one by shape — drops the legacy telegram-only path.
     """
     from src import db
     s = str(chat_id_raw)
@@ -72,22 +72,20 @@ async def _to_internal_chat_id(chat_id_raw: str) -> str:
             return await db.resolve_or_create_conversation(provider, external_id, "dm", "")
         return s  # unknown UUID; let the API call fail loudly
 
-    # Numeric external id — Telegram convention: negative = (super)group, positive = DM.
-    try:
-        chat_type = "group" if int(s) < 0 else "dm"
-    except (TypeError, ValueError):
-        chat_type = "dm"
-    return await db.resolve_or_create_conversation("telegram", s, chat_type, "")
+    from src.utils.chat_id_resolver import resolve_external_conversation
+    resolved = await resolve_external_conversation(s)
+    return resolved if resolved else s
 
 
 async def _to_internal_user_id(user_id_raw: str) -> str:
-    """Accept either external Telegram numeric user id or internal UUID.
+    """Accept either external user id (any provider) or internal UUID.
     Returns the internal person id."""
     s = str(user_id_raw)
     if _looks_like_uuid(s):
         return s
-    from src import db
-    return await db.resolve_or_create_person("telegram", s, "", "")
+    from src.utils.chat_id_resolver import resolve_lark_chat_id
+    resolved = await resolve_lark_chat_id(s)
+    return resolved if resolved else s
 
 
 async def _messenger_for(internal_chat_id: str):
