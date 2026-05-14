@@ -38,6 +38,8 @@ logger = logging.getLogger("file_ingestion")
 
 DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PDF_MIME = "application/pdf"
+TEXT_MIME = "text/plain"
+_TEXT_EXTS = {"txt", "md", "log", "csv", "json", "yaml", "yml", "ini", "conf"}
 
 # Last-line-of-defense: if a channel sets mime to application/octet-stream
 # (or empty) on a recognizable extension, recover it here. Especially helps
@@ -48,6 +50,8 @@ _EXT_TO_MIME = {
     "jpg": "image/jpeg", "jpeg": "image/jpeg",
     "png": "image/png", "webp": "image/webp", "gif": "image/gif",
     "heic": "image/heic", "heif": "image/heif",
+    "txt": TEXT_MIME, "md": TEXT_MIME, "log": TEXT_MIME,
+    "csv": TEXT_MIME, "json": TEXT_MIME,
 }
 
 
@@ -82,6 +86,8 @@ _MAX_PDF_BYTES = 32 * 1024 * 1024
 _MAX_PDF_PAGES = 20
 _MAX_DOCX_BYTES = 5 * 1024 * 1024
 _MAX_DOCX_OUTPUT = 20 * 1024
+_MAX_TEXT_BYTES = 2 * 1024 * 1024  # 2MB
+_MAX_TEXT_OUTPUT = 20 * 1024       # cap inline content; same shape as DOCX
 _LOCAL_FILE_TTL_SEC = 24 * 3600
 
 
@@ -145,6 +151,8 @@ async def _one(client: Any, a: Attachment) -> str:
         return await _ingest_pdf(client, a, name, mime)
     if mime == DOCX_MIME:
         return await _ingest_docx(a, name)
+    if mime.startswith("text/") or ext in _TEXT_EXTS:
+        return _ingest_text(a, name)
     ext_label = ext or "?"
     return f"[Tệp {name} — chưa hỗ trợ định dạng .{ext_label}]"
 
@@ -178,6 +186,23 @@ async def _ingest_pdf(client: Any, a: Attachment, name: str, mime: str) -> str:
         return f"[Tệp {name} — tạm thời lỗi, gửi lại giúp anh]"
     _try_delete(a.url)
     return f"[OPENAI_FILE: file_id={file_id} mime={mime} filename={name}]"
+
+
+def _ingest_text(a: Attachment, name: str) -> str:
+    """Plain UTF-8 text (.txt/.md/.log/.csv/.json/etc.) → inline content."""
+    if a.size_bytes > _MAX_TEXT_BYTES:
+        return f"[Tệp {name} — text quá lớn (>{_MAX_TEXT_BYTES // (1024*1024)}MB)]"
+    try:
+        with open(a.url, "rb") as fh:
+            raw = fh.read()
+        body = raw.decode("utf-8", errors="replace")
+    except Exception as e:
+        logger.warning("text ingest %s failed: %s", a.url, e)
+        return f"[Tệp {name} — không đọc được file]"
+    if len(body) > _MAX_TEXT_OUTPUT:
+        body = body[:_MAX_TEXT_OUTPUT] + "\n…(file dài, em chỉ đọc ~20KB đầu)"
+    _try_delete(a.url)
+    return f"[Tệp {name}]\n{body}"
 
 
 async def _ingest_docx(a: Attachment, name: str) -> str:
