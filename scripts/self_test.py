@@ -829,15 +829,10 @@ SCENARIOS: list[Scenario] = [
         tags=["task", "group", "zalo"],
     ),
     Scenario(
-        name="Reminder fire: route tới target + cc boss",
-        description=(
-            "Trực tiếp gọi send_reminder với target_chat_id → expect outbound tới target. "
-            "Bỏ qua scheduler."
-        ),
-        steps=[
-            # Filled in setup; placeholder.
-        ],
-        tags=["reminder", "fire"],
+        name="Reminder fire: target DM + cc boss + báo vào source group",
+        description="Fire send_reminder() với target + source_chat_id → 3 outbound destinations",
+        steps=[],  # built dynamically
+        tags=["reminder", "fire", "group"],
     ),
     Scenario(
         name="DM: gửi link YouTube",
@@ -1467,26 +1462,42 @@ class _FireFunc:
 
 
 def _build_fire_reminder_scenario(test_ctx: dict) -> Scenario:
-    """Reminder fire needs runtime test_ctx for chat ids — build dynamically."""
+    """Reminder fire with BOTH target_chat_id AND source_chat_id (group).
+    Strict assertion: target gets DM, boss gets cc, AND source group also
+    receives a public 'vừa nhắc' notice (the auto-detect-and-report-back-
+    to-group behaviour)."""
     boss_id = test_ctx["boss_id"]
     target = test_ctx["dm_conv_id"]
+    source_group = test_ctx["group_conv_id"]
     fake_reminder = {
         "id": 999_999_999,
         "boss_chat_id": boss_id,
         "target_chat_id": target,
         "target_name": "Self-Test Target",
-        "source_chat_id": test_ctx["group_conv_id"],
+        "source_chat_id": source_group,
         "content": "Test fire — nộp báo cáo",
         "remind_at": int(time.time()),
     }
+
+    def _strict(rec: Recorder) -> str | None:
+        chat_ids = {c for c, _ in rec.outbound}
+        if target not in chat_ids:
+            return f"target DM ({target}) didn't get the reminder; saw {sorted(chat_ids)}"
+        if source_group not in chat_ids:
+            return (
+                f"source group ({source_group}) didn't get the public notice; "
+                f"saw {sorted(chat_ids)}"
+            )
+        return None
+
     return Scenario(
-        name="Reminder fire: route tới target + cc boss",
-        description="Fire send_reminder() trực tiếp",
+        name="Reminder fire: target DM + cc boss + báo vào source group",
+        description="Fire send_reminder() với target + source_chat_id → 3 outbound",
         steps=[
             FireReminder(reminder=fake_reminder),
-            Expect(outbound_to=target),
+            Expect(custom=_strict),
         ],
-        tags=["reminder", "fire"],
+        tags=["reminder", "fire", "group"],
     )
 
 
@@ -1510,7 +1521,7 @@ async def main_async(args) -> int:
 
     # Replace placeholders with runtime-built versions that need test_ctx.
     dynamic_builders = {
-        "Reminder fire: route tới target + cc boss": _build_fire_reminder_scenario,
+        "Reminder fire: target DM + cc boss + báo vào source group": _build_fire_reminder_scenario,
         "DM: gửi file đính kèm": _build_file_scenario,
         "Escalation: task overdue (DM) → assignee DM + boss report": _build_escalate_scenario,
         "Approve join: boss duyệt pending member": _build_approve_join_scenario,

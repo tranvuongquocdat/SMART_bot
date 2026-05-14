@@ -159,3 +159,21 @@ async def send_reminder(reminder: dict, settings: Settings) -> None:
     if cc_boss:
         # Raw confirmation back to boss; not via LLM.
         await telegram.send(boss_chat_id, f"✓ Đã nhắc {target_name or 'người nhận'}: {content}")
+
+    # When the reminder was created via group @mention, also post a short
+    # notice into that source group so the rest of the team sees the followup
+    # the boss asked for publicly. Skip when source is the same as target/boss
+    # to avoid duplicate sends.
+    source_chat_id = reminder.get("source_chat_id")
+    if (
+        source_chat_id
+        and source_chat_id != dest_chat_id
+        and source_chat_id != boss_chat_id
+    ):
+        try:
+            await telegram.send(
+                source_chat_id,
+                f"⏰ Vừa nhắc {target_name or 'người nhận'}: {content}",
+            )
+        except Exception:
+            logger.warning("%s source-group notify failed", log_prefix, exc_info=True)
