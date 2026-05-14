@@ -57,6 +57,36 @@ def _member_fields_complete(state: dict) -> bool:
     )
 
 
+async def _stranger_channel(chat_id: str) -> str:
+    """Resolve which channel a stranger is DM-ing the bot on.
+
+    Looks up the conversation row for `chat_id`. Returns the provider string
+    ('zalo' / 'telegram' / etc.) or '' when not resolvable — empty string
+    means "no scope filter, all bosses are visible" (back-compat for legacy
+    chats predating primary_channel).
+    """
+    ext = await db.lookup_external_for_conversation(chat_id)
+    if not ext:
+        return ""
+    provider, _ = ext
+    return provider or ""
+
+
+def _filter_bosses_for_channel(bosses: list[dict], channel: str) -> list[dict]:
+    """Full isolation: a stranger on a known channel only ever sees bosses
+    whose `primary_channel` exactly matches.
+
+    Bosses with NULL `primary_channel` are NOT visible to channel-known
+    strangers — there's no safe way to route to them, so they're hidden
+    rather than silently picked. Strangers on an unknown channel ('')
+    still see everyone (legacy back-compat for chats that predate
+    primary_channel population).
+    """
+    if not channel:
+        return list(bosses)
+    return [b for b in bosses if (b.get("primary_channel") or "") == channel]
+
+
 # ---------------------------------------------------------------------------
 # Completion actions
 # ---------------------------------------------------------------------------
@@ -116,7 +146,37 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
         await _db.commit()
         logger.info("[onboarding] boss language='%s' saved for chat_id=%s", language, chat_id)
 
-        await db.add_person(chat_id, chat_id, "boss", name)
+        # C1 — record boss's home channel so outbound never leaks across.
+        # `chat_id` is the boss's external messenger id (the integer/string
+        # the provider gave us); the conversation row keyed on it carries
+        # the actual provider.
+        ext_lookup = await db.lookup_external_for_person(chat_id)
+        if ext_lookup:
+            provider, _ = ext_lookup
+            await _db.execute(
+                "UPDATE bosses SET primary_channel = ? WHERE chat_id = ?",
+                (provider, chat_id),
+            )
+            await _db.commit()
+            logger.info(
+                "[onboarding] boss primary_channel='%s' saved for chat_id=%s",
+                provider, chat_id,
+            )
+
+        # Membership-of-self: must be keyed by the person UUID (sender_id),
+        # not the workspace UUID (chat_id). Phase 1 had sender_id == chat_id
+        # so add_person(chat_id, chat_id, ...) worked by coincidence; after
+        # the Phase 2 ID split, that creates a workspace→workspace row that
+        # context.resolve() can never find via get_memberships(sender_id).
+        person_id = str(state.get("sender_id") or chat_id)
+        from src.services import membership_service
+        await membership_service.activate(
+            chat_id=person_id,
+            boss_chat_id=chat_id,
+            person_type="boss",
+            name=name,
+            source="self_boss",
+        )
         await qdrant.provision_collections(chat_id)
         logger.info("[onboarding] Qdrant collections provisioned for chat_id=%s", chat_id)
 
@@ -158,8 +218,17 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
             {"role": "system", "content": _PERSONA},
             {"role": "user", "content": "Có lỗi khi tạo workspace. Xin lỗi và đề nghị thử lại sau."},
         ]
-        resp3, _ = await get_default_llm().chat_with_tools(messages3, [])
-        await telegram.send(chat_id, (resp3.content or "Có lỗi. Vui lòng thử lại.").strip())
+        try:
+            resp3, _ = await get_default_llm().chat_with_tools(messages3, [])
+            await telegram.send(chat_id, (resp3.content or "Có lỗi. Vui lòng thử lại.").strip())
+        except Exception:
+            logger.exception("[onboarding] also failed to notify user about the previous failure")
+        # CRITICAL: clear state so the user isn't stuck looping back into the
+        # same broken completion path. They restart from scratch on next DM.
+        try:
+            await db.clear_onboarding_state(chat_id)
+        except Exception:
+            logger.exception("[onboarding] could not clear state after failure")
         return
 
     await db.clear_onboarding_state(chat_id)
@@ -173,21 +242,36 @@ async def _complete_member(chat_id: str, state: dict) -> None:
     language = state.get("language", "vi")
     target_boss_id = state["target_boss_id"]
 
-    all_bosses = await db.get_all_bosses()
+    stranger_channel = await _stranger_channel(chat_id)
+    all_bosses = _filter_bosses_for_channel(
+        await db.get_all_bosses(), stranger_channel,
+    )
     boss = next(
         (b for b in all_bosses
          if b["chat_id"] == target_boss_id or str(b["chat_id"]) == str(target_boss_id)),
         None,
     )
     if not boss:
+        # Should never trigger in normal flow — the channel-scoped list shown
+        # to the LLM collector already excludes cross-channel bosses, so a
+        # mismatched target_boss_id only happens via a real bug. Log loud,
+        # bail safely, and reset state so the user isn't stuck.
+        logger.warning(
+            "[onboarding] target_boss_id=%s not in channel-scoped list for chat_id=%s — "
+            "possible LLM/state bug",
+            target_boss_id, chat_id,
+        )
         await telegram.send(chat_id, "Không tìm thấy workspace. Vui lòng thử lại.")
+        await db.clear_onboarding_state(chat_id)
         return
 
     try:
         _db = await db.get_db()
+        # See _complete_boss for why we key the membership by sender_id, not chat_id.
+        person_id = str(state.get("sender_id") or chat_id)
         await db.upsert_membership(
             _db,
-            chat_id=str(chat_id),
+            chat_id=person_id,
             boss_chat_id=str(boss["chat_id"]),
             person_type=person_type,
             name=name,
@@ -196,7 +280,7 @@ async def _complete_member(chat_id: str, state: dict) -> None:
         )
         await _db.execute(
             "UPDATE memberships SET language = ? WHERE chat_id = ? AND boss_chat_id = ?",
-            (language, str(chat_id), str(boss["chat_id"])),
+            (language, person_id, str(boss["chat_id"])),
         )
         await _db.commit()
         logger.info(
@@ -227,7 +311,14 @@ async def _complete_member(chat_id: str, state: dict) -> None:
         logger.exception(
             "[onboarding] failed to create membership for %s chat_id=%s", person_type, chat_id
         )
-        await telegram.send(chat_id, "Có lỗi khi gửi yêu cầu tham gia. Vui lòng thử lại sau.")
+        try:
+            await telegram.send(chat_id, "Có lỗi khi gửi yêu cầu tham gia. Vui lòng thử lại sau.")
+        except Exception:
+            logger.exception("[onboarding] also failed to notify member of the failure")
+        try:
+            await db.clear_onboarding_state(chat_id)
+        except Exception:
+            logger.exception("[onboarding] could not clear state after failure")
         return
 
     await db.clear_onboarding_state(chat_id)
@@ -243,15 +334,64 @@ async def is_onboarding(chat_id: str) -> bool:
     return await db.has_onboarding_state(chat_id)
 
 
-async def start_onboarding(chat_id: str) -> None:
+async def maybe_handle_reset_phrase(
+    text: str, chat_id: str, sender_id: str | None, onboard_phrase: str,
+) -> bool:
+    """Explicit reset hook for the onboard trigger phrase.
+
+    Behaviour:
+      - User already has at least one active membership (any role, any boss):
+        do NOT reset their data — send an info reply explaining the phrase
+        does not nuke their workspace, and how to join another one.
+      - Otherwise: clear any in-flight onboarding_state and restart cleanly
+        (greeting is sent by the recursive call into handle_onboard_message).
+
+    Returns True when the message was consumed (caller must return).
+    """
+    phrase = (onboard_phrase or "").strip().lower()
+    msg = (text or "").strip().lower()
+    if not phrase or phrase not in msg:
+        return False
+
+    # Already onboarded somewhere → escape-hatch, not a destructive reset.
+    if sender_id:
+        memberships = await db.get_memberships(str(sender_id))
+        active = [m for m in (memberships or []) if (m.get("status") or "") == "active"]
+        if active:
+            roles = ", ".join({m.get("person_type", "?") for m in active})
+            await telegram.send(chat_id, (
+                f"Anh/chị đã có workspace rồi (vai trò: *{roles}*). "
+                f"Cụm '{onboard_phrase}' KHÔNG reset workspace hiện tại. "
+                f"Nếu muốn tham gia thêm 1 workspace KHÁC làm member/partner, "
+                f"nói rõ giúp em — vd 'em muốn vào workspace của Trang làm member' — "
+                f"em sẽ gửi yêu cầu cho chủ workspace đó."
+            ))
+            return True
+
+    # Not onboarded → restart fresh.
+    try:
+        await db.clear_onboarding_state(chat_id)
+    except Exception:
+        logger.exception("[onboarding] reset phrase: failed to clear state")
+    await start_onboarding(chat_id, sender_id)
+    await handle_onboard_message(text, chat_id, sender_id)
+    return True
+
+
+async def start_onboarding(chat_id: str, sender_id: str | None = None) -> None:
     """Begin onboarding for a new user."""
-    await db.save_onboarding_state(chat_id, {"first": True})
-    logger.info("[onboarding] started for chat_id=%s", chat_id)
+    state: dict = {"first": True}
+    if sender_id:
+        state["sender_id"] = str(sender_id)
+    await db.save_onboarding_state(chat_id, state)
+    logger.info("[onboarding] started for chat_id=%s sender_id=%s", chat_id, sender_id)
 
 
-async def handle_onboard_message(text: str, chat_id: str) -> None:
+async def handle_onboard_message(text: str, chat_id: str, sender_id: str | None = None) -> None:
     """Route onboarding message through the LLM collector."""
     state = await db.get_onboarding_state(chat_id) or {}
+    if sender_id and not state.get("sender_id"):
+        state["sender_id"] = str(sender_id)
     is_first = state.pop("first", False)
 
     if is_first:
@@ -260,7 +400,13 @@ async def handle_onboard_message(text: str, chat_id: str) -> None:
         await _send_and_save(chat_id, greeting)
         return
 
-    all_bosses = await db.get_all_bosses()
+    # Channel scope: strangers on Zalo must only see Zalo workspaces, etc.
+    # Without this, the LLM can pick a cross-channel boss and route the
+    # pending row to the wrong workspace (the "lẫn lộn zalo và tele" bug).
+    stranger_channel = await _stranger_channel(chat_id)
+    all_bosses = _filter_bosses_for_channel(
+        await db.get_all_bosses(), stranger_channel,
+    )
     boss_list = "\n".join(
         f"chat_id={b['chat_id']}: {b['name']} — {b.get('company', '')}"
         for b in all_bosses
@@ -325,7 +471,10 @@ Trả về JSON duy nhất: {"name": "..."} hoặc {"name": ""} nếu không tì
 
 async def handle_join_inquiry(chat_id: str) -> str:
     """Called when user wants to see available companies. Returns listing message."""
-    bosses = await db.get_all_bosses()
+    stranger_channel = await _stranger_channel(chat_id)
+    bosses = _filter_bosses_for_channel(
+        await db.get_all_bosses(), stranger_channel,
+    )
     if not bosses:
         return "Hiện chưa có tổ chức nào được đăng ký trên hệ thống."
 
@@ -405,64 +554,3 @@ async def handle_join_message(text: str, chat_id: str) -> str:
                 f"Bạn sẽ được thông báo khi sếp xử lý.")
 
     return ""
-
-
-async def handle_boss_join_decision(text: str, boss_chat_id: str) -> str | None:
-    """
-    Process boss reply to a join request.
-    Patterns: 'approve <chat_id>', 'reject <chat_id>', 'approve <chat_id> <adjustments>'
-    Returns response string if handled, None if not a join decision.
-    """
-    import re
-    m = re.match(r'(approve|reject)\s+(\d+)(.*)?', text.strip().lower())
-    if not m:
-        return None
-
-    action = m.group(1)
-    target_id = m.group(2)
-    adjustments = (m.group(3) or "").strip()
-
-    _db = await db.get_db()
-    membership = await db.get_membership(_db, target_id, boss_chat_id)
-    if not membership or membership["status"] != "pending":
-        return None
-
-    boss = await db.get_boss(_db, boss_chat_id)
-
-    if action == "reject":
-        await db.upsert_membership(_db, target_id, boss_chat_id,
-                                   membership["person_type"], membership["name"], "rejected")
-        await tg.send_message(target_id,
-            f"Yêu cầu join {boss['company']} của bạn đã bị từ chối.")
-        return f"Đã từ chối yêu cầu của user {target_id}."
-
-    # Approve — parse role adjustments
-    person_type = membership["person_type"]
-    if adjustments:
-        if "đối tác" in adjustments or "partner" in adjustments:
-            person_type = "partner"
-        elif "nhân viên" in adjustments or "member" in adjustments:
-            person_type = "member"
-
-    # Lark "Chat ID" field stores the external Telegram numeric id (so humans
-    # / cross-system tools can read it). target_id is internal UUID — translate.
-    target_external = await db.lookup_external_for_person(target_id)
-    target_chat_id_for_lark = int(target_external[1]) if target_external else 0
-
-    fields = {
-        "Tên": membership["name"],
-        "Chat ID": target_chat_id_for_lark,
-        "Type": person_type,
-        "Ghi chú": membership.get("request_info", ""),
-    }
-    rec = await lark.create_record(boss["lark_base_token"], boss["lark_table_people"], fields)
-
-    await db.upsert_membership(_db, target_id, boss_chat_id, person_type,
-                               membership["name"], "active",
-                               lark_record_id=rec.get("record_id"))
-
-    await tg.send_message(target_id,
-        f"Yêu cầu join {boss['company']} của bạn đã được chấp nhận với tư cách {person_type}. "
-        f"Hãy bắt đầu trò chuyện với thư ký AI nhé!")
-
-    return f"Đã approve user {target_id} với tư cách {person_type}."

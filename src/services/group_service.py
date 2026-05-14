@@ -156,9 +156,14 @@ async def _invite_member(ctx: ChatContext, name: str) -> str:
 
     if person and person.get("Chat ID"):
         try:
-            ok = await telegram.add_chat_member(ctx.chat_id, int(person["Chat ID"]))
-            if ok:
-                return f"Đã mời {person['Tên']} vào nhóm."
+            from src.utils.chat_id_resolver import resolve_lark_chat_id
+            internal_id = await resolve_lark_chat_id(
+                person["Chat ID"], person.get("Tên", "") or "",
+            )
+            if internal_id:
+                ok = await telegram.add_chat_member(ctx.chat_id, internal_id)
+                if ok:
+                    return f"Đã mời {person['Tên']} vào nhóm."
         except Exception:
             pass  # person hasn't DM'd bot or API error
 
@@ -185,7 +190,12 @@ async def _kick_member(ctx: ChatContext, name: str) -> str:
     if not person or not person.get("Chat ID"):
         return f"Không tìm thấy {name} trong danh sách nhân sự."
 
-    user_id = int(person["Chat ID"])
+    from src.utils.chat_id_resolver import resolve_lark_chat_id
+    user_id = await resolve_lark_chat_id(
+        person["Chat ID"], person.get("Tên", "") or "",
+    )
+    if not user_id:
+        return f"Không tìm thấy {name} trong danh sách nhân sự."
     await telegram.ban_chat_member(ctx.chat_id, user_id)
     await telegram.unban_chat_member(ctx.chat_id, user_id)  # ban + unban = kick without permanent ban
     return f"Đã xóa {person['Tên']} khỏi nhóm."

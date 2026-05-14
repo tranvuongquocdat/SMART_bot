@@ -1,9 +1,13 @@
-"""
-Note read/write tools. Takes ChatContext as first argument.
-"""
+"""Note read/write tools. Takes ChatContext as first argument."""
 import asyncio
+import logging
+from datetime import datetime, timezone
+
 from src import db
 from src.context import ChatContext
+from src.infrastructure import lark_client as lark
+
+logger = logging.getLogger("services.note")
 
 
 async def _embed_note(ctx: ChatContext, note_type: str, ref_id: str, content: str) -> None:
@@ -26,17 +30,50 @@ async def _embed_note(ctx: ChatContext, note_type: str, ref_id: str, content: st
             ref=ref_id,
         )
     except Exception:
-        pass  # Qdrant embedding is best-effort
+        logger.warning("Qdrant embed failed for note (%s/%s)", note_type, ref_id, exc_info=True)
+
+
+async def _sync_note_to_lark(
+    ctx: ChatContext, note_type: str, ref_id: str, content: str, sqlite_id: int,
+) -> None:
+    """Inline-await Lark sync; persist lark_record_id on success.
+    On failure: log warning. Reverse-sync reconciler will retry on next pass."""
+    if not ctx.lark_table_notes:
+        return
+    try:
+        rec_id = await lark.with_retry(lambda: lark.sync_note_to_lark(
+            ctx.lark_base_token,
+            ctx.lark_table_notes,
+            {
+                "type": note_type,
+                "ref_id": ref_id,
+                "content": content,
+                "updated_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+            },
+            sqlite_id,
+        ))
+        if rec_id:
+            from src.repositories.note_repo import NoteRepo
+            repo = NoteRepo(await db.get_db())
+            existing = await repo.get_by_id(sqlite_id)
+            if existing and not existing.get("lark_record_id"):
+                await repo.set_lark_record_id(sqlite_id, rec_id)
+    except Exception:
+        logger.warning(
+            "Lark sync failed for note (%s/%s); reconciler will retry",
+            note_type, ref_id, exc_info=True,
+        )
 
 
 async def update_note(ctx: ChatContext, note_type: str, ref_id: str, content: str) -> str:
-    await db.update_note(
+    sqlite_id = await db.update_note(
         boss_chat_id=ctx.boss_chat_id,
         note_type=note_type,
         ref_id=ref_id,
         content=content,
     )
     asyncio.create_task(_embed_note(ctx, note_type, ref_id, content))
+    await _sync_note_to_lark(ctx, note_type, ref_id, content, sqlite_id)
     return f"Đã cập nhật note ({note_type}/{ref_id})."
 
 
@@ -62,11 +99,12 @@ async def append_note(ctx: ChatContext, note_type: str, ref_id: str, content: st
         new_content = existing["content"] + "\n\n" + content
     else:
         new_content = content
-    await db.update_note(
+    sqlite_id = await db.update_note(
         boss_chat_id=ctx.boss_chat_id,
         note_type=note_type,
         ref_id=ref_id,
         content=new_content,
     )
     asyncio.create_task(_embed_note(ctx, note_type, ref_id, new_content))
+    await _sync_note_to_lark(ctx, note_type, ref_id, new_content, sqlite_id)
     return f"Đã cập nhật note ({note_type}/{ref_id})."

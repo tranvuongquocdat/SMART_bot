@@ -17,6 +17,67 @@ const fs = require('fs');
 const path = require('path');
 const readline = require('readline');
 const { Zalo, ThreadType } = require('zca-js');
+const fetchModule = require('node-fetch');
+const fetch = fetchModule.default || fetchModule;
+
+const INBOUND_ROOT = path.resolve(__dirname, '..', '..', '..', 'data', 'inbound');
+let cookieHeader = '';
+
+function buildCookieHeader(session) {
+  const c = session.cookie;
+  if (!c) return '';
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map((x) => `${x.name}=${x.value}`).join('; ');
+  return '';
+}
+
+const EXT_TO_MIME = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+  gif: 'image/gif', webp: 'image/webp', heic: 'image/heic',
+};
+
+function inferMime(filename, kind) {
+  const ext = (filename.split('.').pop() || '').toLowerCase();
+  if (EXT_TO_MIME[ext]) return EXT_TO_MIME[ext];
+  if (kind === 'image') return 'image/jpeg';
+  return 'application/octet-stream';
+}
+
+function safeName(name) {
+  return String(name || 'file')
+    .replace(/[/\\<>:"|?*\x00-\x1f]/g, '_')
+    .slice(0, 100);
+}
+
+async function downloadAttachment(href, threadId, msgId, filename) {
+  const dir = path.join(INBOUND_ROOT, String(threadId));
+  fs.mkdirSync(dir, { recursive: true });
+  const local = path.join(dir, `${msgId}_${safeName(filename)}`);
+  const headers = { 'User-Agent': 'Mozilla/5.0' };
+  if (cookieHeader) headers['Cookie'] = cookieHeader;
+  // Hard 15s timeout — Zalo CDN occasionally hangs; without this the
+  // listener handler stalls forever and new messages stop processing.
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 15000);
+  let resp;
+  try {
+    resp = await fetch(href, { headers, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const buf = Buffer.from(await resp.arrayBuffer());
+  fs.writeFileSync(local, buf);
+  console.error(`[bridge] downloaded ${filename} -> ${local} (${buf.length}B)`);
+  return { local_path: local, size_bytes: buf.length };
+}
 
 let sessionPath = path.join(__dirname, 'session.json');
 for (let i = 2; i < process.argv.length; i++) {
@@ -48,7 +109,7 @@ function detectKind(msgType) {
   return 'text';
 }
 
-function normalize(msg, ownId) {
+async function normalize(msg, ownId) {
   const data = msg.data || {};
   const isGroup = msg.type === 1;
   const threadId = String(msg.threadId || data.threadId || '');
@@ -64,7 +125,24 @@ function normalize(msg, ownId) {
     text = content.title || content.text || '';
     contentType = detectKind(msg.msgType);
     if (content.href) {
-      attachments.push({ kind: contentType, href: content.href });
+      const params = content.params || {};
+      const fileName = params.fileName || content.title || 'file';
+      const mime = inferMime(fileName, contentType);
+      const att = { kind: contentType, mime, filename: fileName };
+      try {
+        const dl = await downloadAttachment(
+          content.href,
+          threadId,
+          String(data.msgId || data.cliMsgId || Date.now()),
+          fileName,
+        );
+        att.local_path = dl.local_path;
+        att.size_bytes = Number(params.totalSize || dl.size_bytes || 0);
+      } catch (err) {
+        att.error = String((err && err.message) || err);
+        logErr('download', err, { href: content.href, fileName });
+      }
+      attachments.push(att);
     }
   }
 
@@ -106,6 +184,7 @@ let ownId = '';
 
 async function init() {
   const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
+  cookieHeader = buildCookieHeader(session);
   const zalo = new Zalo({ logging: false });
   api = await zalo.login({
     cookie: session.cookie,
@@ -115,11 +194,32 @@ async function init() {
   ownId = String(await api.getOwnId());
   console.error(`[bridge] logged in as uid=${ownId}`);
 
-  api.listener.on('message', (msg) => {
+  api.listener.on('message', async (msg) => {
+    // Diagnostic: surface every incoming event so we can tell if zca-js
+    // is even firing for the message in question (especially file/photo).
     try {
-      const norm = normalize(msg, ownId);
+      const summary = {
+        type: msg && msg.type,
+        msgType: msg && msg.msgType,
+        threadId: msg && (msg.threadId || (msg.data && msg.data.threadId)),
+        contentKind: typeof (msg && msg.data && msg.data.content),
+        hasHref: !!(msg && msg.data && msg.data.content && msg.data.content.href),
+      };
+      console.error('[bridge] msg event:', JSON.stringify(summary));
+    } catch (_) {}
+    try {
+      const norm = await normalize(msg, ownId);
+      console.error('[bridge] post-normalize:', JSON.stringify({
+        sender_uid: norm.sender_uid,
+        ownId: ownId,
+        is_self: norm.sender_uid === ownId,
+        text_len: (norm.text || '').length,
+        n_attachments: (norm.attachments || []).length,
+        first_att: (norm.attachments || [])[0] || null,
+      }));
       if (norm.sender_uid === ownId) return;
       emit({ event: 'message', data: norm });
+      console.error('[bridge] emitted message');
     } catch (err) {
       logErr('normalize', err);
     }

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import time as _time
+import unicodedata
+from pathlib import Path
 
 import httpx
 
@@ -26,6 +29,47 @@ from src.utils.text import full_name
 logger = logging.getLogger("channels.telegram")
 
 API = "https://api.telegram.org"
+
+_INBOUND_ROOT = Path("data/inbound")
+
+
+def _safe_filename(name: str) -> str:
+    name = unicodedata.normalize("NFC", name or "file")
+    name = re.sub(r'[/\\<>:"|?*\x00-\x1f]', "_", name)
+    if "." in name:
+        base, ext = name.rsplit(".", 1)
+        return f"{base[:80]}.{ext[:20]}"
+    return name[:80]
+
+
+async def _download_to_disk(
+    http_client, bot_token: str, file_id: str,
+    chat_id: str, msg_id: str, filename: str,
+) -> str:
+    """Telegram getFile + GET file. Returns local path or '' on failure."""
+    try:
+        r = await http_client.get(
+            f"https://api.telegram.org/bot{bot_token}/getFile",
+            params={"file_id": file_id},
+        )
+        r.raise_for_status()
+        body = r.json()
+        if not body.get("ok"):
+            return ""
+        file_path = body["result"]["file_path"]
+        url = f"https://api.telegram.org/file/bot{bot_token}/{file_path}"
+        r2 = await http_client.get(url)
+        r2.raise_for_status()
+        d = _INBOUND_ROOT / chat_id
+        d.mkdir(parents=True, exist_ok=True)
+        local = d / f"{msg_id}_{_safe_filename(filename)}"
+        local.write_bytes(r2.content)
+        return str(local)
+    except Exception:
+        logger.warning(
+            "telegram download failed for file_id=%s", file_id, exc_info=True,
+        )
+        return ""
 
 _ADMIN_TTL = 600  # seconds
 
@@ -191,19 +235,41 @@ class TelegramMessenger(BaseMessenger):
                     "username": m.get("username", ""),
                 })
 
-        # --- Attachments (basic) ---
+        # --- Attachments ---
         attachments: list[Attachment] = []
+        msg_id_str = str(message.get("message_id", ""))
+        chat_id_str = str(chat_id)
         if message.get("photo"):
-            attachments.append(Attachment(kind="photo"))
+            photos = message["photo"]
+            largest = photos[-1]
+            unique = largest.get("file_unique_id", largest.get("file_id", "p"))
+            name = f"{unique}.jpg"
+            local = await _download_to_disk(
+                self._client, self._token, largest["file_id"],
+                chat_id_str, msg_id_str, name,
+            )
+            attachments.append(Attachment(
+                kind="photo",
+                url=local,
+                mime_type="image/jpeg",
+                filename=name,
+                size_bytes=int(largest.get("file_size", 0)),
+            ))
         if message.get("voice"):
-            attachments.append(Attachment(kind="voice"))
+            attachments.append(Attachment(kind="voice"))  # voice out of scope
         if message.get("document"):
             doc = message["document"]
+            name = doc.get("file_name") or f"doc_{doc.get('file_unique_id', '')}"
+            local = await _download_to_disk(
+                self._client, self._token, doc["file_id"],
+                chat_id_str, msg_id_str, name,
+            )
             attachments.append(Attachment(
                 kind="file",
-                filename=doc.get("file_name", ""),
+                url=local,
+                filename=name,
                 mime_type=doc.get("mime_type", ""),
-                size_bytes=doc.get("file_size", 0),
+                size_bytes=int(doc.get("file_size", 0)),
             ))
 
         # Resolve external chat_id / sender_id → internal ids (UUID).

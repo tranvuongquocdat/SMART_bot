@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 import asyncio
 
 from src import db
+from src.channels import telegram_singleton as telegram
 from src.config import Settings
 from src.context import ChatContext
 from src.infrastructure import lark_client as lark
@@ -42,16 +43,10 @@ async def _resolve_target(ctx: ChatContext, target: str) -> tuple[Optional[int],
     name = str(person.get("Tên", target))
     chat_id_val = person.get("Chat ID")
     if chat_id_val:
-        try:
-            # Lark stores external numeric. reminders.target_chat_id holds
-            # internal UUID — resolve before returning so the caller writes
-            # the right shape into the DB.
-            internal_id = await db.resolve_or_create_person(
-                "telegram", str(int(chat_id_val)), name, ""
-            )
+        from src.utils.chat_id_resolver import resolve_lark_chat_id
+        internal_id = await resolve_lark_chat_id(chat_id_val, name)
+        if internal_id:
             return internal_id, name
-        except (ValueError, TypeError):
-            pass
     return None, name
 
 
@@ -80,40 +75,66 @@ async def create_reminder(
         if not target_name:
             target_name = target
 
-    # Encode task_keyword and project as structured prefix in content
     stored_content = content
     if project:
         stored_content = f"[project:{project}] {stored_content}"
     if task_keyword:
         stored_content = f"[task:{task_keyword}] {stored_content}"
 
+    source_chat_id = str(ctx.chat_id) if ctx.is_group else None
     reminder_id = await db.create_reminder(
         boss_chat_id=ctx.boss_chat_id,
         content=stored_content,
         remind_at=remind_dt,
         target_chat_id=target_chat_id,
         target_name=target_name,
+        source_chat_id=source_chat_id,
     )
 
-    # Sync to Lark async (non-blocking)
-    if ctx.lark_table_reminders:
-        boss = await db.get_boss(str(ctx.boss_chat_id))
-        if boss:
-            asyncio.create_task(lark.sync_reminder_to_lark(
-                ctx.lark_base_token,
-                ctx.lark_table_reminders,
-                {
-                    "content": stored_content,
-                    "remind_at_local": remind_at,
-                    "target_name": target_name,
-                    "status": "pending",
-                },
-                reminder_id,
-            ))
+    base = (
+        f"Da tao nhac nho #{reminder_id}: '{content}' cho {target_name} luc {remind_at}."
+        if target_name and target_chat_id
+        else f"Da tao nhac nho #{reminder_id}: '{content}' luc {remind_at}."
+    )
 
-    if target_name and target_chat_id:
-        return f"Da tao nhac nho #{reminder_id}: '{content}' cho {target_name} luc {remind_at}."
-    return f"Da tao nhac nho #{reminder_id}: '{content}' luc {remind_at}."
+    if ctx.is_group:
+        target_disp = target_name or "sếp"
+        summary = f"Reminder: {content} for {target_disp} at {remind_at}"
+        try:
+            await telegram.send(str(ctx.chat_id), summary, save_history=False)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger("services.reminder").warning(
+                "group announce failed for reminder %d", reminder_id, exc_info=True,
+            )
+
+    if not ctx.lark_table_reminders:
+        return base
+
+    try:
+        record_id = await lark.with_retry(lambda: lark.sync_reminder_to_lark(
+            ctx.lark_base_token,
+            ctx.lark_table_reminders,
+            {
+                "content": stored_content,
+                "remind_at_local": remind_at,
+                "target_name": target_name,
+                "status": "pending",
+            },
+            reminder_id,
+        ))
+        if record_id:
+            from src.repositories.reminder_repo import ReminderRepo
+            repo = ReminderRepo(await db.get_db())
+            await repo.set_lark_record_id(reminder_id, record_id)
+        return base
+    except Exception:
+        import logging as _logging
+        _logging.getLogger("services.reminder").warning(
+            "Lark sync failed for reminder %d; reconciler will retry", reminder_id,
+            exc_info=True,
+        )
+        return base + " (đang chờ đồng bộ Lark)"
 
 
 async def list_reminders(
@@ -181,10 +202,62 @@ async def update_reminder(
     )
     if not ok:
         return f"Khong tim thay nhac nho #{reminder_id} hoac khong co truong nao de cap nhat."
-    return f"Da cap nhat nhac nho #{reminder_id}."
+
+    base = f"Da cap nhat nhac nho #{reminder_id}."
+
+    if not ctx.lark_table_reminders:
+        return base
+
+    from src.repositories.reminder_repo import ReminderRepo
+    repo = ReminderRepo(await db.get_db())
+    row = await repo.get_by_id(reminder_id)
+    if not row:
+        return base
+
+    remind_at_local = remind_at or _utc_naive_stored_to_local_display(row["remind_at"])
+    try:
+        rec_id = await lark.with_retry(lambda: lark.sync_reminder_to_lark(
+            ctx.lark_base_token,
+            ctx.lark_table_reminders,
+            {
+                "content": row["content"],
+                "remind_at_local": remind_at_local,
+                "target_name": row.get("target_name") or "",
+                "status": row["status"],
+            },
+            reminder_id,
+        ))
+        if rec_id and not row.get("lark_record_id"):
+            await repo.set_lark_record_id(reminder_id, rec_id)
+        return base
+    except Exception:
+        import logging as _logging
+        _logging.getLogger("services.reminder").warning(
+            "Lark update sync failed for reminder %d", reminder_id, exc_info=True,
+        )
+        return base + " (đang chờ đồng bộ Lark)"
 
 
 async def delete_reminder(ctx: ChatContext, reminder_id: int) -> str:
+    from src.repositories.reminder_repo import ReminderRepo
+    repo = ReminderRepo(await db.get_db())
+    row = await repo.get_by_id(reminder_id)
+    if not row or str(row.get("boss_chat_id")) != str(ctx.boss_chat_id):
+        return f"Khong tim thay nhac nho #{reminder_id}."
+
+    lark_id = row.get("lark_record_id")
+    if lark_id and ctx.lark_table_reminders:
+        try:
+            await lark.with_retry(lambda: lark.delete_record(
+                ctx.lark_base_token, ctx.lark_table_reminders, lark_id,
+            ))
+        except Exception:
+            import logging as _logging
+            _logging.getLogger("services.reminder").warning(
+                "Lark delete failed for reminder %d", reminder_id, exc_info=True,
+            )
+            return f"Lark dang loi, chua xoa duoc #{reminder_id} — anh thu lai sau."
+
     ok = await db.delete_reminder(reminder_id, ctx.boss_chat_id)
     if not ok:
         return f"Khong tim thay nhac nho #{reminder_id}."

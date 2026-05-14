@@ -17,6 +17,7 @@ from src.infrastructure import lark_client as lark
 from src.agent.tool_definitions import TOOL_DEFINITIONS
 from src.agent.tool_dispatcher import ToolDispatcher
 from src.agent.handlers.web_search import WebSearchHandler
+from src.agent.handlers.url_fetch import FetchUrlHandler
 from src.agent.handlers.escalate import EscalateToAdvisorHandler
 from src.agent.handlers.tasks import (
     CreateTaskHandler, ListTasksHandler, UpdateTaskHandler, DeleteTaskHandler,
@@ -72,7 +73,7 @@ from src.agent.handlers.workspace import SetLanguageHandler, SwitchWorkspaceHand
 # constructor-inject those services.
 _dispatcher = ToolDispatcher([
     # foundation (Phase 4b-1)
-    WebSearchHandler(), EscalateToAdvisorHandler(),
+    WebSearchHandler(), EscalateToAdvisorHandler(), FetchUrlHandler(),
     # tasks
     CreateTaskHandler(), ListTasksHandler(), UpdateTaskHandler(),
     DeleteTaskHandler(), SearchTasksHandler(),

@@ -77,6 +77,22 @@ class ConversationRepo:
             row = await cur.fetchone()
         return row["internal_chat_id"] if row else None
 
+    async def lookup_conversation_by_external_id(
+        self, external_chat_id: str,
+    ) -> Optional[tuple[str, str, str]]:
+        """Provider-agnostic: external_chat_id → (internal_chat_id, provider, chat_type) or None.
+
+        Used when reading raw external chat ids whose channel isn't known
+        up-front (Telegram numeric vs Zalo alphanum)."""
+        async with self._db.execute(
+            """SELECT internal_chat_id, provider, chat_type FROM conversation
+               WHERE external_chat_id = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (str(external_chat_id),),
+        ) as cur:
+            row = await cur.fetchone()
+        return (row["internal_chat_id"], row["provider"], row["chat_type"]) if row else None
+
     async def get_kind(self, internal_chat_id: str) -> str:
         async with self._db.execute(
             "SELECT chat_type FROM conversation WHERE internal_chat_id = ?",

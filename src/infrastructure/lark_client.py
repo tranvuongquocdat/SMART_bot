@@ -1,4 +1,7 @@
+import asyncio
+import logging
 import time
+from typing import Any, Awaitable, Callable
 
 import httpx
 
@@ -10,6 +13,9 @@ _tenant_token: str = ""
 _token_expires: float = 0
 
 LARK_API = "https://open.larksuite.com/open-apis"
+
+_HARD_CAP = 5000
+_logger = logging.getLogger("infrastructure.lark")
 
 # ---------------------------------------------------------------------------
 # Field definitions for provisioning
@@ -217,6 +223,40 @@ async def provision_workspace(company_name: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Retry wrapper — recoverable failures only
+# ---------------------------------------------------------------------------
+
+
+def _is_transient(exc: BaseException) -> bool:
+    if isinstance(exc, httpx.RequestError):
+        return True
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return False
+
+
+async def with_retry(
+    fn: Callable[[], Awaitable[Any]],
+    attempts: int = 2,
+    backoff: float = 0.5,
+) -> Any:
+    """Retry httpx network errors and HTTP 5xx. attempts=2 means initial call + up to 2 retries.
+    Lark business errors (raised as plain Exception with 'Lark error: code') are NOT retried."""
+    last_exc: BaseException | None = None
+    for tryno in range(attempts + 1):
+        try:
+            return await fn()
+        except BaseException as exc:
+            if not _is_transient(exc):
+                raise
+            last_exc = exc
+            if tryno < attempts:
+                await asyncio.sleep(backoff * (2 ** tryno))
+    assert last_exc is not None
+    raise last_exc
+
+
+# ---------------------------------------------------------------------------
 # CRUD helpers
 # ---------------------------------------------------------------------------
 
@@ -235,21 +275,38 @@ async def create_record(base_token: str, table_id: str, fields: dict) -> dict:
 
 
 async def search_records(base_token: str, table_id: str, filter_expr: str = "") -> list[dict]:
-    params = {"page_size": 100}
-    if filter_expr:
-        params["filter"] = filter_expr
-    resp = await _client.get(
-        f"{LARK_API}/bitable/v1/apps/{base_token}/tables/{table_id}/records",
-        headers=await _headers(),
-        params=params,
-    )
-    resp.raise_for_status()
-    body = resp.json()
-    if body.get("code") != 0:
-        raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
-    data = body.get("data", {})
-    items = data.get("items") or []
-    return [{"record_id": r["record_id"], **r["fields"]} for r in items]
+    items: list[dict] = []
+    page_token: str | None = None
+    while True:
+        params: dict = {"page_size": 500}
+        if page_token:
+            params["page_token"] = page_token
+        if filter_expr:
+            params["filter"] = filter_expr
+        resp = await _client.get(
+            f"{LARK_API}/bitable/v1/apps/{base_token}/tables/{table_id}/records",
+            headers=await _headers(),
+            params=params,
+        )
+        resp.raise_for_status()
+        body = resp.json()
+        if body.get("code") != 0:
+            raise Exception(f"Lark error: {body.get('code')} - {body.get('msg')}")
+        data = body.get("data", {})
+        for r in data.get("items") or []:
+            items.append({"record_id": r["record_id"], **r["fields"]})
+        if len(items) >= _HARD_CAP:
+            _logger.warning(
+                "search_records: hit hard cap %d for table %s — additional rows ignored",
+                _HARD_CAP, table_id,
+            )
+            break
+        if not data.get("has_more"):
+            break
+        page_token = data.get("page_token")
+        if not page_token:
+            break
+    return items
 
 
 async def update_record(base_token: str, table_id: str, record_id: str, fields: dict) -> dict:

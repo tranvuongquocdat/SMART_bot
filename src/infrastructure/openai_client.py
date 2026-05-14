@@ -30,3 +30,14 @@ async def chat_with_tools(messages: list[dict], tools: list[dict]) -> tuple:
 async def embed(text: str) -> list[float]:
     response = await _client.embeddings.create(input=text, model=_embedding_model)
     return response.data[0].embedding
+
+
+def get_client() -> AsyncOpenAI:
+    """Return the initialized default AsyncOpenAI client.
+
+    File uploads (openai_files.upload) currently use this default client
+    rather than per-boss credentials — acceptable for ephemeral file refs.
+    """
+    if _client is None:
+        raise RuntimeError("openai client not initialized — call init_openai first")
+    return _client

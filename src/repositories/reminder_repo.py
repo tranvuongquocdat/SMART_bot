@@ -14,12 +14,15 @@ class ReminderRepo:
     async def create(
         self, boss_chat_id: str, content: str, remind_at: datetime,
         target_chat_id: Optional[str] = None, target_name: str = "",
+        source_chat_id: Optional[str] = None,
     ) -> int:
         remind_at_str = remind_at.isoformat(sep=" ", timespec="seconds")
         cur = await self._db.execute(
-            "INSERT INTO reminders (boss_chat_id, target_chat_id, target_name, content, remind_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (str(boss_chat_id), target_chat_id, target_name, content, remind_at_str),
+            "INSERT INTO reminders "
+            "(boss_chat_id, target_chat_id, target_name, content, remind_at, source_chat_id) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (str(boss_chat_id), target_chat_id, target_name, content, remind_at_str,
+             source_chat_id),
         )
         await self._db.commit()
         return cur.lastrowid
@@ -102,5 +105,78 @@ class ReminderRepo:
         await self._db.execute(
             "UPDATE reminders SET content = ?, status = ? WHERE id = ?",
             (content, status, sqlite_id),
+        )
+        await self._db.commit()
+
+    async def set_lark_record_id(self, reminder_id: int, lark_record_id: str) -> None:
+        await self._db.execute(
+            "UPDATE reminders SET lark_record_id = ? WHERE id = ?",
+            (lark_record_id, reminder_id),
+        )
+        await self._db.commit()
+
+    async def get_by_id(self, reminder_id: int) -> Optional[dict]:
+        async with self._db.execute(
+            "SELECT * FROM reminders WHERE id = ?", (reminder_id,)
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def find_by_lark_id(self, boss_chat_id: str, lark_record_id: str) -> Optional[dict]:
+        async with self._db.execute(
+            "SELECT * FROM reminders WHERE boss_chat_id = ? AND lark_record_id = ?",
+            (str(boss_chat_id), lark_record_id),
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
+    async def list_unsynced_pending(self, boss_chat_id: str) -> list[dict]:
+        async with self._db.execute(
+            """SELECT * FROM reminders
+               WHERE boss_chat_id = ?
+                 AND lark_record_id IS NULL
+                 AND status = 'pending'""",
+            (str(boss_chat_id),),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def list_with_lark_id(self, boss_chat_id: str) -> list[dict]:
+        async with self._db.execute(
+            """SELECT * FROM reminders
+               WHERE boss_chat_id = ? AND lark_record_id IS NOT NULL""",
+            (str(boss_chat_id),),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def tombstone(self, reminder_id: int) -> None:
+        # Schema CHECK allows only ('pending', 'done'). Re-use 'done' as the tombstone
+        # state — scheduler skips both 'done' and tombstoned rows for the same reason.
+        await self._db.execute(
+            "UPDATE reminders SET status = 'done' WHERE id = ?", (reminder_id,)
+        )
+        await self._db.commit()
+
+    async def update_remind_at_and_content(
+        self, reminder_id: int, *,
+        content: Optional[str] = None,
+        remind_at: Optional[datetime] = None,
+        status: Optional[str] = None,
+    ) -> None:
+        sets: list[str] = []
+        params: list = []
+        if content is not None:
+            sets.append("content = ?"); params.append(content)
+        if remind_at is not None:
+            sets.append("remind_at = ?")
+            params.append(remind_at.isoformat(sep=" ", timespec="seconds"))
+        if status is not None:
+            sets.append("status = ?"); params.append(status)
+        if not sets:
+            return
+        params.append(reminder_id)
+        await self._db.execute(
+            f"UPDATE reminders SET {', '.join(sets)} WHERE id = ?", params
         )
         await self._db.commit()

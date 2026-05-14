@@ -1,8 +1,12 @@
 import asyncio
 import logging
+import mimetypes
+import os
+import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +65,17 @@ async def lifespan(_app: FastAPI):
     from src.channels import registry as channel_registry
     channel_registry.register("telegram", telegram.get_messenger())
 
+    # Debug channel for /debug/test_message — only when enabled.
+    if settings.debug_enabled:
+        from src.channels.capturing_messenger import CapturingMessenger
+        debug_messenger = CapturingMessenger()
+        channel_registry.register("debug", debug_messenger)
+        _app.state.container.messengers["debug"] = debug_messenger
+        _app.state.debug_settings = settings
+        logging.getLogger("main").warning(
+            "DEBUG endpoint /debug/test_message ENABLED — disable in production",
+        )
+
     # Start scheduler + polling. Polling now feeds raw IncomingMessage to the
     # router (skipping the legacy positional-arg bridge in services/telegram).
     await scheduler.start(settings)
@@ -114,3 +129,86 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+
+@app.post("/debug/test_message")
+async def debug_test_message(request: Request):
+    """Drive the bot end-to-end without Telegram/Zalo.
+
+    Body:
+      {
+        "text": "Tóm tắt giúp file PDF này",
+        "attach": "/app/data/inbound/test.pdf",  # optional, path inside container
+        "boss_id": "<chat_id>"  # optional; defaults to first boss in DB
+      }
+
+    Returns: {reply, all_messages: [(send|edit, text)], elapsed_sec}
+
+    Gated by settings.debug_enabled (env: DEBUG_ENABLED=true). Off by default.
+    """
+    settings = getattr(request.app.state, "debug_settings", None)
+    if settings is None or not settings.debug_enabled:
+        raise HTTPException(status_code=404, detail="not found")
+
+    body = await request.json()
+    text = (body.get("text") or "").strip()
+    attach_path = body.get("attach") or ""
+    boss_id = body.get("boss_id") or ""
+
+    if not text and not attach_path:
+        raise HTTPException(400, "either 'text' or 'attach' required")
+
+    if not boss_id:
+        bosses = await db.get_all_bosses()
+        if not bosses:
+            raise HTTPException(404, "no bosses in DB; onboard one first")
+        boss_id = bosses[0]["chat_id"]
+
+    # Resolve / create a debug-channel conversation tied to this boss.
+    conv_id = await db.resolve_or_create_conversation("debug", boss_id, "dm", "")
+
+    # Build attachments if requested
+    from src.channels.base import Attachment, IncomingMessage
+    attachments: list[Attachment] = []
+    if attach_path:
+        p = Path(attach_path)
+        if not p.exists():
+            raise HTTPException(404, f"file not found inside container: {attach_path}")
+        mime, _ = mimetypes.guess_type(str(p))
+        attachments.append(Attachment(
+            kind="file",
+            url=str(p),
+            mime_type=mime or "application/octet-stream",
+            filename=p.name,
+            size_bytes=p.stat().st_size,
+        ))
+
+    incoming = IncomingMessage(
+        channel="debug",
+        chat_id=conv_id,
+        chat_type="dm",
+        sender_id=boss_id,
+        sender_name="DebugUser",
+        text=text,
+        attachments=attachments,
+        timestamp=int(time.time()),
+    )
+
+    from src.channels.capturing_messenger import (
+        set_capture_buffer, reset_capture_buffer,
+    )
+    buf: list[tuple[str, str]] = []
+    token = set_capture_buffer(buf)
+    t0 = time.monotonic()
+    try:
+        await request.app.state.router.handle(incoming)
+    finally:
+        reset_capture_buffer(token)
+    elapsed = time.monotonic() - t0
+
+    final = buf[-1][1] if buf else ""
+    return {
+        "reply": final,
+        "all_messages": buf,
+        "elapsed_sec": round(elapsed, 3),
+    }

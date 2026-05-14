@@ -22,12 +22,39 @@ from src.infrastructure import lark_client as lark
 from src.agent.tool_definitions import TOOL_DEFINITIONS
 from src.agent.llm_for_ctx import get_llm_for_ctx, get_default_llm
 from src.infrastructure.llm.factory import get_llm_client
+from src.utils.sentinels import strip_sentinels
 
 logger = logging.getLogger("agent")
 
 _settings: Settings | None = None
 
 MAX_TOOL_ROUNDS = 10
+
+# --- Pending-attachment buffer ---------------------------------------------
+# When a boss sends a file/image with no user caption (just the file), the
+# bot stays silent and stashes the attachments for a short window. The next
+# text message in the same chat picks them up and processes file + prompt
+# together — same UX as ChatGPT file uploads.
+
+_PENDING_TTL_SEC = 300  # 5 minutes
+_pending_attachments: dict[str, tuple[float, list]] = {}
+
+
+def _looks_like_filename(text: str, atts: list) -> bool:
+    """True when `text` is auto-generated from the attachment (e.g. Zalo
+    sets text=content.title which is the filename) — i.e. not a real
+    user-typed caption."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    filenames = {a.filename for a in atts if getattr(a, "filename", "")}
+    return t in filenames
+
+
+def _sweep_expired_pending() -> None:
+    now = time.monotonic()
+    for k in [k for k, (deadline, _) in _pending_attachments.items() if deadline < now]:
+        _pending_attachments.pop(k, None)
 
 
 def init(settings: Settings) -> None:
@@ -117,6 +144,7 @@ THINKING_MAP = {
     "get_summary": "Đang tổng hợp...",
     "get_workload": "Đang xem workload...",
     "web_search": "Đang tìm kiếm web...",
+    "fetch_url": "Đang mở link...",
     "escalate_to_advisor": "Đang phân tích chiến lược...",
     "create_reminder": "Đang tạo nhắc nhở...",
     "list_reminders": "Đang xem nhắc nhở...",
@@ -182,6 +210,36 @@ async def _build_people_summary(ctx: ChatContext) -> str:
     except Exception:
         logger.exception("Failed to build people summary")
         return "(Không thể tải danh sách nhân sự)"
+
+
+async def _notify_boss_new_members(
+    boss_chat_id: str, group_label: str, new_members: list[dict],
+) -> None:
+    """When somebody joins an onboarded group, DM the boss so they can decide
+    whether to add them to the team (and via which role). Channel-agnostic:
+    `telegram.send` routes to whichever channel the boss registered with."""
+    try:
+        names = []
+        for m in new_members or []:
+            n = (m.get("name") or "").strip()
+            u = (m.get("username") or "").strip()
+            if n and u:
+                names.append(f"{n} (@{u})")
+            elif n:
+                names.append(n)
+            elif u:
+                names.append(f"@{u}")
+        if not names:
+            return
+        joined = ", ".join(names)
+        plural = "Có người" if len(names) == 1 else f"Có {len(names)} người"
+        msg = (
+            f"{plural} vừa vào group *{group_label}*: {joined}\n\n"
+            f"Anh có muốn thêm họ vào team không? (member / partner — hoặc bỏ qua)"
+        )
+        await telegram.send(boss_chat_id, msg)
+    except Exception:
+        logger.exception("[new-member-notify] failed for boss=%s", boss_chat_id)
 
 
 def _build_zalo_guidance(settings) -> str:
@@ -254,7 +312,7 @@ async def _build_turn_messages(
         db.get_recent(chat_id, limit=_settings.recent_messages),
         qdrant.search(
             collection=ctx.messages_collection,
-            query=text,
+            query=strip_sentinels(text),
             chat_id=chat_id,
             top_n=_settings.rag_messages,
         ),
@@ -321,6 +379,7 @@ async def handle_message(
     username_mentions: list[str] | None = None,
     reply_to: dict | None = None,
     new_members: list[dict] | None = None,
+    attachments: list | None = None,
 ):
     # Lazy import — `src.agent` imports us back, so we resolve at call time.
     from src.agent import _dispatcher
@@ -332,6 +391,47 @@ async def handle_message(
     new_members = new_members or []
 
     logger.info("%s >>> INPUT: %s", log_prefix, text[:200])
+
+    # ---- Pending-attachment buffer (ChatGPT-style file-then-prompt) ----
+    _sweep_expired_pending()
+    attachments = attachments or []
+    if attachments and _looks_like_filename(text, attachments):
+        # Bare file message — defer until the next text prompt. Multiple
+        # files in quick succession are accumulated; each new bare-file
+        # message extends the deadline.
+        existing = _pending_attachments.get(chat_id)
+        prior = list(existing[1]) if existing else []
+        combined = prior + list(attachments)
+        _pending_attachments[chat_id] = (
+            time.monotonic() + _PENDING_TTL_SEC, combined,
+        )
+        logger.info(
+            "%s file-only message stashed (+%d files, total %d in stash)",
+            log_prefix, len(attachments), len(combined),
+        )
+        return  # silent — no reply
+    if not attachments and chat_id in _pending_attachments:
+        deadline, pending = _pending_attachments.pop(chat_id)
+        if time.monotonic() < deadline:
+            attachments = list(pending)
+            logger.info(
+                "%s merged %d pending attachments with new prompt",
+                log_prefix, len(pending),
+            )
+
+    # ---- Step 0: Ingest file attachments → sentinels appended to text ----
+    if attachments:
+        from src.agent.file_ingestion import ingest as _ingest_files
+        from src.infrastructure import openai_client as _openai_client_mod
+        try:
+            ingested = await _ingest_files(
+                _openai_client_mod.get_client(), attachments, chat_id,
+            )
+            if ingested:
+                text = (text + "\n\n" + ingested).strip() if text else ingested
+                logger.info("%s file attachments ingested (%d)", log_prefix, len(attachments))
+        except Exception:
+            logger.exception("%s file_ingestion failed", log_prefix)
 
     sender_dict = {"id": sender_id, "name": sender_name, "username": ""} if sender_id else None
     asyncio.create_task(
@@ -345,6 +445,19 @@ async def handle_message(
     )
 
     try:
+        # ---- Step 0.5: Reset / re-onboard hook ------------------------
+        # When the inbound text contains the configured onboard phrase,
+        # short-circuit: clear any half-finished onboarding state and
+        # restart from scratch — OR for users who already have a workspace,
+        # send a no-op info reply (we don't nuke active memberships).
+        if not is_group and text and _settings:
+            from src import onboarding as _ob  # noqa: PLC0415
+            handled = await _ob.maybe_handle_reset_phrase(
+                text, chat_id, sender_id, _settings.zalo_onboard_phrase,
+            )
+            if handled:
+                return
+
         # ---- Step 1: Group routing ----
         if is_group:
             group_info = await db.get_group(chat_id)
@@ -353,17 +466,25 @@ async def handle_message(
                 if not group_info:
                     return
                 boss_id = group_info["boss_chat_id"]
+                # Proactive: ping boss when a new member joins an onboarded
+                # group. Channel of the boss is preserved by telegram.send →
+                # _messenger_for routing (Zalo boss gets a Zalo DM).
+                if new_members:
+                    asyncio.create_task(_notify_boss_new_members(
+                        boss_id, group_name or chat_id, new_members,
+                    ))
                 msg_id = await db.save_message(chat_id, "user", text, sender_id)
                 _boss_row = await db.get_boss(boss_id) or {}
                 _llm = get_llm_client(_boss_row, _settings or Settings())
-                vector, _dim = await _llm.embed(text)
+                _clean = strip_sentinels(text)
+                vector, _dim = await _llm.embed(_clean)
                 asyncio.create_task(
                     qdrant.upsert(
                         collection=f"messages_{boss_id}_{_dim}",
                         point_id=msg_id,
                         chat_id=chat_id,
                         role="user",
-                        text=text,
+                        text=_clean,
                         vector=vector,
                     )
                 )
@@ -397,8 +518,8 @@ async def handle_message(
             except Exception:
                 logger.warning("%s save_message (DM onboarding user) failed", log_prefix, exc_info=True)
             if not await onboarding.is_onboarding(chat_id):
-                await onboarding.start_onboarding(chat_id)
-            await onboarding.handle_onboard_message(text, chat_id)
+                await onboarding.start_onboarding(chat_id, sender_id)
+            await onboarding.handle_onboard_message(text, chat_id, sender_id)
             return
 
         log_prefix = f"[chat:{chat_id} sender:{sender_id} boss:{ctx.boss_chat_id}]"
@@ -414,14 +535,15 @@ async def handle_message(
         # ---- Step 3: Save user message ----
         msg_id = await db.save_message(chat_id, "user", text, sender_id)
         llm = await get_llm_for_ctx(ctx)
-        vector, _ = await llm.embed(text)
+        _clean_user = strip_sentinels(text)
+        vector, _ = await llm.embed(_clean_user)
         asyncio.create_task(
             qdrant.upsert(
                 collection=ctx.messages_collection,
                 point_id=msg_id,
                 chat_id=chat_id,
                 role="user",
-                text=text,
+                text=_clean_user,
                 vector=vector,
             )
         )

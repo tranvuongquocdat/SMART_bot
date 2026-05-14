@@ -24,6 +24,10 @@ RUN cd src/channels/zalo_bridge && npm install --omit=dev --no-audit --no-fund
 # App source. node_modules from the previous step is preserved (COPY merges).
 COPY src/ src/
 
+# Inbound file scratch dir (mounted as part of data/ volume in compose,
+# but must exist on first run before any download).
+RUN mkdir -p data/inbound
+
 ENV PATH="/app/.venv/bin:$PATH"
 
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "24702"]

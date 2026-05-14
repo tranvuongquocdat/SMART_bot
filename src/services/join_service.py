@@ -8,6 +8,7 @@ from src import db
 from src.context import ChatContext
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
+from src.services import membership_service
 
 logger = logging.getLogger("tools.join")
 
@@ -64,10 +65,7 @@ async def request_join(ctx: ChatContext, target_boss_id: str, role: str, intro: 
 
 
 async def approve_join(ctx: ChatContext, membership_chat_id: str, role: str = None) -> str:
-    """
-    Approve a join request. Writes person to Lark People table of THIS workspace.
-    ctx must be the target boss's context.
-    """
+    """Approve a join request. Routes the write through membership_service.activate()."""
     _db = await db.get_db()
     membership = await db.get_membership(_db, str(membership_chat_id), str(ctx.boss_chat_id))
     if not membership or membership["status"] != "pending":
@@ -75,44 +73,29 @@ async def approve_join(ctx: ChatContext, membership_chat_id: str, role: str = No
 
     person_type = role or membership["person_type"]
     name = membership["name"] or "Unknown"
+    request_info = membership.get("request_info", "")
 
-    # Lark "Chat ID" stores external Telegram numeric id. membership_chat_id
-    # is internal UUID after Phase 2 — translate.
-    target_external = await db.lookup_external_for_person(membership_chat_id)
-    chat_id_for_lark = int(target_external[1]) if target_external else 0
-
-    fields = {
-        "Tên": name,
-        "Chat ID": chat_id_for_lark,
-        "Type": person_type,
-        "Ghi chú": membership.get("request_info", ""),
-    }
-    try:
-        rec = await lark.create_record(ctx.lark_base_token, ctx.lark_table_people, fields)
-        lark_record_id = rec.get("record_id", "")
-    except Exception:
-        logger.exception("Failed to write to Lark People for membership %s", membership_chat_id)
-        lark_record_id = ""
-
-    await db.upsert_membership(
-        _db,
+    await membership_service.activate(
         chat_id=str(membership_chat_id),
         boss_chat_id=str(ctx.boss_chat_id),
         person_type=person_type,
         name=name,
-        status="active",
-        lark_record_id=lark_record_id,
+        source="approval",
+        request_info=request_info,
     )
 
     company = ctx.boss_name
+    # Notify the stranger on their own channel. Failure here is non-fatal —
+    # boss still gets the success string; we just log so the gap is visible.
     try:
-        await telegram.send(
-            membership_chat_id,
-            f"Your request to join {company} has been approved as {person_type}. "
-            f"You can now interact with the AI secretary for {company}.",
+        role_label = "thành viên" if person_type == "member" else "đối tác"
+        msg = (
+            f"Yêu cầu tham gia *{company}* đã được duyệt với vai trò *{role_label}*. "
+            f"Bạn có thể bắt đầu nhắn việc / hỏi bot ngay."
         )
+        await telegram.send(str(membership_chat_id), msg)
     except Exception:
-        logger.exception("Failed to notify approved member %s", membership_chat_id)
+        logger.exception("approve_join: failed to notify stranger %s", membership_chat_id)
 
     return f"Approved {name} as {person_type} in {company}."
 

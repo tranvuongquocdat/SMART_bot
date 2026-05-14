@@ -77,6 +77,21 @@ class IdentityRepo:
             row = await cur.fetchone()
         return row["internal_id"] if row else None
 
+    async def lookup_person_by_external_id(
+        self, external_id: str,
+    ) -> Optional[tuple[str, str]]:
+        """Provider-agnostic: external_id → (internal_id, provider) or None.
+        Used when reading raw Chat ID from Lark — we don't know which channel
+        the contact belongs to (Telegram numeric vs Zalo alphanum)."""
+        async with self._db.execute(
+            """SELECT internal_id, provider FROM external_identity
+               WHERE external_id = ?
+               ORDER BY created_at DESC LIMIT 1""",
+            (str(external_id),),
+        ) as cur:
+            row = await cur.fetchone()
+        return (row["internal_id"], row["provider"]) if row else None
+
     # --- seen_contacts --------------------------------------------------------
 
     async def upsert_seen_contact(

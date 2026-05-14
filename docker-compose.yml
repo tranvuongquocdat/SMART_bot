@@ -7,7 +7,7 @@ services:
       # bất kể .env có ghi localhost (cho dev local) hay không.
       QDRANT_URL: http://qdrant:6333
     ports:
-      - "8000:8000"
+      - "24702:24702"
     volumes:
       - ./data:/app/data
     depends_on:

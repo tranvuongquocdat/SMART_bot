@@ -62,23 +62,21 @@ async def _embed_and_upsert(ctx: ChatContext, record_id: str, fields: dict):
 async def _find_assignee_chat_id(ctx: ChatContext, assignee_name: str) -> tuple[str | None, bool]:
     """Search People table for assignee. Returns (internal_chat_id_or_None, found_in_people).
 
-    Lark's "Chat ID" field stores the external Telegram numeric id. We resolve
-    to the internal UUID here so callers can write it directly into tables that
-    use internal-id FKs (outbound_messages.to_chat_id, task_notifications.assignee_chat_id).
+    Resolves the cross-channel "Chat ID" field via `resolve_lark_chat_id` so
+    Telegram (numeric) and Zalo (alphanum) ids both work.
     """
+    from src.utils.chat_id_resolver import resolve_lark_chat_id
     if not assignee_name:
         return None, False
     records = await lark.search_records(ctx.lark_base_token, ctx.lark_table_people)
     name_lower = assignee_name.lower()
     for r in records:
-        full = (r.get("Tên", "") + " " + r.get("Tên gọi", "")).lower()
+        full = ((r.get("Tên") or "") + " " + (r.get("Tên gọi") or "")).lower()
         if name_lower in full:
             raw = r.get("Chat ID")
             if not raw:
                 return None, True
-            internal_id = await db_mod.resolve_or_create_person(
-                "telegram", str(int(raw)), r.get("Tên", "") or "", "",
-            )
+            internal_id = await resolve_lark_chat_id(raw, r.get("Tên", "") or "")
             return internal_id, True
     return None, False
 
@@ -202,16 +200,25 @@ async def create_task(
 
     asyncio.create_task(_embed_and_upsert(ctx, record_id, fields))
 
-    # Notify each assignee
+    # Announce in source group when this came from a group context.
+    if ctx.is_group:
+        deadline_disp = deadline or "không có deadline"
+        assignee_disp = assignee_display or "chưa giao"
+        summary = f"Task: {name} → {assignee_disp} | deadline {deadline_disp}"
+        try:
+            await telegram.send(str(ctx.chat_id), summary, save_history=False)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger("services.tasks").warning(
+                "group announce failed for task %s", record_id, exc_info=True,
+            )
+
+    # Notify each assignee. Silent skip when no chat_id — group post (above) is the surface.
     notification_statuses = []
     first_assignee_chat_id = None
     for aname in assignee_list:
-        achat_id, found = await _find_assignee_chat_id(ctx, aname)
-        if not found:
-            notification_statuses.append(f"⚠️ '{aname}' không có trong danh sách nhân sự")
-        elif not achat_id:
-            notification_statuses.append(f"⚠️ '{aname}' chưa có tài khoản liên kết")
-        else:
+        achat_id, _found = await _find_assignee_chat_id(ctx, aname)
+        if achat_id:
             if first_assignee_chat_id is None:
                 first_assignee_chat_id = achat_id
             asyncio.create_task(_notify_assignee_task(

@@ -328,9 +328,47 @@ async def _init_schema(db: aiosqlite.Connection) -> None:
         ("embedding_provider",    "TEXT DEFAULT NULL"),
         ("embedding_model",       "TEXT DEFAULT NULL"),
         ("embedding_dim",         "INTEGER DEFAULT NULL"),
+        # C1 — boss's home channel ("telegram" | "zalo"). Set during onboarding
+        # from the inbound message's provider; used to filter outbound so a
+        # Zalo boss never has the bot lean across to Telegram.
+        ("primary_channel",       "TEXT DEFAULT NULL"),
     ]:
         try:
             await db.execute(f"ALTER TABLE bosses ADD COLUMN {col} {definition}")
+        except Exception as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+
+    # Back-fill primary_channel for legacy boss rows: look up the boss's own
+    # DM conversation in `conversation` and copy its provider — but ONLY when
+    # the provider is a real channel ('telegram'/'zalo'). Mock channels
+    # ('cli', 'debug', 'test') used by harnesses must not poison real config.
+    # Idempotent: only fills rows where it's still NULL/empty.
+    await db.execute(
+        """
+        UPDATE bosses
+        SET primary_channel = (
+            SELECT provider FROM conversation
+            WHERE conversation.external_chat_id = bosses.chat_id
+              AND provider IN ('telegram', 'zalo')
+            ORDER BY conversation.created_at ASC LIMIT 1
+        )
+        WHERE primary_channel IS NULL OR primary_channel = ''
+           OR primary_channel NOT IN ('telegram', 'zalo')
+        """
+    )
+
+    # ---- Phase 6c forward-compat: lark_record_id on reminders/notes ----
+    for table, col, definition in [
+        ("reminders", "lark_record_id", "TEXT DEFAULT NULL"),
+        ("notes",     "lark_record_id", "TEXT DEFAULT NULL"),
+        ("reminders", "source_chat_id", "TEXT DEFAULT NULL"),
+        # E2 — track which fired reminders have already been escalated to boss
+        # after the target failed to reply.
+        ("outbound_messages", "escalated", "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            await db.execute(f"ALTER TABLE {table} ADD COLUMN {col} {definition}")
         except Exception as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
@@ -484,11 +522,28 @@ async def lookup_person_by_external(
     return await repo.lookup_person_by_external(provider, external_id)
 
 
+async def lookup_person_by_external_id(
+    external_id: str, db_path: str = "data/history.db",
+) -> tuple[str, str] | None:
+    """Provider-agnostic external_id → (internal_id, provider). For callsites
+    reading raw Chat ID from Lark where provider isn't known up-front."""
+    repo: IdentityRepo = await _repo("identity", IdentityRepo)
+    return await repo.lookup_person_by_external_id(external_id)
+
+
 async def lookup_conversation_by_external(
     provider: str, external_id: str, db_path: str = "data/history.db",
 ) -> str | None:
     repo: ConversationRepo = await _repo("conversation", ConversationRepo)
     return await repo.lookup_conversation_by_external(provider, external_id)
+
+
+async def lookup_conversation_by_external_id(
+    external_id: str, db_path: str = "data/history.db",
+) -> tuple[str, str, str] | None:
+    """Provider-agnostic external_chat_id → (internal_chat_id, provider, chat_type)."""
+    repo: ConversationRepo = await _repo("conversation", ConversationRepo)
+    return await repo.lookup_conversation_by_external_id(external_id)
 
 
 # ---------------------------------------------------------------------------
@@ -504,8 +559,15 @@ async def add_person(
     chat_id: str, boss_chat_id: str, person_type: str, name: str = "",
     db_path: str = "data/history.db",
 ) -> None:
-    repo: MembershipRepo = await _repo("membership", MembershipRepo)
-    await repo.upsert(chat_id, boss_chat_id, person_type, name, status="active")
+    """Legacy facade. New code must call `services.membership_service.activate()` directly."""
+    from src.services import membership_service
+    await membership_service.activate(
+        chat_id=str(chat_id),
+        boss_chat_id=str(boss_chat_id),
+        person_type=person_type,
+        name=name or "",
+        source="boss_add",
+    )
 
 
 async def delete_person(chat_id: str, db_path: str = "data/history.db") -> None:
@@ -570,9 +632,9 @@ async def get_note(
 async def update_note(
     boss_chat_id: str, note_type: str, ref_id: str, content: str,
     db_path: str = "data/history.db",
-) -> None:
+) -> int:
     repo: NoteRepo = await _repo("note", NoteRepo)
-    await repo.upsert(boss_chat_id, note_type, ref_id, content)
+    return await repo.upsert(boss_chat_id, note_type, ref_id, content)
 
 
 # ---------------------------------------------------------------------------
@@ -582,10 +644,14 @@ async def update_note(
 async def create_reminder(
     boss_chat_id: str, content: str, remind_at: datetime,
     target_chat_id: Optional[str] = None, target_name: str = "",
+    source_chat_id: Optional[str] = None,
     db_path: str = "data/history.db",
 ) -> int:
     repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    return await repo.create(boss_chat_id, content, remind_at, target_chat_id, target_name)
+    return await repo.create(
+        boss_chat_id, content, remind_at, target_chat_id, target_name,
+        source_chat_id,
+    )
 
 
 async def get_due_reminders(
@@ -821,6 +887,46 @@ async def get_outbound_log(
 ) -> list[dict]:
     repo: MessageRepo = await _repo("message", MessageRepo)
     return await repo.get_outbound_log(boss_chat_id, to_chat_id, trigger_type, limit)
+
+
+async def get_unescalated_reminders_older_than(hours: int) -> list[dict]:
+    """E2 — fired reminders past their no-reply grace window."""
+    conn = await get_db()
+    async with conn.execute(
+        f"""
+        SELECT id, boss_chat_id, to_chat_id, to_name, content, created_at
+        FROM outbound_messages
+        WHERE trigger_type = 'reminder'
+          AND escalated = 0
+          AND created_at < datetime('now', '-{int(hours)} hours')
+        """
+    ) as cur:
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def has_inbound_after(chat_id: str, since_iso: str) -> bool:
+    """True when the user at `chat_id` has sent ANY message after `since_iso`."""
+    conn = await get_db()
+    async with conn.execute(
+        """
+        SELECT 1 FROM messages
+        WHERE chat_id = ? AND role = 'user' AND created_at > ?
+        LIMIT 1
+        """,
+        (str(chat_id), since_iso),
+    ) as cur:
+        row = await cur.fetchone()
+    return row is not None
+
+
+async def mark_outbound_escalated(outbound_id: int) -> None:
+    conn = await get_db()
+    await conn.execute(
+        "UPDATE outbound_messages SET escalated = 1 WHERE id = ?",
+        (int(outbound_id),),
+    )
+    await conn.commit()
 
 
 # ---------------------------------------------------------------------------

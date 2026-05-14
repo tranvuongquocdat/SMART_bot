@@ -72,41 +72,8 @@ async def test_get_info_creates_pending_membership():
     assert "pending" in str(call_kwargs)
     assert 999 not in onboarding._join_sessions  # session cleaned up
 
-@pytest.mark.asyncio
-async def test_boss_approve_activates_membership():
-    with patch("src.onboarding.db.get_membership", new_callable=AsyncMock,
-               return_value={"chat_id": "999", "boss_chat_id": "1",
-                             "person_type": "partner", "name": "Anh Bình",
-                             "status": "pending", "request_info": "freelance"}), \
-         patch("src.onboarding.db.get_boss", new_callable=AsyncMock,
-               return_value={"chat_id": "1", "name": "Anh X", "company": "Co A",
-                             "lark_base_token": "tok", "lark_table_people": "tp"}), \
-         patch("src.onboarding.db.upsert_membership", new_callable=AsyncMock) as mock_upsert, \
-         patch("src.onboarding.lark.create_record", new_callable=AsyncMock,
-               return_value={"record_id": "lr1"}), \
-         patch("src.onboarding.tg.send_message", new_callable=AsyncMock):
-        reply = await onboarding.handle_boss_join_decision("approve 999", boss_chat_id="1")
-    assert reply is not None
-    mock_upsert.assert_called_once()
-    call_kwargs = mock_upsert.call_args
-    assert "active" in str(call_kwargs)
-
-@pytest.mark.asyncio
-async def test_boss_reject_rejects_membership():
-    with patch("src.onboarding.db.get_membership", new_callable=AsyncMock,
-               return_value={"chat_id": "999", "boss_chat_id": "1",
-                             "person_type": "partner", "name": "Anh Bình",
-                             "status": "pending", "request_info": "test"}), \
-         patch("src.onboarding.db.get_boss", new_callable=AsyncMock,
-               return_value={"chat_id": "1", "name": "Anh X", "company": "Co A"}), \
-         patch("src.onboarding.db.upsert_membership", new_callable=AsyncMock) as mock_upsert, \
-         patch("src.onboarding.tg.send_message", new_callable=AsyncMock):
-        reply = await onboarding.handle_boss_join_decision("reject 999", boss_chat_id="1")
-    assert reply is not None
-    call_kwargs = mock_upsert.call_args
-    assert "rejected" in str(call_kwargs)
-
-@pytest.mark.asyncio
-async def test_non_join_decision_returns_none():
-    reply = await onboarding.handle_boss_join_decision("hello world", boss_chat_id="1")
-    assert reply is None
+# The regex parser `handle_boss_join_decision` was deleted as part of the
+# relaxed-group-flow / approval-cleanup spec. Boss approvals now go through
+# the LLM with conversational context (see spec §2.3 + feedback_message_semantics).
+# Coverage moved to: tests/unit/test_handle_boss_join_decision_removed.py and
+# tests/unit/test_approve_join_via_activate.py.

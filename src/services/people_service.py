@@ -7,6 +7,7 @@ from datetime import datetime
 from src import db
 from src.context import ChatContext
 from src.infrastructure import lark_client as lark
+from src.services import membership_service
 from src.utils.dates import date_to_ms
 
 
@@ -78,15 +79,24 @@ async def add_people(
     if note:
         fields["Ghi chú"] = note
 
-    await lark.create_record(ctx.lark_base_token, ctx.lark_table_people, fields)
+    lark_rec = await lark.create_record(ctx.lark_base_token, ctx.lark_table_people, fields)
+    lark_record_id = lark_rec.get("record_id", "")
 
     if chat_id and ctx.boss_chat_id:
-        await db.add_person(
-            chat_id=chat_id,
-            boss_chat_id=ctx.boss_chat_id,
-            person_type=person_type,
-            name=name,
-        )
+        # Resolve external chat_id → internal UUID before membership write.
+        # Provider-agnostic so Zalo alphanum ids land in the right channel
+        # row instead of being mis-tagged as Telegram.
+        from src.utils.chat_id_resolver import resolve_lark_chat_id
+        internal_id = await resolve_lark_chat_id(chat_id, name)
+        if internal_id:
+            await membership_service.activate(
+                chat_id=internal_id,
+                boss_chat_id=str(ctx.boss_chat_id),
+                person_type=person_type,
+                name=name,
+                source="boss_add",
+                lark_record_id=lark_record_id or None,
+            )
 
     return f"Đã thêm người: {name} (type: {person_type})"
 
@@ -278,15 +288,15 @@ async def delete_people(ctx: ChatContext, search_name: str) -> str:
         # Remove from Lark
         await lark.delete_record(ctx.lark_base_token, ctx.lark_table_people, r["record_id"])
 
-        # Remove from SQLite if Chat ID present. Lark stores external Telegram
-        # numeric id; memberships uses internal UUID — resolve first.
+        # Remove from SQLite if Chat ID present. Resolve via external_identity
+        # so Telegram + Zalo ids both work; memberships uses internal UUID.
         chat_id_val = r.get("Chat ID")
         if chat_id_val:
             try:
-                internal_id = await db.resolve_or_create_person(
-                    "telegram", str(int(chat_id_val)), "", ""
-                )
-                await db.delete_person(internal_id)
+                from src.utils.chat_id_resolver import resolve_lark_chat_id
+                internal_id = await resolve_lark_chat_id(chat_id_val)
+                if internal_id:
+                    await db.delete_person(internal_id)
             except Exception:
                 pass
         deleted += 1

@@ -3,6 +3,9 @@ Scheduler: morning review, evening summary, deadline alerts, reminders.
 Loops through all bosses for each scheduled job.
 """
 import logging
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -69,6 +72,43 @@ async def _evening_summary():
             logger.exception("[scheduler] Evening summary failed for %s", boss["name"])
 
 
+async def _resolve_task_targets(
+    task: dict, person: dict | None, boss_chat_id: str | None = None,
+) -> tuple[str | None, str | None]:
+    """For a task, return (primary_target, fallback_target).
+
+    Routing rules:
+      - Task created in a group (has "Group ID") → primary = group; assignee DM
+        is a courtesy CC, only sent when their Chat ID is known.
+      - Task from DM (no Group ID) → primary = assignee DM (when known).
+      - When the assignee has no Chat ID AND task has no Group ID, both are None.
+
+    C1 channel-isolation: when `boss_chat_id` is supplied and the boss has a
+    `primary_channel` set, the assignee DM is dropped (set to None) if the
+    assignee lives on a different channel — group fallback then kicks in.
+    """
+    from src.utils.chat_id_resolver import (
+        resolve_lark_chat_id, is_target_on_boss_channel,
+    )
+
+    group_id = task.get("Group ID")
+    assignee_id: str | None = None
+    if person and person.get("Chat ID"):
+        assignee_id = await resolve_lark_chat_id(
+            person["Chat ID"], person.get("Tên", "") or "",
+        )
+
+    # Drop cross-channel DM so a Zalo boss never leaks across to Telegram.
+    if assignee_id and boss_chat_id:
+        if not await is_target_on_boss_channel(boss_chat_id, assignee_id):
+            assignee_id = None
+
+    if group_id:
+        # Group is the primary surface; assignee DM is a courtesy CC.
+        return str(group_id), assignee_id
+    return assignee_id, None
+
+
 async def _check_deadlines():
     """9h30: Check deadline sap toi -> nhan nguoi duoc giao."""
     from datetime import date, datetime, timedelta
@@ -96,29 +136,78 @@ async def _check_deadlines():
 
                 assignee_name = r.get("Assignee", "").lower()
                 person = people_map.get(assignee_name)
+                task_name = r.get("Tên task", "?")
+                primary, fallback = await _resolve_task_targets(r, person, boss["chat_id"])
 
-                # Deadline tomorrow -> nhac assignee
-                if tomorrow_ms <= dl < tomorrow_end and person:
-                    target_id = person.get("Chat ID")
-                    if target_id:
+                # Deadline tomorrow -> nhac primary (group nếu task từ group,
+                # ngược lại DM assignee). Có CC nếu primary là group.
+                if tomorrow_ms <= dl < tomorrow_end:
+                    if primary:
                         await telegram.send(
-                            int(target_id),
-                            f"Nhac nho: Task '{r.get('Tên task', '?')}' deadline ngay mai!"
+                            primary,
+                            f"Nhac nho: Task '{task_name}' deadline ngay mai!"
+                        )
+                    if fallback:
+                        await telegram.send(
+                            fallback,
+                            f"Nhac nho: Task '{task_name}' deadline ngay mai!"
                         )
 
-                # Overdue -> nhac assignee + bao boss
+                # Overdue -> nhac primary (group hoặc assignee DM) + bao boss
                 if dl < today_ms:
-                    if person and person.get("Chat ID"):
+                    if primary:
                         await telegram.send(
-                            int(person["Chat ID"]),
-                            f"Task '{r.get('Tên task', '?')}' da QUA HAN! Cap nhat tien do nhe."
+                            primary,
+                            f"Task '{task_name}' da QUA HAN! Cap nhat tien do nhe."
+                        )
+                    if fallback:
+                        await telegram.send(
+                            fallback,
+                            f"Task '{task_name}' da QUA HAN! Cap nhat tien do nhe."
                         )
                     await telegram.send(
                         boss["chat_id"],
-                        f"Task qua han: '{r.get('Tên task', '?')}' ({r.get('Assignee', 'N/A')})"
+                        f"Task qua han: '{task_name}' ({r.get('Assignee', 'N/A')})"
                     )
         except Exception:
             logger.exception("[scheduler] Deadline check failed for %s", boss["name"])
+
+
+_NO_REPLY_GRACE_HOURS = 3
+
+
+async def _check_no_reply_reminders():
+    """E2 — escalate to boss when a target ignored a reminder for too long.
+
+    Every 30 minutes: scan `outbound_messages` for `trigger_type='reminder'`
+    older than _NO_REPLY_GRACE_HOURS that haven't been escalated yet. For
+    each, look at the `messages` table: if no inbound from the target since
+    the fire timestamp → DM the boss and flip escalated=1. If the target
+    did reply, just mark escalated=1 (resolved, no spam).
+    """
+    try:
+        rows = await db.get_unescalated_reminders_older_than(_NO_REPLY_GRACE_HOURS)
+    except Exception:
+        logger.exception("[scheduler] no-reply scan failed")
+        return
+
+    for row in rows:
+        try:
+            replied = await db.has_inbound_after(row["to_chat_id"], row["created_at"])
+            if not replied:
+                msg = (
+                    f"_{row.get('to_name') or 'Người được nhắc'}_ chưa phản hồi tin "
+                    f"nhắc em đã gửi ~{_NO_REPLY_GRACE_HOURS}h trước:\n"
+                    f"> {row['content'][:200]}\n\n"
+                    f"Anh có muốn em hỏi lại không?"
+                )
+                await telegram.send(row["boss_chat_id"], msg)
+            await db.mark_outbound_escalated(row["id"])
+        except Exception:
+            logger.exception(
+                "[scheduler] no-reply escalation for outbound id=%s failed",
+                row.get("id"),
+            )
 
 
 async def _check_reminders():
@@ -169,14 +258,32 @@ async def _check_deadline_push():
                 if not notif:
                     continue
 
-                assignee_chat_id = notif.get("assignee_chat_id")
-                if assignee_chat_id:
+                # Find person row for the assignee so _resolve_task_targets can
+                # decide group vs DM. People not in Lark → person=None → fallback
+                # to the task's Group ID if any.
+                people = await lark.search_records(boss["lark_base_token"], boss["lark_table_people"])
+                assignee_name = task.get("Assignee", "").lower()
+                person = next(
+                    (p for p in people if assignee_name in (p.get("Tên", "") or "").lower()),
+                    None,
+                )
+                primary, fallback = await _resolve_task_targets(task, person, boss["chat_id"])
+                # If task was created from DM and assignee is unknown, the legacy
+                # notif row may carry a pre-resolved chat id — keep it as a last
+                # resort to preserve old behaviour.
+                if not primary and not fallback:
+                    primary = notif.get("assignee_chat_id")
+
+                if primary or fallback:
                     label = "2 tiếng" if kind == "2h" else "24 tiếng"
-                    await telegram.send(
-                        assignee_chat_id,
+                    msg = (
                         f"⏰ Task '{task.get('Tên task')}' còn khoảng {label} đến deadline!\n"
-                        f"Hãy cập nhật tiến độ nhé.",
+                        f"Hãy cập nhật tiến độ nhé."
                     )
+                    if primary:
+                        await telegram.send(primary, msg)
+                    if fallback:
+                        await telegram.send(fallback, msg)
                 await db.mark_notification_sent(db._db, record_id, boss["chat_id"], kind)
         except Exception:
             logger.exception("[scheduler] Deadline push failed for %s", boss.get("name"))
@@ -217,26 +324,30 @@ async def _after_deadline_check():
                     (p for p in people if assignee_name.lower() in p.get("Tên", "").lower()),
                     None,
                 )
-                assignee_chat_id = int(person["Chat ID"]) if (person and person.get("Chat ID")) else None
-
+                primary, fallback = await _resolve_task_targets(task, person, boss["chat_id"])
                 task_name = task.get("Tên task", "?")
-                if assignee_chat_id:
-                    msg = (
-                        f"Task '{task_name}' đã quá hạn rồi!\n"
-                        f"Bạn có thể update tiến độ cho {boss['name']} biết không?"
-                    )
-                    await telegram.send(assignee_chat_id, msg)
+                msg = (
+                    f"Task '{task_name}' đã quá hạn rồi!\n"
+                    f"Bạn có thể update tiến độ cho {boss['name']} biết không?"
+                )
+                if primary:
+                    await telegram.send(primary, msg)
                     await db.log_outbound_dm(
                         boss_chat_id=boss["chat_id"],
-                        to_chat_id=assignee_chat_id,
+                        to_chat_id=primary,
                         to_name=assignee_name,
                         content=msg,
                         trigger_type="deadline_push",
                         task_id=record_id,
                     )
+                if fallback:
+                    await telegram.send(fallback, msg)
+                if primary:
                     report_lines.append(f"Đã nhắc {assignee_name}: '{task_name}'")
                 else:
-                    report_lines.append(f"'{task_name}' — {assignee_name} chưa có Chat ID")
+                    report_lines.append(
+                        f"'{task_name}' — {assignee_name} chưa có Chat ID và task không từ group"
+                    )
 
                 await db.mark_overdue_notified(db._db, record_id, str(boss["chat_id"]))
 
@@ -250,36 +361,29 @@ async def _after_deadline_check():
 
 
 async def _sync_lark_to_sqlite():
-    """Every 30s: Lark → SQLite sync for Reminders. Every 5 min: Tasks, Projects."""
-    from datetime import datetime
+    """Lark → SQLite reverse-sync.
 
+    Reminders block runs every call (every 30s). Tasks status sync + Notes block
+    run only on the every-5-min gate.
+    """
     bosses = await db.get_all_bosses()
     now = datetime.utcnow()
     do_full_sync = (now.minute % 5 == 0 and now.second < 35)
+    settings_tz = ZoneInfo(_settings.timezone) if _settings else ZoneInfo("Asia/Ho_Chi_Minh")
 
     for boss in bosses:
         try:
-            # Reminders sync (always runs)
-            tbl = boss.get("lark_table_reminders", "")
-            if tbl:
-                records = await lark.search_records(boss["lark_base_token"], tbl)
-                for rec in records:
-                    sqlite_id = rec.get("SQLite ID")
-                    if not isinstance(sqlite_id, (int, float)):
-                        continue
-                    await db.sync_reminder_from_lark(
-                        db._db,
-                        int(sqlite_id),
-                        content=rec.get("Nội dung", ""),
-                        status=rec.get("Trạng thái", "pending"),
-                    )
+            await _reverse_sync_reminders_for_boss(boss, settings_tz)
+        except Exception:
+            logger.exception("[scheduler] reminder reverse-sync failed for %s", boss.get("name"))
 
-            if not do_full_sync:
-                continue
+        if not do_full_sync:
+            continue
 
-            # Task status sync — if done/cancelled in Lark, stop future overdue pushes
-            task_tbl = boss.get("lark_table_tasks", "")
-            if task_tbl:
+        # Task terminal-state sync (existing behaviour)
+        task_tbl = boss.get("lark_table_tasks", "")
+        if task_tbl:
+            try:
                 tasks = await lark.search_records(boss["lark_base_token"], task_tbl)
                 for t in tasks:
                     record_id = t.get("record_id")
@@ -291,9 +395,200 @@ async def _sync_lark_to_sqlite():
                             (record_id, str(boss["chat_id"])),
                         )
                 await db._db.commit()
+            except Exception:
+                logger.exception("[scheduler] task terminal sync failed for %s", boss.get("name"))
 
+        try:
+            await _reverse_sync_notes_for_boss(boss)
         except Exception:
-            logger.exception("[scheduler] sync failed for %s", boss.get("name"))
+            logger.exception("[scheduler] notes reverse-sync failed for %s", boss.get("name"))
+
+
+async def _reverse_sync_reminders_for_boss(boss: dict, settings_tz: ZoneInfo) -> None:
+    from src.repositories.reminder_repo import ReminderRepo
+
+    tbl = boss.get("lark_table_reminders", "")
+    if not tbl:
+        return
+
+    repo = ReminderRepo(db._db)
+    boss_chat_id = str(boss["chat_id"])
+    base = boss["lark_base_token"]
+    records = await lark.search_records(base, tbl)
+
+    seen_lark_ids: set[str] = set()
+    for rec in records:
+        rec_id = rec.get("record_id", "")
+        if rec_id:
+            seen_lark_ids.add(rec_id)
+        sqlite_id_raw = rec.get("SQLite ID")
+
+        if isinstance(sqlite_id_raw, (int, float)) and int(sqlite_id_raw) > 0:
+            sqlite_id = int(sqlite_id_raw)
+            new_content = rec.get("Nội dung", "")
+            new_status = rec.get("Trạng thái", "pending")
+            new_status = "pending" if new_status not in ("pending", "done") else new_status
+            remind_at_str = rec.get("Thời gian nhắc", "")
+            remind_at_dt = None
+            if remind_at_str:
+                try:
+                    naive = datetime.strptime(remind_at_str, "%Y-%m-%d %H:%M")
+                    remind_at_dt = naive.replace(tzinfo=settings_tz).astimezone(
+                        ZoneInfo("UTC")
+                    ).replace(tzinfo=None)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "[scheduler] bad time '%s' on lark reminder %s",
+                        remind_at_str, rec_id,
+                    )
+            await repo.update_remind_at_and_content(
+                sqlite_id, content=new_content, remind_at=remind_at_dt,
+                status=new_status,
+            )
+        else:
+            remind_at_str = rec.get("Thời gian nhắc", "")
+            try:
+                naive = datetime.strptime(remind_at_str, "%Y-%m-%d %H:%M")
+            except (ValueError, TypeError):
+                logger.warning(
+                    "[scheduler] cannot parse time on manual-add lark reminder %s: %r",
+                    rec_id, remind_at_str,
+                )
+                continue
+            remind_dt = naive.replace(tzinfo=settings_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+            new_id = await db.create_reminder(
+                boss_chat_id=boss_chat_id,
+                content=rec.get("Nội dung", ""),
+                remind_at=remind_dt,
+                target_chat_id=None,
+                target_name=rec.get("Người nhận", "") or "",
+            )
+            if rec_id:
+                await repo.set_lark_record_id(new_id, rec_id)
+            try:
+                await lark.with_retry(lambda: lark.sync_reminder_to_lark(
+                    base, tbl,
+                    {
+                        "content": rec.get("Nội dung", ""),
+                        "remind_at_local": remind_at_str,
+                        "target_name": rec.get("Người nhận", "") or "",
+                        "status": "pending",
+                    },
+                    new_id,
+                ))
+            except Exception:
+                logger.warning(
+                    "[scheduler] could not write SQLite ID back to lark %s", rec_id,
+                    exc_info=True,
+                )
+
+    # Tombstone vanished
+    for row in await repo.list_with_lark_id(boss_chat_id):
+        if row["lark_record_id"] not in seen_lark_ids and row["status"] == "pending":
+            await repo.tombstone(row["id"])
+
+    # Reconcile push for DB rows lacking lark_record_id
+    for row in await repo.list_unsynced_pending(boss_chat_id):
+        try:
+            remind_local = row["remind_at"]
+            try:
+                dt_utc = datetime.fromisoformat(remind_local.strip()).replace(tzinfo=ZoneInfo("UTC"))
+                remind_local_str = dt_utc.astimezone(settings_tz).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                remind_local_str = remind_local
+            rec_id = await lark.with_retry(lambda r=row, rl=remind_local_str: lark.sync_reminder_to_lark(
+                base, tbl,
+                {
+                    "content": r["content"],
+                    "remind_at_local": rl,
+                    "target_name": r.get("target_name") or "",
+                    "status": r["status"],
+                },
+                r["id"],
+            ))
+            if rec_id:
+                await repo.set_lark_record_id(row["id"], rec_id)
+        except Exception:
+            logger.warning(
+                "[scheduler] reconcile push failed for reminder %d", row["id"],
+                exc_info=True,
+            )
+
+
+async def _reverse_sync_notes_for_boss(boss: dict) -> None:
+    from src.repositories.note_repo import NoteRepo
+
+    tbl = boss.get("lark_table_notes", "")
+    if not tbl:
+        return
+
+    repo = NoteRepo(db._db)
+    boss_chat_id = str(boss["chat_id"])
+    base = boss["lark_base_token"]
+    records = await lark.search_records(base, tbl)
+
+    seen_lark_ids: set[str] = set()
+    for rec in records:
+        rec_id = rec.get("record_id", "")
+        if rec_id:
+            seen_lark_ids.add(rec_id)
+        note_type = rec.get("Loại", "")
+        ref_id = str(rec.get("Ref ID", "") or "")
+        content = rec.get("Nội dung", "")
+        if not note_type or not ref_id:
+            continue
+        sqlite_id_raw = rec.get("SQLite ID")
+
+        if isinstance(sqlite_id_raw, (int, float)) and int(sqlite_id_raw) > 0:
+            sqlite_id = int(sqlite_id_raw)
+            existing = await repo.get_by_id(sqlite_id)
+            if existing and existing.get("content") != content:
+                await repo.update_content_by_id(sqlite_id, content)
+        else:
+            new_id = await repo.upsert(boss_chat_id, note_type, ref_id, content)
+            if rec_id:
+                await repo.set_lark_record_id(new_id, rec_id)
+            try:
+                await lark.with_retry(lambda nid=new_id, c=content, nt=note_type, r=ref_id:
+                    lark.sync_note_to_lark(
+                        base, tbl,
+                        {
+                            "type": nt, "ref_id": r,
+                            "content": c,
+                            "updated_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+                        },
+                        nid,
+                    ))
+            except Exception:
+                logger.warning(
+                    "[scheduler] could not write SQLite ID back for note %s", rec_id,
+                    exc_info=True,
+                )
+
+    # Delete vanished
+    for row in await repo.list_with_lark_id(boss_chat_id):
+        if row["lark_record_id"] not in seen_lark_ids:
+            await repo.delete_by_id(row["id"])
+
+    # Reconcile push
+    for row in await repo.list_unsynced(boss_chat_id):
+        try:
+            rec_id = await lark.with_retry(lambda r=row: lark.sync_note_to_lark(
+                base, tbl,
+                {
+                    "type": r["type"], "ref_id": r["ref_id"],
+                    "content": r["content"],
+                    "updated_at": datetime.now(timezone.utc).isoformat(sep=" ", timespec="seconds"),
+                },
+                r["id"],
+            ))
+            if rec_id:
+                await repo.set_lark_record_id(row["id"], rec_id)
+        except Exception:
+            logger.warning(
+                "[scheduler] reconcile push failed for note %d", row["id"],
+                exc_info=True,
+            )
 
 
 async def _run_dynamic_reviews():
@@ -419,6 +714,7 @@ async def start(settings: Settings):
     _scheduler.add_job(_check_reminders, IntervalTrigger(minutes=1))
     _scheduler.add_job(_check_deadline_push, IntervalTrigger(minutes=30))
     _scheduler.add_job(_after_deadline_check, IntervalTrigger(minutes=30))
+    _scheduler.add_job(_check_no_reply_reminders, IntervalTrigger(minutes=30))
     _scheduler.add_job(_sync_lark_to_sqlite, IntervalTrigger(seconds=30))
     _scheduler.start()
     logger.info("Scheduler started")
