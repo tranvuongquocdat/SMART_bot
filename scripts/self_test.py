@@ -130,6 +130,38 @@ def stash_lark_records(table_id: str, rows: list[dict]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stub: Qdrant — search returns [], upserts are no-ops
+# ---------------------------------------------------------------------------
+
+
+def install_qdrant_stub() -> None:
+    from src.infrastructure import qdrant_client as qdrant
+
+    async def _noop_search(*a, **kw):
+        return []
+
+    async def _noop_upsert(*a, **kw):
+        return None
+
+    async def _noop_ensure(*a, **kw):
+        return None
+
+    async def _noop_provision(*a, **kw):
+        return None
+
+    async def _noop_delete(*a, **kw):
+        return None
+
+    qdrant.search = _noop_search          # type: ignore
+    qdrant.upsert = _noop_upsert          # type: ignore
+    qdrant.upsert_task = _noop_upsert     # type: ignore
+    qdrant.upsert_note = _noop_upsert     # type: ignore
+    qdrant.delete_task = _noop_delete     # type: ignore
+    qdrant.ensure_collection = _noop_ensure  # type: ignore
+    qdrant.provision_collections = _noop_provision  # type: ignore
+
+
+# ---------------------------------------------------------------------------
 # Stub: outbound channel — CapturingMessenger replaces Telegram + Zalo
 # ---------------------------------------------------------------------------
 
@@ -267,6 +299,7 @@ async def init_services(settings):
 
     # Install stubs AFTER the real init, so they replace the real calls.
     install_lark_stub()
+    install_qdrant_stub()
     install_capture_messenger()
     install_dispatcher_recorder()
 
@@ -432,6 +465,8 @@ async def run_scenario(scenario: Scenario, router, settings, test_ctx: dict) -> 
                 await _drive_user_message(router, step, test_ctx)
             elif isinstance(step, FireReminder):
                 await _drive_fire_reminder(step, settings)
+            elif isinstance(step, _FireFunc):
+                await step.fn(step, settings)
             elif isinstance(step, Expect):
                 step_results.append(_check_expectations(step, _REC))
             else:
@@ -572,6 +607,32 @@ async def _bootstrap_test_ctx(boss_hint: str | None) -> dict:
             project_id=None,
         )
 
+    # Seed fake people in the boss's Lark people table so resolve_person /
+    # get_people return something deterministic. Chat IDs mirror real prod
+    # shapes — Telegram is numeric, Zalo is alphanumeric — so the resolver
+    # has to handle both. We pre-register them in external_identity so the
+    # downstream send() routes them through our CapturingMessenger via the
+    # mock conversation row.
+    lark_people_tbl = boss.get("lark_table_people") or ""
+    long_ext_telegram = "999000001"        # Telegram-shaped
+    hung_ext_zalo = "zalo_test_hung_002"   # Zalo-shaped
+    long_internal = await db.resolve_or_create_person(
+        "telegram", long_ext_telegram, "Long", "",
+    )
+    hung_internal = await db.resolve_or_create_person(
+        "zalo", hung_ext_zalo, "Hùng", "",
+    )
+    # Conversations so telegram_singleton.send() can route to our capture.
+    long_conv = await db.resolve_or_create_conversation("telegram", long_ext_telegram, "dm", "")
+    hung_conv = await db.resolve_or_create_conversation("zalo", hung_ext_zalo, "dm", "")
+    if lark_people_tbl:
+        stash_lark_records(lark_people_tbl, [
+            {"record_id": "recLONG", "Tên": "Long", "Tên gọi": "Long",
+             "Chat ID": long_ext_telegram, "Type": "member"},
+            {"record_id": "recHUNG", "Tên": "Hùng", "Tên gọi": "Hùng",
+             "Chat ID": hung_ext_zalo, "Type": "member"},
+        ])
+
     return {
         "boss": boss,
         "boss_id": boss_id,
@@ -579,6 +640,10 @@ async def _bootstrap_test_ctx(boss_hint: str | None) -> dict:
         "dm_conv_id": dm_conv,
         "group_conv_id": group_conv,
         "group_name": "Self-Test Group",
+        "long_conv_id": long_conv,
+        "hung_conv_id": hung_conv,
+        "long_internal_id": long_internal,
+        "hung_internal_id": hung_internal,
     }
 
 
@@ -640,16 +705,28 @@ SCENARIOS: list[Scenario] = [
         tags=["reminder", "group"],
     ),
     Scenario(
-        name="Group: @mention tạo task",
-        description="Trong group @bot giao task → create_task",
+        name="Group: @mention tạo task (Telegram assignee)",
+        description="@bot giao Long (Chat ID Telegram numeric) → create_task không crash",
         steps=[
             UserMessage(
                 "@bot giao Long task: review báo cáo Q2, deadline thứ 6",
                 is_group=True, is_mentioned=True,
             ),
-            Expect(any_tool_in={"create_task"}),
+            Expect(any_tool_in={"create_task"}, no_tool_errors=True),
         ],
-        tags=["task", "group"],
+        tags=["task", "group", "telegram"],
+    ),
+    Scenario(
+        name="Group: @mention tạo task (Zalo assignee)",
+        description="@bot giao Hùng (Chat ID Zalo alphanum) → create_task không crash",
+        steps=[
+            UserMessage(
+                "@bot giao Hùng task: tổng hợp số liệu khách hàng, deadline thứ 5",
+                is_group=True, is_mentioned=True,
+            ),
+            Expect(any_tool_in={"create_task"}, no_tool_errors=True),
+        ],
+        tags=["task", "group", "zalo"],
     ),
     Scenario(
         name="Reminder fire: route tới target + cc boss",
@@ -662,7 +739,141 @@ SCENARIOS: list[Scenario] = [
         ],
         tags=["reminder", "fire"],
     ),
+    Scenario(
+        name="DM: gửi link YouTube",
+        description="Boss paste link YouTube → expect bot dùng web_search hoặc file_ingestion để xử lý URL",
+        steps=[
+            UserMessage("xem video này nói về gì giúp tôi: https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            Expect(
+                # Bất kỳ tool nào liên quan; nếu không có tool, ít nhất reply không
+                # được là pure "không biết" → đo gián tiếp qua reply length.
+                custom=lambda rec: None if (rec.tool_calls or (rec.replies and len(rec.replies[-1]) > 30)) else "no tool + empty reply",
+                no_tool_errors=True,
+            ),
+        ],
+        tags=["link", "dm"],
+    ),
+    Scenario(
+        name="DM: gửi link TikTok",
+        description="Boss paste link TikTok → expect bot không crash, ít nhất phản hồi",
+        steps=[
+            UserMessage("video này nội dung gì: https://www.tiktok.com/@user/video/7000000000000000000"),
+            Expect(
+                custom=lambda rec: None if (rec.replies and len(rec.replies[-1]) > 20) else "empty reply",
+                no_tool_errors=True,
+            ),
+        ],
+        tags=["link", "dm"],
+    ),
+    Scenario(
+        name="DM: gửi file đính kèm",
+        description="Boss gửi file text + caption → expect bot phản hồi có nội dung (file đã ingest)",
+        steps=[
+            # Attachment được build trong setup vì cần Attachment dataclass + temp file
+        ],
+        tags=["file", "dm"],
+    ),
+    Scenario(
+        name="Escalation: task overdue → bot báo sếp",
+        description="Inject task quá hạn vào Lark stub, gọi _after_deadline_check → expect DM tới assignee + report tới boss",
+        steps=[
+            # Filled in dynamically — needs test_ctx
+        ],
+        tags=["escalate", "fire"],
+    ),
+    Scenario(
+        name="Bot hỏi boss khi có người mới vào group",
+        description="Simulate new_member event trong group đã onboarded → expect bot reply gì đó (chào hoặc hỏi boss)",
+        steps=[
+            UserMessage(
+                "",
+                is_group=True,
+                is_mentioned=False,
+                new_members=[{"id": "newcomer_001", "name": "Người Mới", "username": ""}],
+            ),
+            Expect(
+                # Bot phản hồi gì đó (chào hoặc nhắc boss confirm) — không crash
+                custom=lambda rec: None if (rec.replies or rec.outbound) else "no outbound at all",
+                no_tool_errors=True,
+            ),
+        ],
+        tags=["onboard", "group"],
+    ),
 ]
+
+
+def _build_file_scenario(test_ctx: dict) -> Scenario:
+    """Send a small text file as attachment. Bot should ingest it and reply."""
+    from src.channels.base import Attachment
+    tmp = Path("/tmp/selftest_doc.txt")
+    tmp.write_text(
+        "Báo cáo tuần 21: doanh thu tăng 12%, đơn hàng mới 47 cái. Cần follow-up "
+        "với khách hàng A và B trong tuần tới về hợp đồng năm 2026.",
+        encoding="utf-8",
+    )
+    att = Attachment(
+        kind="file", url=str(tmp), mime_type="text/plain",
+        filename="bao_cao_tuan.txt", size_bytes=tmp.stat().st_size,
+    )
+    return Scenario(
+        name="DM: gửi file đính kèm",
+        description="Boss gửi file text + caption",
+        steps=[
+            UserMessage("tóm tắt giúp tôi file này", attachments=[att]),
+            Expect(
+                custom=lambda rec: None if (rec.replies and len(rec.replies[-1]) > 30) else "empty/short reply",
+                no_tool_errors=True,
+            ),
+        ],
+        tags=["file", "dm"],
+    )
+
+
+def _build_escalate_scenario(test_ctx: dict) -> Scenario:
+    """Inject an overdue task into Lark stub, fire after_deadline_check."""
+    boss = test_ctx["boss"]
+    tasks_tbl = boss.get("lark_table_tasks") or ""
+    long_conv = test_ctx["long_conv_id"]
+    boss_id = test_ctx["boss_id"]
+
+    # Deadline 2 hours in the past
+    overdue_ms = int(time.time() * 1000) - 2 * 3600 * 1000
+
+    def setup(_ctx: dict) -> None:
+        # Reset and inject task
+        if tasks_tbl:
+            stash_lark_records(tasks_tbl, [{
+                "record_id": "recOVERDUE",
+                "Tên task": "Self-test overdue task",
+                "Assignee": "Long",
+                "Status": "Đang làm",
+                "Deadline": overdue_ms,
+            }])
+
+    async def _fire_check(_step, settings) -> None:
+        from src.scheduler import _after_deadline_check
+        await _after_deadline_check()
+
+    # We can't reuse FireReminder; introduce a callable step inline via custom
+    return Scenario(
+        name="Escalation: task overdue → bot báo sếp",
+        description="_after_deadline_check trên task có Deadline < now",
+        setup=setup,
+        steps=[
+            _FireFunc(_fire_check),
+            Expect(
+                custom=lambda rec: None if rec.outbound else "no outbound DM/report sent",
+                no_tool_errors=True,
+            ),
+        ],
+        tags=["escalate", "fire"],
+    )
+
+
+@dataclass
+class _FireFunc:
+    """Step that invokes an async callable(step, settings) — for custom direct-call flows."""
+    fn: Callable
 
 
 def _build_fire_reminder_scenario(test_ctx: dict) -> Scenario:
@@ -707,11 +918,15 @@ async def main_async(args) -> int:
     print(f"Group conv: {test_ctx['group_conv_id']}")
     print()
 
-    # Replace fire-reminder placeholder with runtime-built version.
+    # Replace placeholders with runtime-built versions that need test_ctx.
     scenarios = []
     for s in SCENARIOS:
         if s.name == "Reminder fire: route tới target + cc boss":
             scenarios.append(_build_fire_reminder_scenario(test_ctx))
+        elif s.name == "DM: gửi file đính kèm":
+            scenarios.append(_build_file_scenario(test_ctx))
+        elif s.name == "Escalation: task overdue → bot báo sếp":
+            scenarios.append(_build_escalate_scenario(test_ctx))
         else:
             scenarios.append(s)
 
@@ -742,6 +957,23 @@ async def main_async(args) -> int:
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(render_markdown(results), encoding="utf-8")
     print(f"Markdown report: {report_path}")
+
+    # Cleanup — close httpx clients / qdrant client so asyncio.run can exit.
+    try:
+        from src import db
+        from src.channels import telegram_singleton as telegram
+        from src.infrastructure import (
+            cohere_client as cohere,
+            lark_client as lark,
+            qdrant_client as qdrant,
+        )
+        await telegram.close_telegram()
+        await lark.close_lark()
+        await cohere.close_cohere()
+        await qdrant.close_qdrant()
+        await db.close_db()
+    except Exception:
+        pass
 
     return 0 if all(r.ok for r in results) else 1
 
