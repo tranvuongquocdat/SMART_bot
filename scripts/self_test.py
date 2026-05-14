@@ -908,10 +908,16 @@ SCENARIOS: list[Scenario] = [
         tags=["onboard", "group"],
     ),
     Scenario(
-        name="Approve join: boss duyệt pending member",
-        description="Pre-insert pending membership → boss DM 'duyệt cho Khách Lạ' → expect approve_join + member activated",
-        steps=[],  # built dynamically — needs test_ctx
+        name="Approve join: boss duyệt + stranger được báo qua channel của họ",
+        description="Pre-insert pending membership → boss duyệt → approve_join + membership active + stranger nhận outbound",
+        steps=[],  # built dynamically
         tags=["onboard", "approve"],
+    ),
+    Scenario(
+        name="Onboard listing isolation: Zalo stranger không thấy boss Telegram",
+        description="handle_join_inquiry từ Zalo conv không list được boss có primary_channel='telegram'",
+        steps=[],  # built dynamically
+        tags=["onboard", "channel", "isolation"],
     ),
     Scenario(
         name="Image attachment: bot nhận diện ảnh",
@@ -1050,8 +1056,11 @@ def _build_image_scenario(test_ctx: dict) -> Scenario:
 
 
 def _build_approve_join_scenario(test_ctx: dict) -> Scenario:
-    """Pre-insert a pending membership row, then drive a boss DM to approve."""
+    """Pre-insert a pending membership row, drive boss DM to approve, then
+    verify: (1) tool fired, (2) membership active, (3) stranger received an
+    outbound notification on their channel."""
     stranger_id = test_ctx["stranger_internal_id"]
+    stranger_conv = test_ctx["stranger_conv_id"]
     boss_id = test_ctx["boss_id"]
 
     async def _seed(_step, _settings) -> None:
@@ -1076,9 +1085,18 @@ def _build_approve_join_scenario(test_ctx: dict) -> Scenario:
         if row.get("status") != "active":
             raise AssertionError(f"membership status still {row.get('status')!r}, expected active")
 
+    def _stranger_got_notice(rec: Recorder) -> str | None:
+        chat_ids = {c for c, _ in rec.outbound}
+        if stranger_conv not in chat_ids:
+            return (
+                f"stranger DM ({stranger_conv}) didn't receive an approval "
+                f"notification; outbounds went to {sorted(chat_ids) or '∅'}"
+            )
+        return None
+
     return Scenario(
-        name="Approve join: boss duyệt pending member",
-        description="Pre-insert pending membership → boss DM duyệt → approve_join chạy + membership active",
+        name="Approve join: boss duyệt + stranger được báo qua channel của họ",
+        description="Pre-insert pending membership → boss duyệt → approve_join + membership active + stranger nhận outbound",
         steps=[
             _FireFunc(_seed),
             UserMessage(
@@ -1086,8 +1104,57 @@ def _build_approve_join_scenario(test_ctx: dict) -> Scenario:
             ),
             Expect(any_tool_in={"approve_join"}, no_tool_errors=True),
             _FireFunc(_verify),
+            Expect(custom=_stranger_got_notice),
         ],
         tags=["onboard", "approve"],
+    )
+
+
+def _build_listing_isolation_scenario(test_ctx: dict) -> Scenario:
+    """Verify the LIST FILTER is the primary isolation mechanism.
+
+    Test boss "Linh" has primary_channel='telegram'. Calling
+    handle_join_inquiry from a Zalo conversation must produce a listing
+    that does NOT include Linh — i.e. a Zalo stranger never even sees the
+    Telegram boss as a target, so cross-channel mis-pick is impossible
+    upstream of `_complete_member`.
+
+    Also verifies the reverse path: a Telegram conv DOES see Linh.
+    """
+    boss_name = test_ctx["boss_name"]
+    hung_conv = test_ctx["hung_conv_id"]    # provider='zalo'
+    dm_conv = test_ctx["dm_conv_id"]        # provider='test' — legacy/back-compat path
+    long_conv = test_ctx["long_conv_id"]    # provider='telegram' (Long's DM)
+
+    async def _check_zalo_listing(_step, _settings) -> None:
+        from src import onboarding
+        reply = await onboarding.handle_join_inquiry(hung_conv)
+        if boss_name in reply:
+            raise AssertionError(
+                f"Zalo stranger saw the Telegram boss {boss_name!r} in the listing — "
+                f"isolation broken. Reply: {reply[:200]!r}"
+            )
+
+    async def _check_telegram_listing(_step, _settings) -> None:
+        from src import onboarding
+        reply = await onboarding.handle_join_inquiry(long_conv)
+        if boss_name not in reply:
+            raise AssertionError(
+                f"Telegram stranger did NOT see the matching Telegram boss "
+                f"{boss_name!r} in the listing — over-aggressive filtering. "
+                f"Reply: {reply[:200]!r}"
+            )
+
+    return Scenario(
+        name="Onboard listing isolation: Zalo stranger không thấy boss Telegram",
+        description="handle_join_inquiry filter theo channel — Zalo conv không thấy Telegram boss, Telegram conv vẫn thấy",
+        steps=[
+            _FireFunc(_check_zalo_listing),
+            _FireFunc(_check_telegram_listing),
+            # No-op Expect so the scenario has at least one outcome row.
+            Expect(custom=lambda rec: None),
+        ],
+        tags=["onboard", "channel", "isolation"],
     )
 
 
@@ -1602,7 +1669,8 @@ async def main_async(args) -> int:
         "Reminder fire: target DM + cc boss + báo vào source group": _build_fire_reminder_scenario,
         "DM: gửi file đính kèm": _build_file_scenario,
         "Escalation: task overdue (DM) → assignee DM + boss report": _build_escalate_scenario,
-        "Approve join: boss duyệt pending member": _build_approve_join_scenario,
+        "Approve join: boss duyệt + stranger được báo qua channel của họ": _build_approve_join_scenario,
+        "Onboard listing isolation: Zalo stranger không thấy boss Telegram": _build_listing_isolation_scenario,
         "Image attachment: bot nhận diện ảnh": _build_image_scenario,
         "Reminder fire: source-only (không target) → vào source group": _build_source_only_reminder_scenario,
         "Escalation: task từ group, assignee chưa join → reminder vào group": _build_escalate_group_unknown_assignee_scenario,

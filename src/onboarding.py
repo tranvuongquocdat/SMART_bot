@@ -57,6 +57,36 @@ def _member_fields_complete(state: dict) -> bool:
     )
 
 
+async def _stranger_channel(chat_id: str) -> str:
+    """Resolve which channel a stranger is DM-ing the bot on.
+
+    Looks up the conversation row for `chat_id`. Returns the provider string
+    ('zalo' / 'telegram' / etc.) or '' when not resolvable — empty string
+    means "no scope filter, all bosses are visible" (back-compat for legacy
+    chats predating primary_channel).
+    """
+    ext = await db.lookup_external_for_conversation(chat_id)
+    if not ext:
+        return ""
+    provider, _ = ext
+    return provider or ""
+
+
+def _filter_bosses_for_channel(bosses: list[dict], channel: str) -> list[dict]:
+    """Full isolation: a stranger on a known channel only ever sees bosses
+    whose `primary_channel` exactly matches.
+
+    Bosses with NULL `primary_channel` are NOT visible to channel-known
+    strangers — there's no safe way to route to them, so they're hidden
+    rather than silently picked. Strangers on an unknown channel ('')
+    still see everyone (legacy back-compat for chats that predate
+    primary_channel population).
+    """
+    if not channel:
+        return list(bosses)
+    return [b for b in bosses if (b.get("primary_channel") or "") == channel]
+
+
 # ---------------------------------------------------------------------------
 # Completion actions
 # ---------------------------------------------------------------------------
@@ -188,8 +218,17 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
             {"role": "system", "content": _PERSONA},
             {"role": "user", "content": "Có lỗi khi tạo workspace. Xin lỗi và đề nghị thử lại sau."},
         ]
-        resp3, _ = await get_default_llm().chat_with_tools(messages3, [])
-        await telegram.send(chat_id, (resp3.content or "Có lỗi. Vui lòng thử lại.").strip())
+        try:
+            resp3, _ = await get_default_llm().chat_with_tools(messages3, [])
+            await telegram.send(chat_id, (resp3.content or "Có lỗi. Vui lòng thử lại.").strip())
+        except Exception:
+            logger.exception("[onboarding] also failed to notify user about the previous failure")
+        # CRITICAL: clear state so the user isn't stuck looping back into the
+        # same broken completion path. They restart from scratch on next DM.
+        try:
+            await db.clear_onboarding_state(chat_id)
+        except Exception:
+            logger.exception("[onboarding] could not clear state after failure")
         return
 
     await db.clear_onboarding_state(chat_id)
@@ -203,14 +242,27 @@ async def _complete_member(chat_id: str, state: dict) -> None:
     language = state.get("language", "vi")
     target_boss_id = state["target_boss_id"]
 
-    all_bosses = await db.get_all_bosses()
+    stranger_channel = await _stranger_channel(chat_id)
+    all_bosses = _filter_bosses_for_channel(
+        await db.get_all_bosses(), stranger_channel,
+    )
     boss = next(
         (b for b in all_bosses
          if b["chat_id"] == target_boss_id or str(b["chat_id"]) == str(target_boss_id)),
         None,
     )
     if not boss:
+        # Should never trigger in normal flow — the channel-scoped list shown
+        # to the LLM collector already excludes cross-channel bosses, so a
+        # mismatched target_boss_id only happens via a real bug. Log loud,
+        # bail safely, and reset state so the user isn't stuck.
+        logger.warning(
+            "[onboarding] target_boss_id=%s not in channel-scoped list for chat_id=%s — "
+            "possible LLM/state bug",
+            target_boss_id, chat_id,
+        )
         await telegram.send(chat_id, "Không tìm thấy workspace. Vui lòng thử lại.")
+        await db.clear_onboarding_state(chat_id)
         return
 
     try:
@@ -259,7 +311,14 @@ async def _complete_member(chat_id: str, state: dict) -> None:
         logger.exception(
             "[onboarding] failed to create membership for %s chat_id=%s", person_type, chat_id
         )
-        await telegram.send(chat_id, "Có lỗi khi gửi yêu cầu tham gia. Vui lòng thử lại sau.")
+        try:
+            await telegram.send(chat_id, "Có lỗi khi gửi yêu cầu tham gia. Vui lòng thử lại sau.")
+        except Exception:
+            logger.exception("[onboarding] also failed to notify member of the failure")
+        try:
+            await db.clear_onboarding_state(chat_id)
+        except Exception:
+            logger.exception("[onboarding] could not clear state after failure")
         return
 
     await db.clear_onboarding_state(chat_id)
@@ -297,7 +356,13 @@ async def handle_onboard_message(text: str, chat_id: str, sender_id: str | None 
         await _send_and_save(chat_id, greeting)
         return
 
-    all_bosses = await db.get_all_bosses()
+    # Channel scope: strangers on Zalo must only see Zalo workspaces, etc.
+    # Without this, the LLM can pick a cross-channel boss and route the
+    # pending row to the wrong workspace (the "lẫn lộn zalo và tele" bug).
+    stranger_channel = await _stranger_channel(chat_id)
+    all_bosses = _filter_bosses_for_channel(
+        await db.get_all_bosses(), stranger_channel,
+    )
     boss_list = "\n".join(
         f"chat_id={b['chat_id']}: {b['name']} — {b.get('company', '')}"
         for b in all_bosses
@@ -362,7 +427,10 @@ Trả về JSON duy nhất: {"name": "..."} hoặc {"name": ""} nếu không tì
 
 async def handle_join_inquiry(chat_id: str) -> str:
     """Called when user wants to see available companies. Returns listing message."""
-    bosses = await db.get_all_bosses()
+    stranger_channel = await _stranger_channel(chat_id)
+    bosses = _filter_bosses_for_channel(
+        await db.get_all_bosses(), stranger_channel,
+    )
     if not bosses:
         return "Hiện chưa có tổ chức nào được đăng ký trên hệ thống."
 

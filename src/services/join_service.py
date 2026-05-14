@@ -85,6 +85,18 @@ async def approve_join(ctx: ChatContext, membership_chat_id: str, role: str = No
     )
 
     company = ctx.boss_name
+    # Notify the stranger on their own channel. Failure here is non-fatal —
+    # boss still gets the success string; we just log so the gap is visible.
+    try:
+        role_label = "thành viên" if person_type == "member" else "đối tác"
+        msg = (
+            f"Yêu cầu tham gia *{company}* đã được duyệt với vai trò *{role_label}*. "
+            f"Bạn có thể bắt đầu nhắn việc / hỏi bot ngay."
+        )
+        await telegram.send(str(membership_chat_id), msg)
+    except Exception:
+        logger.exception("approve_join: failed to notify stranger %s", membership_chat_id)
+
     return f"Approved {name} as {person_type} in {company}."
 
 
