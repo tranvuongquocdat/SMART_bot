@@ -377,51 +377,38 @@ class ScenarioResult:
     error: str = ""
 
 
-def _check_link_handling(platform: str, url_keyword: str = ""):
-    """Build a custom expectation for link scenarios.
+def _check_link_actually_handled(platform: str, url_keyword: str = ""):
+    """Build a strict expectation: the bot ACTUALLY processed the link.
 
-    PASS conditions:
-      - bot called web_search (genuine attempt to learn about the link), OR
-      - reply contains an honest disclaimer (can't access / can't watch / ...)
-        AND does NOT contain hallucination markers ("video này nói về", ...)
-    FAIL when reply describes specific video content without having fetched it.
+    PASS only when:
+      - web_search tool was called (genuine attempt to learn about the link), OR
+      - reply references the URL content via `url_keyword` (when supplied) AND
+        contains no hallucination markers.
+
+    Honest disclaimers ("can't access") count as FAIL — they signal the
+    capability is missing, not that the test succeeded. The CSV tags such
+    scenarios as FEATURE_GAP separately.
     """
     hallucination_markers = [
         "video này nói", "video nói về", "video kể",
         "nội dung video là", "video chiếu",
         "i watched", "in the video", "the video shows",
     ]
-    disclaimers = [
-        # "không X"
-        "không thể", "không xem", "không truy cập", "không đọc",
-        "không phân tích trực tiếp", "không xem trực tiếp",
-        "không mở", "không mở được", "không trực tiếp",
-        "không có khả năng",
-        # "chưa X" (bot's common phrasing — modest disclaim)
-        "chưa xem", "chưa đọc", "chưa truy cập", "chưa thể",
-        "chưa mở", "chưa fetch",
-        # English
-        "cannot access", "can't watch", "can't access",
-        "cannot read", "can't read",
-    ]
 
     def _check(rec: Recorder) -> str | None:
         tool_names = {tc.name for tc in rec.tool_calls}
         if "web_search" in tool_names:
-            return None  # honest tool use
+            return None
         if not rec.replies:
             return "no reply at all"
         reply = rec.replies[-1].lower()
         if any(m in reply for m in hallucination_markers):
-            return f"reply looks like hallucination of {platform} content"
-        if any(d in reply for d in disclaimers):
-            return None  # honest disclaimer
+            return f"reply hallucinates {platform} content"
         if url_keyword and url_keyword.lower() in reply:
-            # Acknowledged the URL — partial pass
             return None
         return (
-            f"reply gave neither web_search call nor honest disclaimer; "
-            f"got: {reply[:140]!r}"
+            f"bot did not actually fetch/process the {platform} link — "
+            f"no web_search and no URL-keyword match"
         )
 
     return _check
@@ -823,7 +810,7 @@ SCENARIOS: list[Scenario] = [
         steps=[
             UserMessage("xem video này nói về gì giúp tôi: https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
             Expect(
-                custom=_check_link_handling("youtube"),
+                custom=_check_link_actually_handled("youtube"),
                 no_tool_errors=True,
             ),
         ],
@@ -835,7 +822,7 @@ SCENARIOS: list[Scenario] = [
         steps=[
             UserMessage("video này nội dung gì: https://www.tiktok.com/@user/video/7000000000000000000"),
             Expect(
-                custom=_check_link_handling("tiktok"),
+                custom=_check_link_actually_handled("tiktok"),
                 no_tool_errors=True,
             ),
         ],
@@ -847,7 +834,7 @@ SCENARIOS: list[Scenario] = [
         steps=[
             UserMessage("đọc tin này giúp tôi: https://vnexpress.net/the-thao/bong-da/bong-da-trong-nuoc"),
             Expect(
-                custom=_check_link_handling("vnexpress", url_keyword="vnexpress"),
+                custom=_check_link_actually_handled("vnexpress", url_keyword="vnexpress"),
                 no_tool_errors=True,
             ),
         ],
@@ -870,11 +857,12 @@ SCENARIOS: list[Scenario] = [
         tags=["escalate", "fire"],
     ),
     Scenario(
-        name="New-member event trong group đã onboarded — silent expected",
+        name="New-member event trong group → bot phải hỏi boss",
         description=(
-            "Telegram emits service event 'X joined the group'. Bot không có "
-            "logic auto-greet; chỉ passive identity.harvest. Test confirm: "
-            "không reply, không outbound, không crash. Boss approval flow đi qua O2 (DM)."
+            "Theo yêu cầu boss: khi có người mới vào group đã onboarded, bot "
+            "phải chủ động hỏi sếp (DM hoặc nhắn group) — vd 'Có A vừa vào "
+            "group X, anh có muốn thêm họ vào team không?'. Silent = không có "
+            "feature, không phải pass."
         ),
         steps=[
             UserMessage(
@@ -884,7 +872,7 @@ SCENARIOS: list[Scenario] = [
                 new_members=[{"id": "newcomer_001", "name": "Người Mới", "username": ""}],
             ),
             Expect(
-                custom=lambda rec: None if (not rec.replies and not rec.outbound) else "unexpected outbound on bare new-member event",
+                custom=lambda rec: None if (rec.replies or rec.outbound) else "silence — bot không proactive hỏi boss khi new member join",
                 no_tool_errors=True,
             ),
         ],
@@ -933,22 +921,13 @@ def _build_file_scenario(test_ctx: dict) -> Scenario:
         if not rec.replies:
             return "no reply"
         last = rec.replies[-1].lower()
-        if len(last) < 30:
-            return f"reply too short: {last!r}"
-        # Path A: bot actually read the file → reply references unique keyword.
+        # Strict: bot ACTUALLY read the file → unique keyword shows up. Honest
+        # disclaimer is FAIL (file_ingestion gap = missing feature, not pass).
         if "zulipix" in last or "qorantek" in last:
             return None
-        # Path B: file format isn't supported (file_ingestion only handles
-        # image/PDF/DOCX). Bot should honestly disclaim, not fabricate content.
-        honest = [
-            "không hỗ trợ", "chưa hỗ trợ", "không đọc",
-            "chưa đọc", "không thể đọc",
-        ]
-        if any(h in last for h in honest):
-            return None
         return (
-            "reply doesn't reference unique keyword from file AND lacks "
-            "an honest disclaimer about not reading it"
+            "bot did not read the file content (no unique keyword in reply) — "
+            "feature gap, file_ingestion doesn't handle text/plain"
         )
 
     return Scenario(
