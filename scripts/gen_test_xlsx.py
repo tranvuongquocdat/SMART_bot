@@ -44,13 +44,11 @@ BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 COLUMN_WIDTHS = {
     "A": 13,   # cluster
-    "B": 36,   # cluster_purpose
-    "C": 7,    # case_id
-    "D": 42,   # case_name
-    "E": 64,   # case_intent
-    "F": 12,   # status
-    "G": 36,   # evidence
-    "H": 56,   # notes
+    "B": 7,    # case_id
+    "C": 60,   # scenario
+    "D": 12,   # status
+    "E": 42,   # evidence
+    "F": 56,   # notes
 }
 
 
@@ -72,7 +70,9 @@ def main() -> int:
     ws.title = "Self-test scenarios"
 
     # ----- Summary block -----
-    counts = Counter(r[5] for r in data)
+    # Status column is index 3 in the new 6-col layout (0-based).
+    status_col_idx = headers.index("status") if "status" in headers else 3
+    counts = Counter(r[status_col_idx] for r in data)
     total = len(data)
     when = datetime.now().strftime("%Y-%m-%d %H:%M")
     pass_n = counts.get("PASS", 0)
@@ -84,7 +84,7 @@ def main() -> int:
     summary_fill = PatternFill("solid", fgColor="305496")
     ws.cell(row=1, column=1, value="SMART bot — self-test summary").font = summary_title
     ws.cell(row=1, column=1).fill = summary_fill
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=8)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(headers))
     ws.cell(row=1, column=1).alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 26
 
@@ -137,11 +137,12 @@ def main() -> int:
 
         ws.cell(row=row_idx, column=1).fill = CLUSTER_FILL
         ws.cell(row=row_idx, column=1).font = Font(bold=True)
-        ws.cell(row=row_idx, column=2).fill = CLUSTER_FILL
 
-        status = r[5]
+        # status column = D (index 4 in 1-based)
+        status = r[status_col_idx]
+        status_col_letter = status_col_idx + 1
         if status in STATUS_FILL:
-            sc = ws.cell(row=row_idx, column=6)
+            sc = ws.cell(row=row_idx, column=status_col_letter)
             sc.fill = STATUS_FILL[status]
             sc.font = STATUS_FONT[status]
             sc.alignment = Alignment(horizontal="center", vertical="center")

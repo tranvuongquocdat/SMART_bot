@@ -1,25 +1,25 @@
-cluster,cluster_purpose,case_id,case_name,case_intent,status,evidence,notes
-Task,"Boss tạo / liệt kê / cập nhật task qua DM hoặc group",T1,"DM tạo task","Boss DM bot 'tạo task ...' → bot gọi create_task",PASS,"tool create_task được gọi","-"
-Task,"Boss tạo / liệt kê / cập nhật task qua DM hoặc group",T2,"DM liệt kê task","Boss DM 'cho xem danh sách task' → bot gọi list_tasks",PASS,"tool list_tasks được gọi","-"
-Task,"Boss tạo / liệt kê / cập nhật task qua DM hoặc group",T3a,"Group @mention giao task — Telegram assignee","Trong group, boss @bot 'giao Long task' (Chat ID Telegram numeric) → resolve được id, create_task không crash",PASS,"tool create_task không lỗi","-"
-Task,"Boss tạo / liệt kê / cập nhật task qua DM hoặc group",T3b,"Group @mention giao task — Zalo assignee","Trong group, boss @bot 'giao Hùng task' (Chat ID Zalo alphanum) → resolve được id, create_task không crash",PASS,"tool create_task không lỗi","-"
-Reminder,"Tạo / fire / nhận diện nguồn reminder",R1,"DM: self-reminder","Boss DM 'nhắc tôi ...' → tool create_reminder với target=boss",PASS,"tool create_reminder được gọi","-"
-Reminder,"Tạo / fire / nhận diện nguồn reminder",R2,"Group @mention nhắc 1 member","Trong group, boss @bot 'nhắc Long' → create_reminder với target=member, source_chat_id=group",PASS,"tool create_reminder được gọi","-"
-Reminder,"Tạo / fire / nhận diện nguồn reminder",R3,"Fire reminder có target + source group → 3 destinations","send_reminder(target_chat_id + source_chat_id) → target nhận DM + boss nhận cc + source group nhận public notice 'Vừa nhắc X: ...'",PASS,"3 outbound: target DM, boss cc, source group","FIXED — reminder_agent.send_reminder giờ post thêm notice vào source group khi reminder được tạo trong group context"
-Reminder,"Tạo / fire / nhận diện nguồn reminder",R4,"Fire reminder source-only","Reminder không có target_chat_id, có source_chat_id → outbound vào source group thay vì DM boss",PASS,"outbound vào source group","-"
-Reminder,"Tạo / fire / nhận diện nguồn reminder",R5,"Fire DM-only self-reminder → chỉ boss","Self-reminder trong DM (target=None, source=None) → fire chỉ DM boss; KHÔNG group, KHÔNG DM người khác",PASS,"outbound chỉ tới boss conv","Đảm bảo nhắc lẻ không bị leak ra group / contact khác"
-Reminder,"Tạo / fire / nhận diện nguồn reminder",R6,"Fire DM-only target reminder → DM target + boss, KHÔNG group","Boss DM tạo reminder cho Long (target có, source=None) → fire DM Long + cc boss; group KHÔNG có post",PASS,"outbound tới target DM + boss; group conv không có","Bảo đảm boss DM riêng → fire không lén post vào group"
-Notes,"Khả năng auto-take note từ hội thoại tự nhiên",N1,"Auto-append khi boss chia sẻ context cá nhân","Boss nói 'gọi tôi là anh Đạt' → bot append_note / update_note",PASS,"tool append_note / update_note được gọi","-"
-File-Link,"Bot xử lý file đính kèm và link YouTube/TikTok/báo",F1,"DM gửi file text + caption","Boss gửi .txt + 'tóm tắt' → bot phải đọc nội dung file (keyword đặc trưng zulipix/qorantek phải xuất hiện)",PASS,"bot reference keyword zulipix/qorantek từ file","FIXED — _ingest_text handler đọc text/plain (Zalo bridge thường drop mime)"
-File-Link,"Bot xử lý file đính kèm và link YouTube/TikTok/báo",F2,"DM paste link YouTube","Boss gửi YouTube link → bot fetch via oEmbed",PASS,"tool fetch_url được gọi","FIXED — fetch_url tool mới + url_fetch_service hit YouTube oEmbed"
-File-Link,"Bot xử lý file đính kèm và link YouTube/TikTok/báo",F3,"DM paste link TikTok","Boss gửi TikTok link → bot fetch via oEmbed",PASS,"tool fetch_url được gọi","FIXED — fetch_url tool"
-File-Link,"Bot xử lý file đính kèm và link YouTube/TikTok/báo",F4,"DM paste link bài báo (vnexpress)","Boss gửi link tin tức → bot fetch HTML + summary",PASS,"tool fetch_url được gọi","Path generic HTML qua fetch_url (trước đây dùng web_search; giờ chính xác hơn)"
-File-Link,"Bot xử lý file đính kèm và link YouTube/TikTok/báo",F5,"Image attachment (PNG 32x32 đỏ)","Boss gửi ảnh + 'trong ảnh này có gì' → bot ingest, reply nhắc ảnh/màu",PASS,"reply nhắc tới ảnh / màu","File ingestion → LOCAL_IMAGE sentinel + OpenAI Vision"
-Onboard,"Hỏi boss / xin phép khi có người mới",O1,"New-member event trong group → bot phải hỏi boss","Người mới vào group đã onboarded → bot proactive DM boss hỏi role",PASS,"outbound tới boss có tên 'Người Mới'","FIXED — _notify_boss_new_members trong secretary_agent.handle_message (qua _messenger_for nên route đúng channel boss)"
-Onboard,"Hỏi boss / xin phép khi có người mới",O2,"Boss duyệt + stranger được báo qua channel của họ","Boss DM duyệt → approve_join → membership active + stranger nhận outbound qua channel của stranger",PASS,"approve_join + membership active + outbound vào stranger conv","FIXED — approve_join notify stranger qua _messenger_for"
-Onboard,"Hỏi boss / xin phép khi có người mới",O3,"Stranger gọi request_join → pending row + boss được DM","Stranger gọi service request_join → membership pending + boss nhận outbound",PASS,"membership status=pending + outbound to boss conv","-"
-Onboard,"Hỏi boss / xin phép khi có người mới",O4,"Listing isolation: Zalo stranger không thấy boss Telegram","handle_join_inquiry từ Zalo conv: response KHÔNG chứa tên boss Telegram. Từ Telegram conv: response CÓ.",PASS,"Zalo listing không chứa 'Linh'; Telegram listing có 'Linh'","FIXED — _filter_bosses_for_channel strict isolation: stranger Zalo không thể chọn boss Telegram ngay từ tầng listing. Bosses NULL primary_channel cũng bị hide."
-Escalation,"Bot tự báo sếp / route reminder khi quá hạn",E1,"Task overdue (DM context) → assignee DM + boss report","Task không có Group ID + assignee có Chat ID → reminder DM tới assignee + boss nhận report",PASS,"outbound tới assignee DM + boss conv","-"
-Escalation,"Bot tự báo sếp / route reminder khi quá hạn",E2,"Member bị nhắc deadline không reply → bot báo sếp","Reminder fire 4h trước, target im lặng → _check_no_reply_reminders → bot DM boss",PASS,"outbound nhắc boss về Long + escalated=1","FIXED — _check_no_reply_reminders scheduler tick mới (30 phút) + outbound_messages.escalated column"
-Escalation,"Bot tự báo sếp / route reminder khi quá hạn",E3,"Task từ group, assignee chưa join → reminder vào group","Task có Group ID + assignee không có Chat ID → reminder fallback vào group",PASS,"outbound vào source group","-"
-Channel,"Cross-channel isolation per boss",C1,"Boss Zalo + Telegram-only assignee → reminder vào group, KHÔNG DM cross-channel","Boss có primary_channel='zalo', assignee chỉ có Telegram identity → reminder PHẢI vào group, KHÔNG được DM Long qua Telegram",PASS,"outbound vào group + KHÔNG outbound vào Long DM","FIXED — bosses.primary_channel column + is_target_on_boss_channel filter trong _resolve_task_targets"
+cluster,case_id,scenario,status,evidence,notes
+Task,T1,"DM tạo task — bot gọi create_task",PASS,create_task tool called,
+Task,T2,"DM liệt kê task — bot gọi list_tasks",PASS,list_tasks tool called,
+Task,T3a,"Group @mention giao task — Telegram assignee (id numeric)",PASS,create_task không lỗi,
+Task,T3b,"Group @mention giao task — Zalo assignee (id alphanum)",PASS,create_task không lỗi,
+Reminder,R1,"DM self-reminder",PASS,create_reminder called,
+Reminder,R2,"Group @mention nhắc 1 member",PASS,create_reminder called với target + source_chat_id,
+Reminder,R3,"Fire reminder target + source group → 3 destinations",PASS,target DM + boss cc + source group public notice,reminder_agent post thêm vào source_chat_id
+Reminder,R4,"Fire reminder source-only (không target) → vào source group",PASS,outbound vào source group,
+Reminder,R5,"Fire DM-only self-reminder → chỉ boss",PASS,outbound chỉ tới boss conv,
+Reminder,R6,"Fire DM-only target reminder → DM target + boss, KHÔNG group",PASS,target DM + boss cc; group conv không có,
+Notes,N1,"Auto-append note khi boss chia sẻ context cá nhân",PASS,append_note / update_note called,
+File-Link,F1,"DM gửi file .txt + caption — bot đọc nội dung",PASS,reply reference keyword đặc trưng từ file,_ingest_text handler cho text/plain
+File-Link,F2,"DM paste link YouTube — bot fetch metadata + transcript",PASS,fetch_url called,fetch_url tool + url_fetch_service oEmbed + youtube-transcript-api
+File-Link,F3,"DM paste link TikTok — bot fetch oEmbed + yt-dlp metadata",PASS,fetch_url called,fetch_url tool — caption/uploader/duration/views
+File-Link,F4,"DM paste link bài báo — bot fetch HTML summary",PASS,fetch_url called,
+File-Link,F5,"Image attachment (PNG) — bot nhận diện ảnh",PASS,reply nhắc tới ảnh/màu,LOCAL_IMAGE sentinel + OpenAI Vision
+Onboard,O1,"New-member event trong group → bot proactive DM boss",PASS,outbound tới boss có tên người mới,_notify_boss_new_members route qua channel của boss
+Onboard,O2,"Boss duyệt + stranger được báo qua channel của họ",PASS,approve_join + membership active + outbound vào stranger conv,approve_join giờ notify stranger
+Onboard,O3,"Stranger gọi request_join → pending row + boss DM",PASS,membership status=pending + outbound to boss conv,
+Onboard,O4,"Listing isolation: Zalo stranger không thấy boss Telegram",PASS,Zalo listing không chứa 'Linh'; Telegram listing có,_filter_bosses_for_channel strict — NULL primary_channel cũng hidden
+Escalation,E1,"Task overdue (DM context) → assignee DM + boss report",PASS,outbound tới assignee DM + boss conv,
+Escalation,E2,"Member nhắc deadline không reply → bot báo sếp",PASS,outbound nhắc boss + escalated=1,_check_no_reply_reminders tick 30min + outbound_messages.escalated
+Escalation,E3,"Task từ group, assignee chưa join → reminder vào group",PASS,outbound vào source group,
+Channel,C1,"Boss Zalo + Telegram-only assignee → reminder vào group, KHÔNG DM cross-channel",PASS,outbound vào group; KHÔNG outbound vào Long DM,bosses.primary_channel + is_target_on_boss_channel filter
