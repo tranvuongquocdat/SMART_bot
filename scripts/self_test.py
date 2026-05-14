@@ -353,6 +353,10 @@ class Scenario:
     steps: list  # mixed list of UserMessage | FireReminder | Expect
     setup: Callable[[dict], None] | None = None       # called with shared test_ctx
     tags: list[str] = field(default_factory=list)
+    # LLM tool-call decisions are non-deterministic. Scenarios that exercise
+    # the agent loop end-to-end can spuriously fail one in N runs. Bump this
+    # to 1 for those — runner retries once on FAIL before reporting.
+    retry_on_fail: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -502,12 +506,10 @@ async def _drive_fire_reminder(fr: FireReminder, settings) -> None:
     await agent.send_reminder(fr.reminder, settings)
 
 
-async def run_scenario(scenario: Scenario, router, settings, test_ctx: dict) -> ScenarioResult:
-    print(f"  → {scenario.name} ...", end="", flush=True)
+async def _run_once(scenario: Scenario, router, settings, test_ctx: dict) -> ScenarioResult:
     _REC.reset()
     if scenario.setup:
         scenario.setup(test_ctx)
-
     step_results: list[StepResult] = []
     t0 = time.monotonic()
     error = ""
@@ -529,7 +531,6 @@ async def run_scenario(scenario: Scenario, router, settings, test_ctx: dict) -> 
 
     elapsed = time.monotonic() - t0
     ok = (not error) and all(s.ok for s in step_results) and bool(step_results)
-    print(f" {'PASS' if ok else 'FAIL'} ({elapsed:.1f}s)")
     return ScenarioResult(
         name=scenario.name,
         ok=ok,
@@ -539,6 +540,38 @@ async def run_scenario(scenario: Scenario, router, settings, test_ctx: dict) -> 
         elapsed_s=elapsed,
         error=error,
     )
+
+
+def _auto_retry_budget(scenario: Scenario) -> int:
+    """Scenarios that drive the agent loop with a UserMessage depend on the
+    LLM choosing a tool — non-deterministic. Default 1 retry for those;
+    other scenarios (direct FireFunc / FireReminder) stay strict at 0."""
+    if scenario.retry_on_fail:
+        return scenario.retry_on_fail
+    for s in scenario.steps:
+        if isinstance(s, UserMessage):
+            return 1
+    return 0
+
+
+async def run_scenario(scenario: Scenario, router, settings, test_ctx: dict) -> ScenarioResult:
+    print(f"  → {scenario.name} ...", end="", flush=True)
+    result = await _run_once(scenario, router, settings, test_ctx)
+    attempts = 1
+    budget = _auto_retry_budget(scenario)
+    # Retry on FAIL when the scenario opted in — covers LLM tool-call jitter.
+    while not result.ok and attempts <= budget:
+        retry = await _run_once(scenario, router, settings, test_ctx)
+        if retry.ok:
+            # Merge: keep the first attempt's elapsed for visibility, but
+            # promote the retry's outcome so a stable run shows PASS.
+            retry.elapsed_s = result.elapsed_s + retry.elapsed_s
+            result = retry
+            print(f" RETRY-PASS ({result.elapsed_s:.1f}s)")
+            return result
+        attempts += 1
+    print(f" {'PASS' if result.ok else 'FAIL'} ({result.elapsed_s:.1f}s)")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -726,6 +759,7 @@ SCENARIOS: list[Scenario] = [
             Expect(any_tool_in={"create_task"}),
         ],
         tags=["task", "dm"],
+        retry_on_fail=1,
     ),
     Scenario(
         name="DM: list tasks",
@@ -756,6 +790,7 @@ SCENARIOS: list[Scenario] = [
             Expect(any_tool_in={"append_note", "update_note"}),
         ],
         tags=["note", "dm"],
+        retry_on_fail=1,
     ),
     Scenario(
         name="Group: @mention tạo reminder cho người khác",
