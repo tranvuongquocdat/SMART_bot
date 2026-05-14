@@ -467,8 +467,8 @@ async def handle_message(
             except Exception:
                 logger.warning("%s save_message (DM onboarding user) failed", log_prefix, exc_info=True)
             if not await onboarding.is_onboarding(chat_id):
-                await onboarding.start_onboarding(chat_id)
-            await onboarding.handle_onboard_message(text, chat_id)
+                await onboarding.start_onboarding(chat_id, sender_id)
+            await onboarding.handle_onboard_message(text, chat_id, sender_id)
             return
 
         log_prefix = f"[chat:{chat_id} sender:{sender_id} boss:{ctx.boss_chat_id}]"

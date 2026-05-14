@@ -1,0 +1,762 @@
+#!/usr/bin/env python
+"""End-to-end behavioral self-test for the SMART bot.
+
+Drives the full agent loop with real LLM + real DB, but stubs outbound
+side effects (Lark mutations, Telegram/Zalo outbound) so scenarios are
+safe to run repeatedly. Captures tool calls and bot replies, asserts
+expected behavior, and prints a pass/fail table.
+
+Usage:
+    python scripts/self_test.py                      # all scenarios
+    python scripts/self_test.py --only "task,note"   # name substring filter
+    python scripts/self_test.py --boss "Dat"         # pick test boss
+    python scripts/self_test.py --report-md path.md  # custom report path
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+import sys
+import time
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable, Iterable
+
+sys.path.insert(0, ".")
+
+logging.basicConfig(
+    level=logging.WARNING,
+    format="%(asctime)s | %(name)-10s | %(levelname)-5s | %(message)s",
+    datefmt="%H:%M:%S",
+)
+# Keep our own logger talkative, silence the rest.
+logger = logging.getLogger("self_test")
+logger.setLevel(logging.INFO)
+
+
+# ---------------------------------------------------------------------------
+# Recorder — tracks what the bot did during a scenario step
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class ToolCall:
+    name: str
+    args: dict | str
+    result: str
+
+
+@dataclass
+class Recorder:
+    tool_calls: list[ToolCall] = field(default_factory=list)
+    replies: list[str] = field(default_factory=list)
+    lark_writes: list[tuple[str, dict]] = field(default_factory=list)
+    outbound: list[tuple[str, str]] = field(default_factory=list)  # (chat_id, text)
+
+    def reset(self) -> None:
+        self.tool_calls.clear()
+        self.replies.clear()
+        self.lark_writes.clear()
+        self.outbound.clear()
+
+
+# Module-global recorder (single test run; not concurrent).
+_REC = Recorder()
+
+
+# ---------------------------------------------------------------------------
+# Stub: Lark client — no real Lark mutations
+# ---------------------------------------------------------------------------
+
+
+def install_lark_stub() -> None:
+    """Monkey-patch lark_client to fake all writes. Reads return empty lists by
+    default (we inject per-scenario data via stash_lark_records when needed)."""
+    from src.infrastructure import lark_client as lark
+
+    _records_by_table: dict[str, list[dict]] = {}
+
+    async def _fake_search(base_token: str, table_id: str, filter_expr: str = "") -> list[dict]:
+        return list(_records_by_table.get(table_id, []))
+
+    async def _fake_create(base_token: str, table_id: str, fields: dict) -> dict:
+        rid = f"recFAKE_{uuid.uuid4().hex[:8]}"
+        row = {"record_id": rid, **fields}
+        _records_by_table.setdefault(table_id, []).append(row)
+        _REC.lark_writes.append(("create", {"table": table_id, "fields": fields}))
+        return row
+
+    async def _fake_update(base_token: str, table_id: str, record_id: str, fields: dict) -> dict:
+        _REC.lark_writes.append(("update", {"table": table_id, "record_id": record_id, "fields": fields}))
+        # Mutate in place if found.
+        for r in _records_by_table.get(table_id, []):
+            if r.get("record_id") == record_id:
+                r.update(fields)
+                return r
+        return {"record_id": record_id, **fields}
+
+    async def _fake_delete(base_token: str, table_id: str, record_id: str):
+        _REC.lark_writes.append(("delete", {"table": table_id, "record_id": record_id}))
+        _records_by_table[table_id] = [
+            r for r in _records_by_table.get(table_id, []) if r.get("record_id") != record_id
+        ]
+
+    async def _fake_sync_reminder(*a, **kw):
+        _REC.lark_writes.append(("sync_reminder", kw or {"args": a}))
+
+    async def _fake_sync_note(*a, **kw):
+        _REC.lark_writes.append(("sync_note", kw or {"args": a}))
+
+    lark.search_records = _fake_search  # type: ignore
+    lark.create_record = _fake_create   # type: ignore
+    lark.update_record = _fake_update   # type: ignore
+    lark.delete_record = _fake_delete   # type: ignore
+    lark.sync_reminder_to_lark = _fake_sync_reminder  # type: ignore
+    lark.sync_note_to_lark = _fake_sync_note  # type: ignore
+
+    # Expose so scenarios can inject pre-existing records.
+    install_lark_stub.records = _records_by_table  # type: ignore[attr-defined]
+
+
+def stash_lark_records(table_id: str, rows: list[dict]) -> None:
+    """Pre-populate fake Lark table for a scenario. Call after install_lark_stub()."""
+    records = install_lark_stub.records  # type: ignore[attr-defined]
+    records.setdefault(table_id, []).extend(rows)
+
+
+# ---------------------------------------------------------------------------
+# Stub: outbound channel — CapturingMessenger replaces Telegram + Zalo
+# ---------------------------------------------------------------------------
+
+
+def install_capture_messenger() -> None:
+    """Replace telegram_singleton._messenger AND register the same capturing
+    messenger for every provider in the channel registry."""
+    from src.channels.base import BaseMessenger, MessengerCapabilities, OutgoingMessage
+    from src.channels import telegram_singleton
+    from src.channels import registry as channel_registry
+
+    class _Capture(BaseMessenger):
+        channel = "test"
+        capabilities = MessengerCapabilities(
+            supports_groups=True, supports_group_admin=True,
+            supports_invite_links=True, supports_edit=True, supports_delete=True,
+            supports_typing=True, supports_photos=True, supports_files=True,
+            supports_voice=True, supports_markdown=True,
+        )
+
+        async def send_message(self, chat_id, text, *, format="markdown",
+                               save_history=True, reply_to_message_id=None):
+            _REC.outbound.append((str(chat_id), text))
+            _REC.replies.append(text)
+            return OutgoingMessage(message_id=str(uuid.uuid4()), chat_id=str(chat_id))
+
+        async def edit_message(self, chat_id, message_id, text, *, format="markdown"):
+            # Treat the FINAL state of the placeholder as the reply.
+            # We just record every edit; report uses the last.
+            _REC.outbound.append((str(chat_id), text))
+            if _REC.replies:
+                _REC.replies[-1] = text
+            else:
+                _REC.replies.append(text)
+
+        async def delete_message(self, chat_id, message_id):
+            return None
+
+        async def typing(self, chat_id):
+            return None
+
+        async def get_bot_id(self):
+            return "test-bot"
+
+        # group admin no-ops (return permissive defaults)
+        async def get_chat_administrators(self, chat_id):
+            return []
+
+        async def get_chat_member(self, chat_id, user_id):
+            return {"status": "member"}
+
+        async def add_chat_member(self, chat_id, user_id):
+            return True
+
+        async def set_chat_title(self, chat_id, title):
+            return True
+
+        async def set_chat_description(self, chat_id, description):
+            return True
+
+        async def pin_chat_message(self, chat_id, message_id):
+            return True
+
+        async def unpin_all_chat_messages(self, chat_id):
+            return True
+
+        async def ban_chat_member(self, chat_id, user_id):
+            return True
+
+        async def unban_chat_member(self, chat_id, user_id):
+            return True
+
+        async def create_invite_link(self, chat_id, *, member_limit=1, expire_hours=24):
+            return "https://t.me/joinchat/FAKE"
+
+    cap = _Capture()
+    telegram_singleton._messenger = cap  # type: ignore
+    channel_registry.register("telegram", cap)
+    channel_registry.register("zalo", cap)
+    channel_registry.register("test", cap)
+
+
+# ---------------------------------------------------------------------------
+# Stub: dispatcher — wrap execute() to record calls
+# ---------------------------------------------------------------------------
+
+
+def install_dispatcher_recorder() -> None:
+    from src import agent
+    orig = agent._dispatcher.execute  # bound method
+
+    async def wrapped(name: str, arguments, ctx) -> str:
+        result = await orig(name, arguments, ctx)
+        _REC.tool_calls.append(ToolCall(name=name, args=arguments, result=result))
+        return result
+
+    agent._dispatcher.execute = wrapped  # type: ignore[assignment]
+
+
+# ---------------------------------------------------------------------------
+# Init — mirror cli_test.py, but with stubs and no scheduler
+# ---------------------------------------------------------------------------
+
+
+async def init_services(settings):
+    from src import agent, context, db
+    from src.channels import telegram_singleton as telegram
+    from src.channels import registry as channel_registry
+    from src.infrastructure import (
+        cohere_client as cohere,
+        lark_client as lark,
+        openai_client,
+        qdrant_client as qdrant,
+    )
+
+    database = await db.get_db(settings.db_path)
+    context.init_context(database)
+    openai_client.init_openai(
+        settings.openai_api_key,
+        settings.openai_chat_model,
+        settings.openai_embedding_model,
+    )
+    await qdrant.init_qdrant(settings.qdrant_url)
+    await cohere.init_cohere(settings.cohere_api_key)
+    # Real lark init so token client builds, then we monkey-patch its calls.
+    await lark.init_lark(settings.lark_app_id, settings.lark_app_secret)
+    await telegram.init_telegram(settings.telegram_bot_token)
+    agent.init_agent(settings)
+
+    from src.agent.llm_for_ctx import init_llm_settings
+    init_llm_settings(settings)
+
+    from src.container import build_container
+    container = await build_container(settings)
+
+    # Install stubs AFTER the real init, so they replace the real calls.
+    install_lark_stub()
+    install_capture_messenger()
+    install_dispatcher_recorder()
+
+    # CRITICAL: do NOT start scheduler — we'd be racing with deadline pushes,
+    # reminder fires, etc.
+
+    from src.controllers.message_router import MessageRouter
+    router = MessageRouter(container)
+    return router
+
+
+# ---------------------------------------------------------------------------
+# Scenario types
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class UserMessage:
+    text: str
+    is_group: bool = False
+    is_mentioned: bool = False
+    new_members: list[dict] = field(default_factory=list)
+    attachments: list = field(default_factory=list)
+
+
+@dataclass
+class FireReminder:
+    """Directly invoke reminder_agent.send_reminder() with a synthetic row."""
+    reminder: dict
+
+
+@dataclass
+class Expect:
+    """Declarative assertion against the recorder state since the last step."""
+    any_tool_in: set[str] | None = None              # at least one of these tools called
+    no_tool_errors: bool = True                      # tool results free of [TOOL_ERROR
+    reply_contains_any: list[str] | None = None      # last reply contains any of these (case-insensitive)
+    reply_excludes: list[str] | None = None          # last reply must NOT contain any of these
+    outbound_to: str | None = None                   # at least one outbound to this chat_id
+    custom: Callable[[Recorder], str | None] | None = None  # return None on pass, else reason
+
+
+@dataclass
+class Scenario:
+    name: str
+    description: str
+    steps: list  # mixed list of UserMessage | FireReminder | Expect
+    setup: Callable[[dict], None] | None = None       # called with shared test_ctx
+    tags: list[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Runner
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class StepResult:
+    ok: bool
+    reason: str = ""
+
+
+@dataclass
+class ScenarioResult:
+    name: str
+    ok: bool
+    steps: list[StepResult]
+    tool_calls: list[ToolCall]
+    replies: list[str]
+    elapsed_s: float
+    error: str = ""
+
+
+def _check_expectations(exp: Expect, rec: Recorder) -> StepResult:
+    reasons: list[str] = []
+
+    if exp.any_tool_in is not None:
+        names = {tc.name for tc in rec.tool_calls}
+        hit = exp.any_tool_in & names
+        if not hit:
+            reasons.append(
+                f"expected one of tools {sorted(exp.any_tool_in)}, got {sorted(names) or '∅'}"
+            )
+
+    if exp.no_tool_errors:
+        for tc in rec.tool_calls:
+            if isinstance(tc.result, str) and tc.result.startswith("[TOOL_ERROR"):
+                reasons.append(f"tool {tc.name} returned {tc.result[:80]}")
+
+    if exp.reply_contains_any:
+        last = rec.replies[-1].lower() if rec.replies else ""
+        if not any(kw.lower() in last for kw in exp.reply_contains_any):
+            reasons.append(
+                f"reply missing all of {exp.reply_contains_any!r}; got {last[:100]!r}"
+            )
+
+    if exp.reply_excludes:
+        last = rec.replies[-1].lower() if rec.replies else ""
+        hits = [kw for kw in exp.reply_excludes if kw.lower() in last]
+        if hits:
+            reasons.append(f"reply contained forbidden {hits!r}")
+
+    if exp.outbound_to is not None:
+        chat_ids = {c for c, _ in rec.outbound}
+        if exp.outbound_to not in chat_ids:
+            reasons.append(f"no outbound to {exp.outbound_to}; saw {sorted(chat_ids) or '∅'}")
+
+    if exp.custom is not None:
+        msg = exp.custom(rec)
+        if msg:
+            reasons.append(f"custom: {msg}")
+
+    if reasons:
+        return StepResult(ok=False, reason=" | ".join(reasons))
+    return StepResult(ok=True)
+
+
+async def _drive_user_message(
+    router, msg: UserMessage, test_ctx: dict
+) -> None:
+    from src.channels.base import IncomingMessage
+    boss_id = test_ctx["boss_id"]
+    boss_name = test_ctx["boss_name"]
+    dm_conv = test_ctx["dm_conv_id"]
+    group_conv = test_ctx["group_conv_id"]
+
+    chat_id = group_conv if msg.is_group else dm_conv
+    chat_type = "group" if msg.is_group else "dm"
+
+    incoming = IncomingMessage(
+        channel="test",
+        chat_id=chat_id,
+        chat_type=chat_type,
+        sender_id=boss_id,
+        sender_name=boss_name,
+        text=msg.text,
+        attachments=msg.attachments,
+        is_mentioned=msg.is_mentioned,
+        new_members=msg.new_members,
+        timestamp=int(time.time()),
+        group_name=test_ctx.get("group_name", "Test Group") if msg.is_group else "",
+    )
+    await router.handle(incoming)
+
+
+async def _drive_fire_reminder(fr: FireReminder, settings) -> None:
+    from src import agent
+    await agent.send_reminder(fr.reminder, settings)
+
+
+async def run_scenario(scenario: Scenario, router, settings, test_ctx: dict) -> ScenarioResult:
+    print(f"  → {scenario.name} ...", end="", flush=True)
+    _REC.reset()
+    if scenario.setup:
+        scenario.setup(test_ctx)
+
+    step_results: list[StepResult] = []
+    t0 = time.monotonic()
+    error = ""
+    try:
+        for step in scenario.steps:
+            if isinstance(step, UserMessage):
+                await _drive_user_message(router, step, test_ctx)
+            elif isinstance(step, FireReminder):
+                await _drive_fire_reminder(step, settings)
+            elif isinstance(step, Expect):
+                step_results.append(_check_expectations(step, _REC))
+            else:
+                step_results.append(StepResult(ok=False, reason=f"unknown step type: {type(step).__name__}"))
+    except Exception as exc:
+        error = f"{type(exc).__name__}: {exc}"
+        logger.exception("scenario %s crashed", scenario.name)
+
+    elapsed = time.monotonic() - t0
+    ok = (not error) and all(s.ok for s in step_results) and bool(step_results)
+    print(f" {'PASS' if ok else 'FAIL'} ({elapsed:.1f}s)")
+    return ScenarioResult(
+        name=scenario.name,
+        ok=ok,
+        steps=step_results,
+        tool_calls=list(_REC.tool_calls),
+        replies=list(_REC.replies),
+        elapsed_s=elapsed,
+        error=error,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Report
+# ---------------------------------------------------------------------------
+
+
+def render_table(results: list[ScenarioResult]) -> str:
+    headers = ["#", "Scenario", "Result", "Tools", "Time", "Notes"]
+    rows: list[list[str]] = []
+    for i, r in enumerate(results, 1):
+        tools = ", ".join(sorted({tc.name for tc in r.tool_calls})) or "—"
+        if r.error:
+            note = f"crash: {r.error[:60]}"
+        else:
+            fail_reasons = [s.reason for s in r.steps if not s.ok]
+            note = "; ".join(fail_reasons)[:120] if fail_reasons else "ok"
+        rows.append([
+            str(i), r.name[:42],
+            "✓" if r.ok else "✗",
+            tools[:40], f"{r.elapsed_s:.1f}s", note[:80],
+        ])
+
+    widths = [max(len(h), *(len(row[i]) for row in rows)) for i, h in enumerate(headers)]
+    sep = "+".join("-" * (w + 2) for w in widths)
+    sep = f"+{sep}+"
+
+    def fmt(row: list[str]) -> str:
+        return "| " + " | ".join(c.ljust(widths[i]) for i, c in enumerate(row)) + " |"
+
+    lines = [sep, fmt(headers), sep] + [fmt(r) for r in rows] + [sep]
+    return "\n".join(lines)
+
+
+def render_markdown(results: list[ScenarioResult]) -> str:
+    passed = sum(1 for r in results if r.ok)
+    total = len(results)
+    when = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    out = [
+        f"# SMART bot — self-test report",
+        f"_Generated: {when}_",
+        "",
+        f"**Result:** {passed}/{total} passed",
+        "",
+        "| # | Scenario | Result | Tools called | Time | Notes |",
+        "|---|---|---|---|---|---|",
+    ]
+    for i, r in enumerate(results, 1):
+        tools = ", ".join(sorted({tc.name for tc in r.tool_calls})) or "—"
+        if r.error:
+            note = f"crash: `{r.error}`"
+        else:
+            fail_reasons = [s.reason for s in r.steps if not s.ok]
+            note = "; ".join(fail_reasons) if fail_reasons else "ok"
+        out.append(
+            f"| {i} | {r.name} | {'✓' if r.ok else '✗'} | "
+            f"`{tools}` | {r.elapsed_s:.1f}s | {note} |"
+        )
+
+    out += ["", "## Failure details", ""]
+    for r in results:
+        if r.ok:
+            continue
+        out.append(f"### {r.name}")
+        if r.error:
+            out.append(f"- **crash:** `{r.error}`")
+        for s in r.steps:
+            if not s.ok:
+                out.append(f"- {s.reason}")
+        out.append("")
+        out.append("**Tool calls:**")
+        for tc in r.tool_calls:
+            out.append(f"- `{tc.name}` args=`{str(tc.args)[:120]}` → `{tc.result[:120]}`")
+        out.append("")
+        out.append("**Replies:**")
+        for rp in r.replies:
+            out.append(f"> {rp[:200]}")
+        out.append("")
+
+    return "\n".join(out)
+
+
+# ---------------------------------------------------------------------------
+# Test bootstrap — pick boss + ensure DM + group conversations
+# ---------------------------------------------------------------------------
+
+
+async def _bootstrap_test_ctx(boss_hint: str | None) -> dict:
+    from src import db
+    bosses = await db.get_all_bosses()
+    if not bosses:
+        print("No boss found. Onboard one first.")
+        sys.exit(1)
+    if boss_hint:
+        q = boss_hint.lower()
+        matches = [b for b in bosses if q in (b.get("name") or "").lower()]
+        if not matches:
+            print(f"No boss matches '{boss_hint}'. Available: {[b['name'] for b in bosses]}")
+            sys.exit(1)
+        boss = matches[0]
+    else:
+        boss = bosses[0]
+
+    boss_id = boss["chat_id"]
+    boss_name = boss.get("name") or "Boss"
+
+    dm_conv = await db.resolve_or_create_conversation("test", f"selftest_dm_{boss_id}", "dm", "")
+    group_conv = await db.resolve_or_create_conversation(
+        "test", f"selftest_grp_{boss_id}", "group", "Self-Test Group",
+    )
+    # Link group to this boss so group routing works.
+    grp = await db.get_group(group_conv)
+    if not grp:
+        await db.add_group(
+            group_chat_id=group_conv,
+            boss_chat_id=boss_id,
+            group_name="Self-Test Group",
+            project_id=None,
+        )
+
+    return {
+        "boss": boss,
+        "boss_id": boss_id,
+        "boss_name": boss_name,
+        "dm_conv_id": dm_conv,
+        "group_conv_id": group_conv,
+        "group_name": "Self-Test Group",
+    }
+
+
+# ---------------------------------------------------------------------------
+# Scenarios
+# ---------------------------------------------------------------------------
+
+
+SCENARIOS: list[Scenario] = [
+    Scenario(
+        name="DM: boss tạo task",
+        description="Boss DM lệnh tạo task → expect create_task tool",
+        steps=[
+            UserMessage("ê tạo task: nộp báo cáo doanh thu trước thứ 6 tuần này"),
+            Expect(any_tool_in={"create_task"}),
+        ],
+        tags=["task", "dm"],
+    ),
+    Scenario(
+        name="DM: list tasks",
+        description="Liệt kê task → expect list_tasks hoặc search_tasks",
+        steps=[
+            UserMessage("cho tôi xem danh sách task hiện tại"),
+            Expect(any_tool_in={"list_tasks", "search_tasks"}),
+        ],
+        tags=["task", "dm"],
+    ),
+    Scenario(
+        name="DM: tạo reminder cho mình",
+        description="Self-reminder → expect create_reminder",
+        steps=[
+            UserMessage("nhắc tôi 6h tối mai gọi điện cho khách hàng"),
+            Expect(any_tool_in={"create_reminder"}),
+        ],
+        tags=["reminder", "dm"],
+    ),
+    Scenario(
+        name="DM: smart note (auto-append)",
+        description="Khi boss chia sẻ thông tin cá nhân → expect append_note hoặc update_note",
+        steps=[
+            UserMessage(
+                "À nhớ giúp tôi nhé, từ giờ trở đi gọi tôi là 'anh Đạt' chứ không phải 'sếp', "
+                "và tôi thích phong cách trao đổi ngắn gọn, không dài dòng."
+            ),
+            Expect(any_tool_in={"append_note", "update_note"}),
+        ],
+        tags=["note", "dm"],
+    ),
+    Scenario(
+        name="Group: @mention tạo reminder cho người khác",
+        description="Trong group @bot nhắc 1 người → create_reminder với target + source_chat_id",
+        steps=[
+            UserMessage(
+                "@bot nhắc anh Long 5h chiều mai họp review tuần",
+                is_group=True, is_mentioned=True,
+            ),
+            Expect(any_tool_in={"create_reminder"}),
+        ],
+        tags=["reminder", "group"],
+    ),
+    Scenario(
+        name="Group: @mention tạo task",
+        description="Trong group @bot giao task → create_task",
+        steps=[
+            UserMessage(
+                "@bot giao Long task: review báo cáo Q2, deadline thứ 6",
+                is_group=True, is_mentioned=True,
+            ),
+            Expect(any_tool_in={"create_task"}),
+        ],
+        tags=["task", "group"],
+    ),
+    Scenario(
+        name="Reminder fire: route tới target + cc boss",
+        description=(
+            "Trực tiếp gọi send_reminder với target_chat_id → expect outbound tới target. "
+            "Bỏ qua scheduler."
+        ),
+        steps=[
+            # Filled in setup; placeholder.
+        ],
+        tags=["reminder", "fire"],
+    ),
+]
+
+
+def _build_fire_reminder_scenario(test_ctx: dict) -> Scenario:
+    """Reminder fire needs runtime test_ctx for chat ids — build dynamically."""
+    boss_id = test_ctx["boss_id"]
+    target = test_ctx["dm_conv_id"]
+    fake_reminder = {
+        "id": 999_999_999,
+        "boss_chat_id": boss_id,
+        "target_chat_id": target,
+        "target_name": "Self-Test Target",
+        "source_chat_id": test_ctx["group_conv_id"],
+        "content": "Test fire — nộp báo cáo",
+        "remind_at": int(time.time()),
+    }
+    return Scenario(
+        name="Reminder fire: route tới target + cc boss",
+        description="Fire send_reminder() trực tiếp",
+        steps=[
+            FireReminder(reminder=fake_reminder),
+            Expect(outbound_to=target),
+        ],
+        tags=["reminder", "fire"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+
+async def main_async(args) -> int:
+    from src.config import Settings
+    settings = Settings()
+
+    print("Bootstrapping services (real DB + LLM, stubbed Lark/outbound)…")
+    router = await init_services(settings)
+
+    test_ctx = await _bootstrap_test_ctx(args.boss)
+    print(f"Test boss: {test_ctx['boss_name']} ({test_ctx['boss_id']})")
+    print(f"DM conv:    {test_ctx['dm_conv_id']}")
+    print(f"Group conv: {test_ctx['group_conv_id']}")
+    print()
+
+    # Replace fire-reminder placeholder with runtime-built version.
+    scenarios = []
+    for s in SCENARIOS:
+        if s.name == "Reminder fire: route tới target + cc boss":
+            scenarios.append(_build_fire_reminder_scenario(test_ctx))
+        else:
+            scenarios.append(s)
+
+    # Filter
+    if args.only:
+        needles = [n.strip().lower() for n in args.only.split(",") if n.strip()]
+        scenarios = [
+            s for s in scenarios
+            if any(n in s.name.lower() or n in " ".join(s.tags) for n in needles)
+        ]
+    if not scenarios:
+        print("(no scenarios matched filter)")
+        return 1
+
+    print(f"Running {len(scenarios)} scenario(s):")
+    t0 = time.monotonic()
+    results: list[ScenarioResult] = []
+    for sc in scenarios:
+        res = await run_scenario(sc, router, settings, test_ctx)
+        results.append(res)
+    elapsed = time.monotonic() - t0
+
+    print()
+    print(render_table(results))
+    print(f"\nTotal: {sum(r.ok for r in results)}/{len(results)} passed in {elapsed:.1f}s")
+
+    report_path = Path(args.report_md)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(render_markdown(results), encoding="utf-8")
+    print(f"Markdown report: {report_path}")
+
+    return 0 if all(r.ok for r in results) else 1
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="SMART bot self-test harness")
+    parser.add_argument("--boss", default=None, help="Boss name substring (default: first boss)")
+    parser.add_argument("--only", default=None, help="Filter by name/tag substring (comma-sep)")
+    parser.add_argument(
+        "--report-md", default="data/self_test_report.md",
+        help="Where to write the markdown report",
+    )
+    args = parser.parse_args()
+    sys.exit(asyncio.run(main_async(args)))
+
+
+if __name__ == "__main__":
+    main()

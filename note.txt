@@ -1,0 +1,12 @@
+* cần tối ưu code toàn diện để support thuần zalo mượt mà, tele là phụ thôi, zalo mới là bên cần quan tâm chính
+- handle các case giao việc, chat qua lại một cách hiệu qủa
+- bỏ phần bắt buộc user add bot làm admin, ko có thì vẫn làm việc, chỉ là ko làm đc các việc của admin đâu, hiện tại bị block nhiều quá
+- check lại luồng vd giao task hoặc reminder trong nhóm thì đã nhắc ở nhóm chưa
+- bỏ cơ chế bắt user phải onboard thì mới được giao task, vd trong nhóm sếp nhắn là @bot nhắc anh Tân chiếu thứ 3 j j đó, dù Tân chưa onboard nma cứ ghi lại và nhắc lại ở trong nhóm về lịch này, vì bot chưa thể tự nhắn Tân được
+- các usecase khác cũng cần linh hoạt và thông minh hơn
+- Code cũng cần tối ưu, lark thuần và source of truth linh hoạt (tương lai có thể mở rộng ra nền tảng khác nma hiện tại là lark)
+- code gọn hơn, flow gọn hơn, nhẹ và chính xác linh hoạt hơn, cứ để Agent nó cân đối hợp lý, đừng dở hơi quá
+- check bug theo hướng gọn hơn
+- quan trọng: mở rộng tính năng đọc được link, link có thể là file, youtube, tiktok, báo,...
+- có web search web fetch mak lại reject bảo ko đọc được link, kỳ lạ
+- vẫn nhắc lại, flow hiện tại quá cứng nhắc, user dùng rất tù, bot bị ngu đi vì bị limit
