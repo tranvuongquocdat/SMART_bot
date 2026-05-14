@@ -445,6 +445,19 @@ async def handle_message(
     )
 
     try:
+        # ---- Step 0.5: Reset / re-onboard hook ------------------------
+        # When the inbound text contains the configured onboard phrase,
+        # short-circuit: clear any half-finished onboarding state and
+        # restart from scratch — OR for users who already have a workspace,
+        # send a no-op info reply (we don't nuke active memberships).
+        if not is_group and text and _settings:
+            from src import onboarding as _ob  # noqa: PLC0415
+            handled = await _ob.maybe_handle_reset_phrase(
+                text, chat_id, sender_id, _settings.zalo_onboard_phrase,
+            )
+            if handled:
+                return
+
         # ---- Step 1: Group routing ----
         if is_group:
             group_info = await db.get_group(chat_id)

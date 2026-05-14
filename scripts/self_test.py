@@ -920,6 +920,18 @@ SCENARIOS: list[Scenario] = [
         tags=["onboard", "channel", "isolation"],
     ),
     Scenario(
+        name="Reset phrase mid-onboarding → state wiped + fresh greeting",
+        description="Stranger mid-onboarding gửi lại phrase → clear state, restart sạch",
+        steps=[],  # built dynamically
+        tags=["onboard", "reset"],
+    ),
+    Scenario(
+        name="Reset phrase từ boss đã onboard → KHÔNG reset, chỉ thông báo",
+        description="Boss đã có workspace gửi phrase → bot reply info, KHÔNG xoá data",
+        steps=[],  # built dynamically
+        tags=["onboard", "reset", "boss"],
+    ),
+    Scenario(
         name="Image attachment: bot nhận diện ảnh",
         description="Boss gửi ảnh nhỏ → bot ingest, reply không crash, có nhắc tới ảnh hoặc nội dung",
         steps=[],  # built dynamically
@@ -1107,6 +1119,123 @@ def _build_approve_join_scenario(test_ctx: dict) -> Scenario:
             Expect(custom=_stranger_got_notice),
         ],
         tags=["onboard", "approve"],
+    )
+
+
+def _build_reset_phrase_midflow_scenario(test_ctx: dict) -> Scenario:
+    """Stranger mid-onboarding (state already set) sends the phrase again.
+    Expect: state cleared, fresh `{first: True, ...}` written, greeting sent."""
+    stranger_conv = test_ctx["stranger_conv_id"]
+    stranger_internal = test_ctx["stranger_internal_id"]
+    boss_id = test_ctx["boss_id"]
+
+    async def _seed(_step, _settings) -> None:
+        from src import db
+        # Pre-fill a half-finished state to mimic the user being stuck.
+        await db.save_onboarding_state(stranger_conv, {
+            "type": "boss",
+            "name": "wrong_name_from_earlier",
+            "company": None,
+            "language": "vi",
+            "sender_id": stranger_internal,
+        })
+        # Make sure this stranger has NO active memberships so the reset
+        # branch (not the "already onboarded" branch) fires.
+        _db = await db.get_db()
+        await _db.execute(
+            "DELETE FROM memberships WHERE chat_id = ? AND boss_chat_id = ?",
+            (stranger_internal, str(boss_id)),
+        )
+        await _db.commit()
+
+    async def _drive(_step, _settings) -> None:
+        from src import onboarding
+        await onboarding.maybe_handle_reset_phrase(
+            "khởi tạo trợ lý", stranger_conv, stranger_internal, "khởi tạo trợ lý",
+        )
+
+    async def _verify(_step, _settings) -> None:
+        from src import db
+        state = await db.get_onboarding_state(stranger_conv) or {}
+        # After reset, start_onboarding wrote {first: True, sender_id: ...},
+        # then handle_onboard_message popped 'first' and saved {sender_id: ...}.
+        # Either way, the OLD fields (type=boss, name=wrong_name_from_earlier)
+        # must be gone.
+        if state.get("name") == "wrong_name_from_earlier":
+            raise AssertionError(f"reset did not clear old name; state={state}")
+        if state.get("type") == "boss":
+            raise AssertionError(f"reset did not clear old type; state={state}")
+
+    def _check_outbound(rec: Recorder) -> str | None:
+        if not rec.outbound:
+            return "no greeting sent after reset"
+        return None
+
+    return Scenario(
+        name="Reset phrase mid-onboarding → state wiped + fresh greeting",
+        description="maybe_handle_reset_phrase wipes onboarding_state and emits a fresh greeting",
+        steps=[
+            _FireFunc(_seed),
+            _FireFunc(_drive),
+            Expect(custom=_check_outbound, no_tool_errors=True),
+            _FireFunc(_verify),
+        ],
+        tags=["onboard", "reset"],
+    )
+
+
+def _build_reset_phrase_existing_boss_scenario(test_ctx: dict) -> Scenario:
+    """Boss already onboarded sends the phrase. Expect: info reply, no
+    destructive action — neither onboarding_state nor memberships touched."""
+    boss_id = test_ctx["boss_id"]
+    dm_conv = test_ctx["dm_conv_id"]
+
+    async def _seed(_step, _settings) -> None:
+        from src import db
+        # Confirm the test boss has at least one active membership row
+        # (the self-boss row from onboarding). Self-test bootstrap creates
+        # this implicitly; assert it's there.
+        memberships = await db.get_memberships(str(boss_id)) or []
+        actives = [m for m in memberships if (m.get("status") or "") == "active"]
+        if not actives:
+            raise AssertionError(
+                "test boss has no active membership — fixture broken; reset "
+                "phrase test can't tell the 'already onboarded' branch apart"
+            )
+
+    async def _drive(_step, _settings) -> None:
+        from src import onboarding
+        await onboarding.maybe_handle_reset_phrase(
+            "khởi tạo trợ lý", dm_conv, str(boss_id), "khởi tạo trợ lý",
+        )
+
+    async def _verify(_step, _settings) -> None:
+        from src import db
+        # Memberships must be intact.
+        memberships = await db.get_memberships(str(boss_id)) or []
+        actives = [m for m in memberships if (m.get("status") or "") == "active"]
+        if not actives:
+            raise AssertionError("reset phrase nuked boss memberships — destructive!")
+
+    def _check_outbound(rec: Recorder) -> str | None:
+        if not rec.outbound:
+            return "boss got no info reply"
+        for _, body in rec.outbound:
+            low = body.lower()
+            if ("không reset" in low) or ("đã có workspace" in low):
+                return None
+        return f"info reply doesn't mention 'không reset' / 'đã có workspace'; bodies: {[b[:80] for _, b in rec.outbound]}"
+
+    return Scenario(
+        name="Reset phrase từ boss đã onboard → KHÔNG reset, chỉ thông báo",
+        description="Already-onboarded boss → info reply, memberships intact",
+        steps=[
+            _FireFunc(_seed),
+            _FireFunc(_drive),
+            Expect(custom=_check_outbound, no_tool_errors=True),
+            _FireFunc(_verify),
+        ],
+        tags=["onboard", "reset", "boss"],
     )
 
 
@@ -1671,6 +1800,8 @@ async def main_async(args) -> int:
         "Escalation: task overdue (DM) → assignee DM + boss report": _build_escalate_scenario,
         "Approve join: boss duyệt + stranger được báo qua channel của họ": _build_approve_join_scenario,
         "Onboard listing isolation: Zalo stranger không thấy boss Telegram": _build_listing_isolation_scenario,
+        "Reset phrase mid-onboarding → state wiped + fresh greeting": _build_reset_phrase_midflow_scenario,
+        "Reset phrase từ boss đã onboard → KHÔNG reset, chỉ thông báo": _build_reset_phrase_existing_boss_scenario,
         "Image attachment: bot nhận diện ảnh": _build_image_scenario,
         "Reminder fire: source-only (không target) → vào source group": _build_source_only_reminder_scenario,
         "Escalation: task từ group, assignee chưa join → reminder vào group": _build_escalate_group_unknown_assignee_scenario,

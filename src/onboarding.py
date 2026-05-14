@@ -334,6 +334,50 @@ async def is_onboarding(chat_id: str) -> bool:
     return await db.has_onboarding_state(chat_id)
 
 
+async def maybe_handle_reset_phrase(
+    text: str, chat_id: str, sender_id: str | None, onboard_phrase: str,
+) -> bool:
+    """Explicit reset hook for the onboard trigger phrase.
+
+    Behaviour:
+      - User already has at least one active membership (any role, any boss):
+        do NOT reset their data — send an info reply explaining the phrase
+        does not nuke their workspace, and how to join another one.
+      - Otherwise: clear any in-flight onboarding_state and restart cleanly
+        (greeting is sent by the recursive call into handle_onboard_message).
+
+    Returns True when the message was consumed (caller must return).
+    """
+    phrase = (onboard_phrase or "").strip().lower()
+    msg = (text or "").strip().lower()
+    if not phrase or phrase not in msg:
+        return False
+
+    # Already onboarded somewhere → escape-hatch, not a destructive reset.
+    if sender_id:
+        memberships = await db.get_memberships(str(sender_id))
+        active = [m for m in (memberships or []) if (m.get("status") or "") == "active"]
+        if active:
+            roles = ", ".join({m.get("person_type", "?") for m in active})
+            await telegram.send(chat_id, (
+                f"Anh/chị đã có workspace rồi (vai trò: *{roles}*). "
+                f"Cụm '{onboard_phrase}' KHÔNG reset workspace hiện tại. "
+                f"Nếu muốn tham gia thêm 1 workspace KHÁC làm member/partner, "
+                f"nói rõ giúp em — vd 'em muốn vào workspace của Trang làm member' — "
+                f"em sẽ gửi yêu cầu cho chủ workspace đó."
+            ))
+            return True
+
+    # Not onboarded → restart fresh.
+    try:
+        await db.clear_onboarding_state(chat_id)
+    except Exception:
+        logger.exception("[onboarding] reset phrase: failed to clear state")
+    await start_onboarding(chat_id, sender_id)
+    await handle_onboard_message(text, chat_id, sender_id)
+    return True
+
+
 async def start_onboarding(chat_id: str, sender_id: str | None = None) -> None:
     """Begin onboarding for a new user."""
     state: dict = {"first": True}
