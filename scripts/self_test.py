@@ -958,6 +958,18 @@ SCENARIOS: list[Scenario] = [
         steps=[],  # built dynamically
         tags=["escalate", "no-reply"],
     ),
+    Scenario(
+        name="Reminder fire DM-only (self): chỉ boss, KHÔNG group",
+        description="Boss tạo reminder cho chính mình trong DM (no target, no source) → fire chỉ DM boss",
+        steps=[],  # built dynamically
+        tags=["reminder", "fire", "solo"],
+    ),
+    Scenario(
+        name="Reminder fire DM-only (boss → member): target DM + cc boss, KHÔNG group",
+        description="Boss DM tạo reminder cho Long (target, no source) → fire DM Long + cc boss, KHÔNG có group post",
+        steps=[],  # built dynamically
+        tags=["reminder", "fire", "solo"],
+    ),
 ]
 
 
@@ -1164,6 +1176,72 @@ def _build_escalate_scenario(test_ctx: dict) -> Scenario:
             Expect(custom=_strict_check, no_tool_errors=True),
         ],
         tags=["escalate", "fire", "dm"],
+    )
+
+
+def _build_solo_self_reminder_scenario(test_ctx: dict) -> Scenario:
+    """Self-reminder created in DM: target=None, source=None. Fire must reach
+    boss only — never a group, never an unintended DM."""
+    boss_id = test_ctx["boss_id"]
+    group_conv = test_ctx["group_conv_id"]
+    long_conv = test_ctx["long_conv_id"]
+    reminder = {
+        "id": 999_999_001,
+        "boss_chat_id": boss_id,
+        "target_chat_id": None,
+        "target_name": "",
+        "source_chat_id": None,
+        "content": "Solo self-reminder test",
+        "remind_at": int(time.time()),
+    }
+
+    def _strict(rec: Recorder) -> str | None:
+        chat_ids = {c for c, _ in rec.outbound}
+        if group_conv in chat_ids:
+            return f"leak: group ({group_conv}) got a solo reminder"
+        if long_conv in chat_ids:
+            return f"leak: third party Long DM ({long_conv}) got a solo reminder"
+        if not rec.outbound:
+            return "no outbound at all"
+        return None
+
+    return Scenario(
+        name="Reminder fire DM-only (self): chỉ boss, KHÔNG group",
+        description="Self-reminder không có target / source → chỉ boss DM",
+        steps=[FireReminder(reminder=reminder), Expect(custom=_strict)],
+        tags=["reminder", "fire", "solo"],
+    )
+
+
+def _build_solo_target_reminder_scenario(test_ctx: dict) -> Scenario:
+    """DM boss → "nhắc Long ...": target=Long, source=None. Fire must reach
+    Long DM + boss cc — never the group (boss didn't ask via group)."""
+    boss_id = test_ctx["boss_id"]
+    group_conv = test_ctx["group_conv_id"]
+    long_conv = test_ctx["long_conv_id"]
+    reminder = {
+        "id": 999_999_002,
+        "boss_chat_id": boss_id,
+        "target_chat_id": long_conv,
+        "target_name": "Long",
+        "source_chat_id": None,
+        "content": "DM-target solo reminder test",
+        "remind_at": int(time.time()),
+    }
+
+    def _strict(rec: Recorder) -> str | None:
+        chat_ids = {c for c, _ in rec.outbound}
+        if long_conv not in chat_ids:
+            return f"target Long DM didn't get the reminder; saw {sorted(chat_ids)}"
+        if group_conv in chat_ids:
+            return f"leak: group ({group_conv}) got a DM-created reminder it shouldn't see"
+        return None
+
+    return Scenario(
+        name="Reminder fire DM-only (boss → member): target DM + cc boss, KHÔNG group",
+        description="Reminder có target, không có source → DM target + cc boss, không touch group",
+        steps=[FireReminder(reminder=reminder), Expect(custom=_strict)],
+        tags=["reminder", "fire", "solo"],
     )
 
 
@@ -1531,6 +1609,8 @@ async def main_async(args) -> int:
         "Request join: stranger gọi request_join → pending row + boss DM": _build_request_join_scenario,
         "C1: Zalo boss + Telegram-only assignee → reminder vào group, KHÔNG DM": _build_channel_isolation_scenario,
         "E2: no-reply timer → bot báo sếp": _build_no_reply_escalation_scenario,
+        "Reminder fire DM-only (self): chỉ boss, KHÔNG group": _build_solo_self_reminder_scenario,
+        "Reminder fire DM-only (boss → member): target DM + cc boss, KHÔNG group": _build_solo_target_reminder_scenario,
     }
     scenarios = []
     for s in SCENARIOS:
