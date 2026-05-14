@@ -301,6 +301,7 @@ async def _build_turn_messages(
     is_group: bool,
     built: dict,
     group_ctx: dict | None,
+    burst_size: int = 1,
 ) -> tuple[list[dict], int, int]:
     """Returns (messages, recent_count, rag_count)."""
     assert _settings is not None
@@ -357,6 +358,25 @@ async def _build_turn_messages(
         messages.append({"role": "system", "content": f"Lịch sử liên quan:\n{rag_text}"})
     for msg in recent:
         messages.append({"role": msg["role"], "content": msg["content"]})
+    if burst_size > 1:
+        # Cancel-and-coalesce: user sent N messages in burst; the previous
+        # in-flight agent run was interrupted, but any tool side effects it
+        # already produced (created reminder, updated task, sent outbound
+        # message) are still live in DB / Lark. Tell the agent to verify
+        # state before acting again.
+        messages.append({
+            "role": "system",
+            "content": (
+                f"[Hệ thống] Sếp vừa gửi {burst_size} tin liên tục — em đã huỷ "
+                f"xử lý tin trước đó để xử lý cụm tin này trong 1 turn. "
+                f"Lưu ý: nếu em đã chạy tool (create_reminder, update_task, "
+                f"create_idea, ...) cho 1 trong các tin trước đó, side-effect "
+                f"vẫn còn trong hệ thống. Trước khi tạo mới, kiểm tra "
+                f"list_reminders / list_tasks / get_communication_log; "
+                f"nếu trùng hoặc lệch ý mới của sếp → update/delete để chỉnh, "
+                f"đừng tạo thêm bản trùng."
+            ),
+        })
     messages.append({"role": "user", "content": text})
 
     return messages, len(recent), len(rag_results)
@@ -380,6 +400,7 @@ async def handle_message(
     reply_to: dict | None = None,
     new_members: list[dict] | None = None,
     attachments: list | None = None,
+    burst_size: int = 1,
 ):
     # Lazy import — `src.agent` imports us back, so we resolve at call time.
     from src.agent import _dispatcher
@@ -393,9 +414,13 @@ async def handle_message(
     logger.info("%s >>> INPUT: %s", log_prefix, text[:200])
 
     # ---- Pending-attachment buffer (ChatGPT-style file-then-prompt) ----
+    # GROUP only. For DM the burst-coalesce wrapper in `src/agent/burst.py`
+    # already merges a file message with a follow-up text message into a
+    # single agent turn — keeping this stash for DM would just race the
+    # burst cancellation.
     _sweep_expired_pending()
     attachments = attachments or []
-    if attachments and _looks_like_filename(text, attachments):
+    if is_group and attachments and _looks_like_filename(text, attachments):
         # Bare file message — defer until the next text prompt. Multiple
         # files in quick succession are accumulated; each new bare-file
         # message extends the deadline.
@@ -410,7 +435,7 @@ async def handle_message(
             log_prefix, len(attachments), len(combined),
         )
         return  # silent — no reply
-    if not attachments and chat_id in _pending_attachments:
+    if is_group and not attachments and chat_id in _pending_attachments:
         deadline, pending = _pending_attachments.pop(chat_id)
         if time.monotonic() < deadline:
             attachments = list(pending)
@@ -552,7 +577,7 @@ async def handle_message(
         assert _settings is not None, "init() must be called before handling messages"
         assert ctx.boss_chat_id is not None, "ChatContext must have a boss_chat_id"
         messages, recent_count, rag_count = await _build_turn_messages(
-            ctx, text, chat_id, is_group, built, group_ctx,
+            ctx, text, chat_id, is_group, built, group_ctx, burst_size=burst_size,
         )
         logger.info("%s Context: %d recent, %d RAG", log_prefix, recent_count, rag_count)
 

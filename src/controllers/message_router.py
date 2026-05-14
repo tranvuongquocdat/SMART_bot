@@ -48,30 +48,35 @@ class MessageRouter:
             # Phase 5b: delegate to the existing secretary loop body.
             # Phase 6 will route per-channel capability checks here too.
             from src.agent.secretary_agent import handle_message
+            from src.agent import burst
 
-            reply_to = None
-            if incoming.reply_to_sender_id:
-                reply_to = {
-                    "id": incoming.reply_to_sender_id,
-                    "name": "",
-                    "username": "",
-                }
+            async def _run(msg: IncomingMessage, batch_size: int) -> None:
+                reply_to = None
+                if msg.reply_to_sender_id:
+                    reply_to = {"id": msg.reply_to_sender_id, "name": "", "username": ""}
+                await handle_message(
+                    msg.text or "",
+                    msg.chat_id,
+                    msg.sender_id or None,
+                    msg.chat_type == "group",
+                    msg.is_mentioned,
+                    msg.group_name,
+                    sender_name=msg.sender_name,
+                    mentions=msg.mentions,
+                    username_mentions=msg.username_mentions,
+                    reply_to=reply_to,
+                    new_members=msg.new_members,
+                    attachments=msg.attachments,
+                    burst_size=batch_size,
+                )
 
             try:
-                await handle_message(
-                    incoming.text or "",
-                    incoming.chat_id,
-                    incoming.sender_id or None,
-                    incoming.chat_type == "group",
-                    incoming.is_mentioned,
-                    incoming.group_name,
-                    sender_name=incoming.sender_name,
-                    mentions=incoming.mentions,
-                    username_mentions=incoming.username_mentions,
-                    reply_to=reply_to,
-                    new_members=incoming.new_members,
-                    attachments=incoming.attachments,
-                )
+                # DM goes through burst-coalesce (cancel + merge). Group
+                # bypasses — only @mention triggers, so burstiness is rare.
+                if incoming.chat_type == "group":
+                    await _run(incoming, 1)
+                else:
+                    await burst.dispatch(incoming, _run)
             except Exception:
                 logger.exception("[router] handler raised for %s", incoming.chat_id)
 

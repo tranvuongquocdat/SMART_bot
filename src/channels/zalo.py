@@ -138,21 +138,27 @@ class ZaloMessenger(BaseMessenger):
 
         attachments: list[Attachment] = []
         for a in (ev.get("attachments") or []):
+            kind = a.get("kind", "file")
+            # Zalo "url card" / link preview is wrapped by the bridge as a
+            # fake attachment with kind in {link, text} and filename = raw
+            # message body. Drop it — the URL is already in ev["text"] and
+            # the LLM will call fetch_url. Keeping it triggered the
+            # `_looks_like_filename` heuristic and silently stashed the
+            # message, so the bot never responded to YouTube/TikTok links.
+            if kind in ("link", "text"):
+                continue
+            # Real file attachment but download failed (e.g. EACCES on the
+            # inbound dir) — no usable file path, drop so the agent doesn't
+            # mis-stash a textless message.
             if a.get("error"):
-                attachments.append(Attachment(
-                    kind=a.get("kind", "file"),
-                    url="",
-                    mime_type=a.get("mime", ""),
-                    filename=a.get("filename", ""),
-                ))
-            else:
-                attachments.append(Attachment(
-                    kind=a.get("kind", "file"),
-                    url=a.get("local_path", "") or "",
-                    mime_type=a.get("mime", ""),
-                    filename=a.get("filename", ""),
-                    size_bytes=int(a.get("size_bytes", 0) or 0),
-                ))
+                continue
+            attachments.append(Attachment(
+                kind=kind,
+                url=a.get("local_path", "") or "",
+                mime_type=a.get("mime", ""),
+                filename=a.get("filename", ""),
+                size_bytes=int(a.get("size_bytes", 0) or 0),
+            ))
 
         mentions: list[dict] = []
         for m in (ev.get("mentions") or []):

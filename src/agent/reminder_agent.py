@@ -148,17 +148,26 @@ async def send_reminder(reminder: dict, settings: Settings) -> None:
 
     dest_chat_id, cc_boss = _destination_for(reminder)
     await telegram.send(dest_chat_id, reply)
+    # Main delivery succeeded → mark done immediately so any failure in the
+    # best-effort follow-ups (CC boss, source-group notify, outbound log)
+    # cannot leave status=pending and trigger a re-fire next minute.
+    await db.mark_reminder_done(reminder["id"])
     if dest_chat_id == target_id:
-        await db.log_outbound_dm(
-            boss_chat_id=boss_chat_id,
-            to_chat_id=target_id,
-            to_name=target_name or "",
-            content=reply,
-            trigger_type="reminder",
-        )
+        try:
+            await db.log_outbound_dm(
+                boss_chat_id=boss_chat_id,
+                to_chat_id=target_id,
+                to_name=target_name or "",
+                content=reply,
+                trigger_type="reminder",
+            )
+        except Exception:
+            logger.warning("%s log_outbound_dm failed", log_prefix, exc_info=True)
     if cc_boss:
-        # Raw confirmation back to boss; not via LLM.
-        await telegram.send(boss_chat_id, f"✓ Đã nhắc {target_name or 'người nhận'}: {content}")
+        try:
+            await telegram.send(boss_chat_id, f"✓ Đã nhắc {target_name or 'người nhận'}: {content}")
+        except Exception:
+            logger.warning("%s CC boss send failed", log_prefix, exc_info=True)
 
     # When the reminder was created via group @mention, also post a short
     # notice into that source group so the rest of the team sees the followup

@@ -33,7 +33,8 @@ logger = logging.getLogger("services.url_fetch")
 
 _TIMEOUT = 8.0
 _MAX_BODY_CHARS = 1500
-_MAX_TRANSCRIPT_CHARS = 6000  # keep prompt small; bots truncate sensibly
+_MAX_TRANSCRIPT_CHARS = 10000  # cap for the sampled transcript handed to the LLM
+_TRANSCRIPT_WINDOWS = 8        # evenly-spaced sampling windows across the video
 
 _YT_HOSTS = ("youtube.com", "youtu.be", "m.youtube.com", "www.youtube.com")
 _TT_HOSTS = ("tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com")
@@ -67,6 +68,38 @@ async def _oembed(provider_url: str, target_url: str) -> dict | None:
         return None
 
 
+def _sample_evenly(text: str, target: int, windows: int = _TRANSCRIPT_WINDOWS) -> str:
+    """Pick `windows` roughly-equal chunks evenly spaced through `text`,
+    joined by ` […] ` markers. Total length ≤ ~target chars.
+
+    For long YouTube transcripts we don't want to keep just the first N
+    chars — that drops the entire back half of the video. Sampling
+    evenly lets the LLM see beginning, middle, and end.
+    """
+    text = text or ""
+    if len(text) <= target or windows < 2:
+        return text[:target]
+    window_size = max(1, target // windows)
+    # Stride across the *gap* between window starts so the last window
+    # ends near the end of the text.
+    stride = max(window_size, (len(text) - window_size) // (windows - 1))
+    chunks: list[str] = []
+    for w in range(windows):
+        start = w * stride
+        end = start + window_size
+        if start >= len(text):
+            break
+        # Snap to whitespace so we don't cut mid-word.
+        while start > 0 and not text[start].isspace():
+            start -= 1
+        while end < len(text) and not text[end].isspace():
+            end += 1
+        chunk = text[start:end].strip()
+        if chunk:
+            chunks.append(chunk)
+    return " […] ".join(chunks)
+
+
 def _yt_transcript_sync(video_id: str) -> str | None:
     """Blocking transcript fetch — runs inside `asyncio.to_thread`.
     Returns concatenated text or None on any failure."""
@@ -89,7 +122,7 @@ def _yt_transcript_sync(video_id: str) -> str | None:
                 text = " ".join(s.text for s in fetched.snippets if s.text)
                 text = re.sub(r"\s+", " ", text).strip()
                 if text:
-                    return text[:_MAX_TRANSCRIPT_CHARS]
+                    return _sample_evenly(text, _MAX_TRANSCRIPT_CHARS)
             except Exception:
                 continue
         return None

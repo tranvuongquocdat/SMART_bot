@@ -211,14 +211,37 @@ async def _check_no_reply_reminders():
 
 
 async def _check_reminders():
-    """Moi phut: check reminders den gio -> qua agent LLM de gui loi nhac tu nhien."""
+    """Moi phut: check reminders den gio -> qua agent LLM de gui loi nhac tu nhien.
+
+    After sending, mark done in SQLite AND push Trạng thái=done to the matching
+    Lark row. Without the Lark write, the next reverse-sync (every 30s) would
+    read Lark's stale 'pending' and clobber SQLite back to pending, causing the
+    reminder to re-fire on every minute boundary.
+    """
     from src import agent  # noqa: PLC0415
 
     reminders = await db.get_due_reminders()
     for r in reminders:
         try:
+            # send_reminder owns the SQLite mark-done transition (right
+            # after main delivery succeeds). Scheduler only owns the
+            # Lark write-back so the UI flips too.
             await agent.send_reminder(r, _settings)
-            await db.mark_reminder_done(r["id"])
+            lark_rec_id = r.get("lark_record_id")
+            if lark_rec_id:
+                boss = await db.get_boss(r["boss_chat_id"])
+                tbl = (boss or {}).get("lark_table_reminders", "")
+                base = (boss or {}).get("lark_base_token", "")
+                if tbl and base:
+                    try:
+                        await lark.with_retry(lambda: lark.update_record(
+                            base, tbl, lark_rec_id, {"Trạng thái": "done"},
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "[scheduler] could not flip Lark Trạng thái=done for reminder %d",
+                            r["id"], exc_info=True,
+                        )
             logger.info("[scheduler] Reminder %d sent", r["id"])
         except Exception:
             logger.exception("[scheduler] Reminder %d failed", r["id"])
@@ -360,6 +383,71 @@ async def _after_deadline_check():
             logger.exception("[scheduler] _after_deadline_check failed for %s", boss.get("name"))
 
 
+def _coerce_lark_status(raw) -> str | None:
+    """Normalise Lark's `Trạng thái` field across shapes.
+
+    Bitable can return single-select / text values as raw str, wrapped
+    {"text": "..."}, or list-of-{"text": ...}. The naive `rec.get(...)`
+    used to demote any non-str shape to "pending", which (after the
+    fire-path pushed "done" to Lark) caused the reverse-sync guard to
+    re-heal Lark every 30s in a tight no-op loop.
+    """
+    if raw is None or isinstance(raw, bool):
+        return None
+    if isinstance(raw, str):
+        s = raw.strip().lower()
+        return s if s in ("pending", "done") else None
+    if isinstance(raw, list) and raw:
+        parts: list[str] = []
+        for item in raw:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("value") or item.get("name") or ""))
+            else:
+                parts.append(str(item))
+        return _coerce_lark_status("".join(parts))
+    if isinstance(raw, dict):
+        return _coerce_lark_status(raw.get("text") or raw.get("value") or raw.get("name"))
+    return None
+
+
+def _coerce_sqlite_id(raw) -> int | None:
+    """Parse Lark's 'SQLite ID' field across all shapes it can come back as.
+
+    Bitable returns number fields as int/float, but text-shaped or rich-text
+    columns come back as str / list-of-{'text': ...}. A narrow isinstance
+    check used to drop those cases, which caused the reverse-sync to think
+    the Lark record was unlinked and create a duplicate SQLite row every 30s.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, bool):
+        return None
+    if isinstance(raw, (int, float)):
+        v = int(raw)
+        return v if v > 0 else None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        try:
+            v = int(float(s))
+            return v if v > 0 else None
+        except ValueError:
+            return None
+    if isinstance(raw, list) and raw:
+        # Lark rich text: [{"text": "5", "type": "text"}, ...]
+        parts = []
+        for item in raw:
+            if isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("value") or ""))
+            else:
+                parts.append(str(item))
+        return _coerce_sqlite_id("".join(parts))
+    if isinstance(raw, dict):
+        return _coerce_sqlite_id(raw.get("text") or raw.get("value"))
+    return None
+
+
 async def _sync_lark_to_sqlite():
     """Lark → SQLite reverse-sync.
 
@@ -421,13 +509,20 @@ async def _reverse_sync_reminders_for_boss(boss: dict, settings_tz: ZoneInfo) ->
         rec_id = rec.get("record_id", "")
         if rec_id:
             seen_lark_ids.add(rec_id)
-        sqlite_id_raw = rec.get("SQLite ID")
+        sqlite_id = _coerce_sqlite_id(rec.get("SQLite ID"))
+        linked_row: dict | None = None
 
-        if isinstance(sqlite_id_raw, (int, float)) and int(sqlite_id_raw) > 0:
-            sqlite_id = int(sqlite_id_raw)
+        # Defensive: even if SQLite ID didn't decode, we may already have a
+        # SQLite row linked by lark_record_id from a prior sync. Use that to
+        # avoid creating a duplicate (the loop bug).
+        if sqlite_id is None and rec_id:
+            linked_row = await repo.find_by_lark_id(boss_chat_id, rec_id)
+            if linked_row:
+                sqlite_id = int(linked_row["id"])
+
+        if sqlite_id is not None and sqlite_id > 0:
             new_content = rec.get("Nội dung", "")
-            new_status = rec.get("Trạng thái", "pending")
-            new_status = "pending" if new_status not in ("pending", "done") else new_status
+            new_status = _coerce_lark_status(rec.get("Trạng thái")) or "pending"
             remind_at_str = rec.get("Thời gian nhắc", "")
             remind_at_dt = None
             if remind_at_str:
@@ -441,45 +536,77 @@ async def _reverse_sync_reminders_for_boss(boss: dict, settings_tz: ZoneInfo) ->
                         "[scheduler] bad time '%s' on lark reminder %s",
                         remind_at_str, rec_id,
                     )
+            # Status is monotonic: pending → done only. If SQLite already says
+            # 'done' (we fired it), never let a stale Lark 'pending' demote it
+            # — that demotion is what made reminders re-fire every minute.
+            # Instead push the truth (done) back to Lark.
+            current = linked_row or await repo.get_by_id(sqlite_id)
+            current_status = (current or {}).get("status")
+            status_to_write: str | None = new_status
+            if current_status == "done" and new_status == "pending":
+                status_to_write = None  # don't downgrade
+                if rec_id:
+                    try:
+                        await lark.with_retry(lambda: lark.update_record(
+                            base, tbl, rec_id, {"Trạng thái": "done"},
+                        ))
+                    except Exception:
+                        logger.warning(
+                            "[scheduler] could not heal Lark Trạng thái=done for %s",
+                            rec_id, exc_info=True,
+                        )
             await repo.update_remind_at_and_content(
                 sqlite_id, content=new_content, remind_at=remind_at_dt,
-                status=new_status,
+                status=status_to_write,
             )
-        else:
-            remind_at_str = rec.get("Thời gian nhắc", "")
-            try:
-                naive = datetime.strptime(remind_at_str, "%Y-%m-%d %H:%M")
-            except (ValueError, TypeError):
-                logger.warning(
-                    "[scheduler] cannot parse time on manual-add lark reminder %s: %r",
-                    rec_id, remind_at_str,
-                )
-                continue
-            remind_dt = naive.replace(tzinfo=settings_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-            new_id = await db.create_reminder(
-                boss_chat_id=boss_chat_id,
-                content=rec.get("Nội dung", ""),
-                remind_at=remind_dt,
-                target_chat_id=None,
-                target_name=rec.get("Người nhận", "") or "",
+            # Self-heal: if Lark has no SQLite ID set, patch it in-place so
+            # the next sync takes the fast path. Direct update_record only —
+            # never sync_reminder_to_lark here (it'd create a duplicate).
+            if rec_id and _coerce_sqlite_id(rec.get("SQLite ID")) is None:
+                try:
+                    await lark.with_retry(lambda: lark.update_record(
+                        base, tbl, rec_id, {"SQLite ID": sqlite_id},
+                    ))
+                except Exception:
+                    logger.warning(
+                        "[scheduler] could not patch SQLite ID on lark %s",
+                        rec_id, exc_info=True,
+                    )
+            continue
+
+        # Genuine manual-add in Lark (no SQLite ID, no prior link).
+        remind_at_str = rec.get("Thời gian nhắc", "")
+        try:
+            naive = datetime.strptime(remind_at_str, "%Y-%m-%d %H:%M")
+        except (ValueError, TypeError):
+            logger.warning(
+                "[scheduler] cannot parse time on manual-add lark reminder %s: %r",
+                rec_id, remind_at_str,
             )
-            if rec_id:
-                await repo.set_lark_record_id(new_id, rec_id)
+            continue
+        remind_dt = naive.replace(tzinfo=settings_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
+        new_id = await db.create_reminder(
+            boss_chat_id=boss_chat_id,
+            content=rec.get("Nội dung", ""),
+            remind_at=remind_dt,
+            target_chat_id=None,
+            target_name=rec.get("Người nhận", "") or "",
+        )
+        if rec_id:
+            await repo.set_lark_record_id(new_id, rec_id)
+            # Write SQLite ID back to the SAME Lark record. Must use
+            # update_record directly — sync_reminder_to_lark searches by
+            # SQLite ID, won't find it (we just minted it), and falls
+            # through to creating ANOTHER Lark record, which is exactly
+            # the duplication loop we're fixing.
             try:
-                await lark.with_retry(lambda: lark.sync_reminder_to_lark(
-                    base, tbl,
-                    {
-                        "content": rec.get("Nội dung", ""),
-                        "remind_at_local": remind_at_str,
-                        "target_name": rec.get("Người nhận", "") or "",
-                        "status": "pending",
-                    },
-                    new_id,
+                await lark.with_retry(lambda: lark.update_record(
+                    base, tbl, rec_id, {"SQLite ID": new_id},
                 ))
             except Exception:
                 logger.warning(
-                    "[scheduler] could not write SQLite ID back to lark %s", rec_id,
-                    exc_info=True,
+                    "[scheduler] could not write SQLite ID back to lark %s",
+                    rec_id, exc_info=True,
                 )
 
     # Tombstone vanished
