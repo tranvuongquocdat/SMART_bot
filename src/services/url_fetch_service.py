@@ -8,10 +8,12 @@ YouTube (youtube.com / youtu.be)
   2. If transcript unavailable / IP-blocked / no captions → oEmbed only.
 
 TikTok (tiktok.com)
-  1. yt-dlp metadata extract → caption, uploader, duration, view count,
-     thumbnail. No subtitle attempt (TikTok subs require curl_cffi
-     impersonation which isn't reliable in our environment).
-  2. If yt-dlp fails for any reason → oEmbed only.
+  1. yt-dlp metadata extract (with writesubtitles=True) → caption,
+     uploader, duration, view count, thumbnail, plus subtitle stream
+     URLs when TikTok exposes them.
+  2. If subtitle URLs are present → download VTT, strip cues, sample
+     evenly like YouTube.
+  3. If yt-dlp fails for any reason → oEmbed only.
 
 Generic URL (news, blog, …)
   GET → strip <script>/<style> → return title + og:description + first
@@ -130,6 +132,37 @@ def _yt_transcript_sync(video_id: str) -> str | None:
         return None
 
 
+def _pick_subtitle_urls(info: dict) -> list[str]:
+    """Pick subtitle stream URLs from a yt-dlp info dict, ordered by language
+    preference (Vietnamese → English → first available). Matches BCP-47
+    variants like 'vie-VN', 'vi', 'en-US' by prefix."""
+    out: list[str] = []
+
+    def _matches_lang(key: str, prefixes: tuple[str, ...]) -> bool:
+        low = key.lower()
+        return any(low == p or low.startswith(p + "-") or low.startswith(p) for p in prefixes)
+
+    for buckets in (info.get("subtitles") or {}, info.get("automatic_captions") or {}):
+        if not buckets:
+            continue
+        # Prefer vi, then en, then anything else still in this bucket
+        ordered_keys = (
+            [k for k in buckets if _matches_lang(k, ("vi", "vie"))]
+            + [k for k in buckets if _matches_lang(k, ("en", "eng"))]
+            + [k for k in buckets if not _matches_lang(k, ("vi", "vie", "en", "eng"))]
+        )
+        for k in ordered_keys:
+            entries = buckets.get(k) or []
+            # Prefer VTT, then any
+            for ext_pref in ("vtt", "srv3", "srv2", "srv1", None):
+                for e in entries:
+                    if ext_pref is None or e.get("ext") == ext_pref:
+                        u = e.get("url")
+                        if u and u not in out:
+                            out.append(u)
+    return out
+
+
 def _tt_yt_dlp_sync(url: str) -> dict | None:
     """Blocking yt-dlp metadata extract. Returns a dict of useful fields or
     None on failure. Skipped if yt-dlp isn't installed."""
@@ -138,7 +171,14 @@ def _tt_yt_dlp_sync(url: str) -> dict | None:
     except Exception:
         return None
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "no_warnings": True}) as ydl:
+        with yt_dlp.YoutubeDL({
+            "quiet": True, "skip_download": True, "no_warnings": True,
+            # Populate the info dict's `subtitles` / `automatic_captions`
+            # fields so we can fetch transcript URLs separately. TikTok
+            # only exposes them when these flags are on.
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+        }) as ydl:
             info = ydl.extract_info(url, download=False)
         return {
             "title": (info.get("title") or "").strip()[:200],
@@ -147,9 +187,50 @@ def _tt_yt_dlp_sync(url: str) -> dict | None:
             "duration_s": info.get("duration"),
             "view_count": info.get("view_count"),
             "thumbnail": info.get("thumbnail") or "",
+            "_subtitle_urls": _pick_subtitle_urls(info),
         }
     except Exception:
         return None
+
+
+def _vtt_to_text(vtt: str) -> str:
+    """Strip WEBVTT / SRT-ish formatting → one flat string of cue text."""
+    out: list[str] = []
+    for raw in vtt.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("WEBVTT") or line.startswith("NOTE"):
+            continue
+        if "-->" in line:  # timestamp cue
+            continue
+        if line.isdigit():  # SRT cue number
+            continue
+        # Strip inline tags like <c.colorE5E5E5>foo</c> and <i>...</i>
+        line = re.sub(r"</?[^>]+>", "", line)
+        if line:
+            out.append(line)
+    return " ".join(out)
+
+
+async def _fetch_subtitle_text(urls: list[str]) -> str | None:
+    """Download the first URL that returns a parseable transcript."""
+    if not urls:
+        return None
+    async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as cli:
+        for u in urls:
+            try:
+                r = await cli.get(u, headers={"User-Agent": "Mozilla/5.0 smart-bot/1.0"})
+                if r.status_code != 200 or not r.text:
+                    continue
+                text = _vtt_to_text(r.text)
+                text = re.sub(r"\s+", " ", text).strip()
+                if text:
+                    return _sample_evenly(text, _MAX_TRANSCRIPT_CHARS)
+            except Exception:
+                logger.warning("subtitle fetch failed: %s", u[:120], exc_info=True)
+                continue
+    return None
 
 
 def _strip_html(html: str) -> tuple[str, str, str]:
@@ -228,6 +309,11 @@ async def fetch_url(url: str) -> str:
             lines.append(f"Description: {meta['description']}")
         if meta.get("thumbnail"):
             lines.append(f"Thumbnail: {meta['thumbnail']}")
+        transcript = await _fetch_subtitle_text(meta.get("_subtitle_urls") or [])
+        if transcript:
+            lines.append("")
+            lines.append("Transcript (rút gọn):")
+            lines.append(transcript)
         lines.append(f"URL: {url}")
         return "\n".join(lines)
 
