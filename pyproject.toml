@@ -18,6 +18,8 @@ dependencies = [
     "pypdf>=4.0",
     "pillow>=10.0",
     "pillow-heif>=0.18",
+    "youtube-transcript-api>=1.2",
+    "yt-dlp>=2026.3",
 ]
 
 [dependency-groups]

@@ -1,17 +1,28 @@
 """fetch_url tool — pulls a compact summary of any URL.
 
-Behaviour:
-- YouTube / youtu.be → hit YouTube oEmbed JSON → title + channel + thumbnail.
-- TikTok               → hit TikTok oEmbed JSON → title + author + thumbnail.
-- Anything else        → GET the URL, strip HTML, return <title> + meta
-                         description + first ~1.5KB of body text.
+Per-platform extraction order, each step degrades gracefully:
 
-No auth, no scraping libraries — just `httpx` + a tiny regex strip. Bots
-that previously had to disclaim "chưa thể mở link YouTube" now have a real
-tool to call.
+YouTube (youtube.com / youtu.be)
+  1. youtube-transcript-api → real captions (vi → en → first available).
+     Returns the full transcript text alongside oEmbed metadata.
+  2. If transcript unavailable / IP-blocked / no captions → oEmbed only.
+
+TikTok (tiktok.com)
+  1. yt-dlp metadata extract → caption, uploader, duration, view count,
+     thumbnail. No subtitle attempt (TikTok subs require curl_cffi
+     impersonation which isn't reliable in our environment).
+  2. If yt-dlp fails for any reason → oEmbed only.
+
+Generic URL (news, blog, …)
+  GET → strip <script>/<style> → return title + og:description + first
+  ~1.5KB of body text.
+
+No API keys, no auth. Network errors are caught and surfaced as a
+human-readable single-line error string to the LLM, never a crash.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from urllib.parse import quote_plus
@@ -22,6 +33,7 @@ logger = logging.getLogger("services.url_fetch")
 
 _TIMEOUT = 8.0
 _MAX_BODY_CHARS = 1500
+_MAX_TRANSCRIPT_CHARS = 6000  # keep prompt small; bots truncate sensibly
 
 _YT_HOSTS = ("youtube.com", "youtu.be", "m.youtube.com", "www.youtube.com")
 _TT_HOSTS = ("tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com")
@@ -30,6 +42,16 @@ _TT_HOSTS = ("tiktok.com", "www.tiktok.com", "vm.tiktok.com", "m.tiktok.com")
 def _host_of(url: str) -> str:
     m = re.match(r"https?://([^/]+)", url, re.IGNORECASE)
     return (m.group(1) if m else "").lower()
+
+
+def _matches(host: str, allowed: tuple[str, ...]) -> bool:
+    return any(host == h or host.endswith("." + h) for h in allowed)
+
+
+def _yt_video_id(url: str) -> str | None:
+    """Extract the 11-char YouTube video id from any standard URL shape."""
+    m = re.search(r"(?:v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})", url)
+    return m.group(1) if m else None
 
 
 async def _oembed(provider_url: str, target_url: str) -> dict | None:
@@ -45,8 +67,59 @@ async def _oembed(provider_url: str, target_url: str) -> dict | None:
         return None
 
 
+def _yt_transcript_sync(video_id: str) -> str | None:
+    """Blocking transcript fetch — runs inside `asyncio.to_thread`.
+    Returns concatenated text or None on any failure."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi
+    except Exception:
+        return None
+    try:
+        api = YouTubeTranscriptApi()
+        # Prefer Vietnamese, then English, then any first transcript.
+        for lang in (["vi"], ["en"], None):
+            try:
+                fetched = api.fetch(video_id, languages=lang) if lang else None
+                if fetched is None:
+                    listing = api.list(video_id)
+                    first = next(iter(listing), None)
+                    if first is None:
+                        return None
+                    fetched = first.fetch()
+                text = " ".join(s.text for s in fetched.snippets if s.text)
+                text = re.sub(r"\s+", " ", text).strip()
+                if text:
+                    return text[:_MAX_TRANSCRIPT_CHARS]
+            except Exception:
+                continue
+        return None
+    except Exception:
+        return None
+
+
+def _tt_yt_dlp_sync(url: str) -> dict | None:
+    """Blocking yt-dlp metadata extract. Returns a dict of useful fields or
+    None on failure. Skipped if yt-dlp isn't installed."""
+    try:
+        import yt_dlp
+    except Exception:
+        return None
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "skip_download": True, "no_warnings": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+        return {
+            "title": (info.get("title") or "").strip()[:200],
+            "description": (info.get("description") or "").strip()[:400],
+            "uploader": info.get("uploader") or info.get("uploader_id") or "",
+            "duration_s": info.get("duration"),
+            "view_count": info.get("view_count"),
+            "thumbnail": info.get("thumbnail") or "",
+        }
+    except Exception:
+        return None
+
+
 def _strip_html(html: str) -> tuple[str, str, str]:
-    """Return (title, description, body_text). Very simple — no lxml, no bs4."""
     title_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     title = (title_m.group(1).strip() if title_m else "")[:200]
 
@@ -59,7 +132,6 @@ def _strip_html(html: str) -> tuple[str, str, str]:
     )
     desc = (desc_m.group(1).strip() if desc_m else "")[:400]
 
-    # Drop scripts/styles, then strip tags.
     body = re.sub(r"<script[\s\S]*?</script>", " ", html, flags=re.IGNORECASE)
     body = re.sub(r"<style[\s\S]*?</style>", " ", body, flags=re.IGNORECASE)
     body = re.sub(r"<[^>]+>", " ", body)
@@ -68,38 +140,65 @@ def _strip_html(html: str) -> tuple[str, str, str]:
 
 
 async def fetch_url(url: str) -> str:
-    """Public entry point — returns a compact human-readable summary."""
     url = (url or "").strip()
     if not url or not url.lower().startswith(("http://", "https://")):
         return "Cần một URL hợp lệ (http/https) để fetch."
 
     host = _host_of(url)
 
-    # YouTube path
-    if any(h == host or host.endswith("." + h.split(".", 1)[-1]) for h in _YT_HOSTS):
-        data = await _oembed("https://www.youtube.com/oembed", url)
-        if data:
-            return (
-                f"[YouTube] {data.get('title', '?')}\n"
-                f"Channel: {data.get('author_name', '?')}\n"
-                f"Thumbnail: {data.get('thumbnail_url', '')}\n"
-                f"URL: {url}"
-            )
-        return f"[YouTube] Không lấy được oEmbed cho {url} (video có thể bị giới hạn/region-locked)."
+    # ---- YouTube ----------------------------------------------------------
+    if _matches(host, _YT_HOSTS):
+        oembed = await _oembed("https://www.youtube.com/oembed", url)
+        video_id = _yt_video_id(url)
+        transcript = None
+        if video_id:
+            transcript = await asyncio.to_thread(_yt_transcript_sync, video_id)
 
-    # TikTok path
-    if any(h == host or host.endswith("." + h.split(".", 1)[-1]) for h in _TT_HOSTS):
-        data = await _oembed("https://www.tiktok.com/oembed", url)
-        if data:
-            return (
-                f"[TikTok] {data.get('title', '?')}\n"
-                f"Author: {data.get('author_name', '?')}\n"
-                f"Thumbnail: {data.get('thumbnail_url', '')}\n"
-                f"URL: {url}"
-            )
-        return f"[TikTok] Không lấy được oEmbed cho {url}."
+        lines = ["[YouTube]"]
+        if oembed:
+            lines.append(f"Title: {oembed.get('title', '?')}")
+            lines.append(f"Channel: {oembed.get('author_name', '?')}")
+        else:
+            lines.append(f"(oEmbed không trả về metadata cho {url})")
+        if transcript:
+            lines.append("")
+            lines.append("Transcript (rút gọn):")
+            lines.append(transcript)
+        else:
+            lines.append("Transcript: không lấy được (video không có caption hoặc IP đang bị YouTube hạn chế).")
+        lines.append(f"URL: {url}")
+        return "\n".join(lines)
 
-    # Generic HTML fetch
+    # ---- TikTok -----------------------------------------------------------
+    if _matches(host, _TT_HOSTS):
+        meta = await asyncio.to_thread(_tt_yt_dlp_sync, url)
+        if not meta:
+            # Fall back to oEmbed when yt-dlp can't reach the video.
+            data = await _oembed("https://www.tiktok.com/oembed", url)
+            if data:
+                return (
+                    f"[TikTok] {data.get('title', '?')}\n"
+                    f"Author: {data.get('author_name', '?')}\n"
+                    f"Thumbnail: {data.get('thumbnail_url', '')}\n"
+                    f"URL: {url}"
+                )
+            return f"[TikTok] Không lấy được dữ liệu cho {url}."
+
+        lines = ["[TikTok]", f"Caption: {meta.get('title', '?')}"]
+        if meta.get("uploader"):
+            lines.append(f"Uploader: @{meta['uploader']}")
+        if meta.get("duration_s"):
+            lines.append(f"Duration: {int(meta['duration_s'])}s")
+        if meta.get("view_count"):
+            lines.append(f"Views: {meta['view_count']:,}")
+        if meta.get("description") and meta.get("description") != meta.get("title"):
+            lines.append(f"Description: {meta['description']}")
+        if meta.get("thumbnail"):
+            lines.append(f"Thumbnail: {meta['thumbnail']}")
+        lines.append(f"URL: {url}")
+        return "\n".join(lines)
+
+    # ---- Generic HTML -----------------------------------------------------
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT, follow_redirects=True) as cli:
             r = await cli.get(url, headers={"User-Agent": "Mozilla/5.0 smart-bot/1.0"})
