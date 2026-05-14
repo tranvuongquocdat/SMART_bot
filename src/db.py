@@ -496,6 +496,15 @@ async def lookup_person_by_external(
     return await repo.lookup_person_by_external(provider, external_id)
 
 
+async def lookup_person_by_external_id(
+    external_id: str, db_path: str = "data/history.db",
+) -> tuple[str, str] | None:
+    """Provider-agnostic external_id → (internal_id, provider). For callsites
+    reading raw Chat ID from Lark where provider isn't known up-front."""
+    repo: IdentityRepo = await _repo("identity", IdentityRepo)
+    return await repo.lookup_person_by_external_id(external_id)
+
+
 async def lookup_conversation_by_external(
     provider: str, external_id: str, db_path: str = "data/history.db",
 ) -> str | None:

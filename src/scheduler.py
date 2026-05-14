@@ -100,22 +100,30 @@ async def _check_deadlines():
                 assignee_name = r.get("Assignee", "").lower()
                 person = people_map.get(assignee_name)
 
+                from src.utils.chat_id_resolver import resolve_lark_chat_id
+
                 # Deadline tomorrow -> nhac assignee
                 if tomorrow_ms <= dl < tomorrow_end and person:
-                    target_id = person.get("Chat ID")
+                    target_id = await resolve_lark_chat_id(
+                        person.get("Chat ID"), person.get("Tên", "") or "",
+                    )
                     if target_id:
                         await telegram.send(
-                            int(target_id),
+                            target_id,
                             f"Nhac nho: Task '{r.get('Tên task', '?')}' deadline ngay mai!"
                         )
 
                 # Overdue -> nhac assignee + bao boss
                 if dl < today_ms:
                     if person and person.get("Chat ID"):
-                        await telegram.send(
-                            int(person["Chat ID"]),
-                            f"Task '{r.get('Tên task', '?')}' da QUA HAN! Cap nhat tien do nhe."
+                        assignee_id = await resolve_lark_chat_id(
+                            person["Chat ID"], person.get("Tên", "") or "",
                         )
+                        if assignee_id:
+                            await telegram.send(
+                                assignee_id,
+                                f"Task '{r.get('Tên task', '?')}' da QUA HAN! Cap nhat tien do nhe."
+                            )
                     await telegram.send(
                         boss["chat_id"],
                         f"Task qua han: '{r.get('Tên task', '?')}' ({r.get('Assignee', 'N/A')})"
@@ -220,7 +228,13 @@ async def _after_deadline_check():
                     (p for p in people if assignee_name.lower() in p.get("Tên", "").lower()),
                     None,
                 )
-                assignee_chat_id = int(person["Chat ID"]) if (person and person.get("Chat ID")) else None
+                if person and person.get("Chat ID"):
+                    from src.utils.chat_id_resolver import resolve_lark_chat_id
+                    assignee_chat_id = await resolve_lark_chat_id(
+                        person["Chat ID"], person.get("Tên", "") or "",
+                    )
+                else:
+                    assignee_chat_id = None
 
                 task_name = task.get("Tên task", "?")
                 if assignee_chat_id:
