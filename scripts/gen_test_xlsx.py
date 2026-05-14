@@ -26,11 +26,13 @@ STATUS_FILL = {
     "PASS": PatternFill("solid", fgColor="C6EFCE"),
     "FAIL": PatternFill("solid", fgColor="FFC7CE"),
     "NOT_TESTED": PatternFill("solid", fgColor="FFEB9C"),
+    "FEATURE_GAP": PatternFill("solid", fgColor="E7E6E6"),
 }
 STATUS_FONT = {
     "PASS": Font(color="006100", bold=True),
     "FAIL": Font(color="9C0006", bold=True),
     "NOT_TESTED": Font(color="9C6500", bold=True),
+    "FEATURE_GAP": Font(color="595959", bold=True),
 }
 CLUSTER_FILL = PatternFill("solid", fgColor="D9E1F2")
 HEADER_FILL = PatternFill("solid", fgColor="4472C4")

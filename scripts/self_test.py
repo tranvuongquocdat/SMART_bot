@@ -323,6 +323,10 @@ class UserMessage:
     is_mentioned: bool = False
     new_members: list[dict] = field(default_factory=list)
     attachments: list = field(default_factory=list)
+    # Override sender — used for O2 to simulate a stranger DMing the bot.
+    # When set, chat_id is resolved to the stranger's DM conversation (created
+    # in setup) rather than the boss's DM.
+    as_sender_key: str = ""  # "long" | "hung" | "stranger" — keys we'll wire in test_ctx
 
 
 @dataclass
@@ -371,6 +375,56 @@ class ScenarioResult:
     replies: list[str]
     elapsed_s: float
     error: str = ""
+
+
+def _check_link_handling(platform: str, url_keyword: str = ""):
+    """Build a custom expectation for link scenarios.
+
+    PASS conditions:
+      - bot called web_search (genuine attempt to learn about the link), OR
+      - reply contains an honest disclaimer (can't access / can't watch / ...)
+        AND does NOT contain hallucination markers ("video này nói về", ...)
+    FAIL when reply describes specific video content without having fetched it.
+    """
+    hallucination_markers = [
+        "video này nói", "video nói về", "video kể",
+        "nội dung video là", "video chiếu",
+        "i watched", "in the video", "the video shows",
+    ]
+    disclaimers = [
+        # "không X"
+        "không thể", "không xem", "không truy cập", "không đọc",
+        "không phân tích trực tiếp", "không xem trực tiếp",
+        "không mở", "không mở được", "không trực tiếp",
+        "không có khả năng",
+        # "chưa X" (bot's common phrasing — modest disclaim)
+        "chưa xem", "chưa đọc", "chưa truy cập", "chưa thể",
+        "chưa mở", "chưa fetch",
+        # English
+        "cannot access", "can't watch", "can't access",
+        "cannot read", "can't read",
+    ]
+
+    def _check(rec: Recorder) -> str | None:
+        tool_names = {tc.name for tc in rec.tool_calls}
+        if "web_search" in tool_names:
+            return None  # honest tool use
+        if not rec.replies:
+            return "no reply at all"
+        reply = rec.replies[-1].lower()
+        if any(m in reply for m in hallucination_markers):
+            return f"reply looks like hallucination of {platform} content"
+        if any(d in reply for d in disclaimers):
+            return None  # honest disclaimer
+        if url_keyword and url_keyword.lower() in reply:
+            # Acknowledged the URL — partial pass
+            return None
+        return (
+            f"reply gave neither web_search call nor honest disclaimer; "
+            f"got: {reply[:140]!r}"
+        )
+
+    return _check
 
 
 def _check_expectations(exp: Expect, rec: Recorder) -> StepResult:
@@ -423,18 +477,29 @@ async def _drive_user_message(
     from src.channels.base import IncomingMessage
     boss_id = test_ctx["boss_id"]
     boss_name = test_ctx["boss_name"]
-    dm_conv = test_ctx["dm_conv_id"]
-    group_conv = test_ctx["group_conv_id"]
 
-    chat_id = group_conv if msg.is_group else dm_conv
-    chat_type = "group" if msg.is_group else "dm"
+    if msg.as_sender_key:
+        sender_id = test_ctx[f"{msg.as_sender_key}_internal_id"]
+        sender_name = test_ctx[f"{msg.as_sender_key}_display_name"]
+        chat_id = test_ctx[f"{msg.as_sender_key}_conv_id"]
+        chat_type = "dm"
+    elif msg.is_group:
+        sender_id = boss_id
+        sender_name = boss_name
+        chat_id = test_ctx["group_conv_id"]
+        chat_type = "group"
+    else:
+        sender_id = boss_id
+        sender_name = boss_name
+        chat_id = test_ctx["dm_conv_id"]
+        chat_type = "dm"
 
     incoming = IncomingMessage(
         channel="test",
         chat_id=chat_id,
         chat_type=chat_type,
-        sender_id=boss_id,
-        sender_name=boss_name,
+        sender_id=sender_id,
+        sender_name=sender_name,
         text=msg.text,
         attachments=msg.attachments,
         is_mentioned=msg.is_mentioned,
@@ -616,15 +681,20 @@ async def _bootstrap_test_ctx(boss_hint: str | None) -> dict:
     lark_people_tbl = boss.get("lark_table_people") or ""
     long_ext_telegram = "999000001"        # Telegram-shaped
     hung_ext_zalo = "zalo_test_hung_002"   # Zalo-shaped
+    stranger_ext = "999000003"             # New unknown contact
     long_internal = await db.resolve_or_create_person(
         "telegram", long_ext_telegram, "Long", "",
     )
     hung_internal = await db.resolve_or_create_person(
         "zalo", hung_ext_zalo, "Hùng", "",
     )
+    stranger_internal = await db.resolve_or_create_person(
+        "telegram", stranger_ext, "Khách Lạ", "",
+    )
     # Conversations so telegram_singleton.send() can route to our capture.
     long_conv = await db.resolve_or_create_conversation("telegram", long_ext_telegram, "dm", "")
     hung_conv = await db.resolve_or_create_conversation("zalo", hung_ext_zalo, "dm", "")
+    stranger_conv = await db.resolve_or_create_conversation("telegram", stranger_ext, "dm", "")
     if lark_people_tbl:
         stash_lark_records(lark_people_tbl, [
             {"record_id": "recLONG", "Tên": "Long", "Tên gọi": "Long",
@@ -640,10 +710,18 @@ async def _bootstrap_test_ctx(boss_hint: str | None) -> dict:
         "dm_conv_id": dm_conv,
         "group_conv_id": group_conv,
         "group_name": "Self-Test Group",
+        # long
         "long_conv_id": long_conv,
-        "hung_conv_id": hung_conv,
         "long_internal_id": long_internal,
+        "long_display_name": "Long",
+        # hung
+        "hung_conv_id": hung_conv,
         "hung_internal_id": hung_internal,
+        "hung_display_name": "Hùng",
+        # stranger (for O2 join-flow scenarios)
+        "stranger_conv_id": stranger_conv,
+        "stranger_internal_id": stranger_internal,
+        "stranger_display_name": "Khách Lạ",
     }
 
 
@@ -741,13 +819,11 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         name="DM: gửi link YouTube",
-        description="Boss paste link YouTube → expect bot dùng web_search hoặc file_ingestion để xử lý URL",
+        description="Boss paste link YouTube → bot phải hoặc gọi web_search, hoặc thừa nhận không xem được trực tiếp (không hallucinate nội dung video)",
         steps=[
             UserMessage("xem video này nói về gì giúp tôi: https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
             Expect(
-                # Bất kỳ tool nào liên quan; nếu không có tool, ít nhất reply không
-                # được là pure "không biết" → đo gián tiếp qua reply length.
-                custom=lambda rec: None if (rec.tool_calls or (rec.replies and len(rec.replies[-1]) > 30)) else "no tool + empty reply",
+                custom=_check_link_handling("youtube"),
                 no_tool_errors=True,
             ),
         ],
@@ -755,15 +831,27 @@ SCENARIOS: list[Scenario] = [
     ),
     Scenario(
         name="DM: gửi link TikTok",
-        description="Boss paste link TikTok → expect bot không crash, ít nhất phản hồi",
+        description="Boss paste link TikTok → bot không hallucinate nội dung; gọi web_search hoặc disclaim",
         steps=[
             UserMessage("video này nội dung gì: https://www.tiktok.com/@user/video/7000000000000000000"),
             Expect(
-                custom=lambda rec: None if (rec.replies and len(rec.replies[-1]) > 20) else "empty reply",
+                custom=_check_link_handling("tiktok"),
                 no_tool_errors=True,
             ),
         ],
         tags=["link", "dm"],
+    ),
+    Scenario(
+        name="DM: gửi link bài báo",
+        description="Boss paste link tin tức → bot nên gọi web_search để lấy info; nếu không thì disclaim",
+        steps=[
+            UserMessage("đọc tin này giúp tôi: https://vnexpress.net/the-thao/bong-da/bong-da-trong-nuoc"),
+            Expect(
+                custom=_check_link_handling("vnexpress", url_keyword="vnexpress"),
+                no_tool_errors=True,
+            ),
+        ],
+        tags=["link", "dm", "news"],
     ),
     Scenario(
         name="DM: gửi file đính kèm",
@@ -782,8 +870,12 @@ SCENARIOS: list[Scenario] = [
         tags=["escalate", "fire"],
     ),
     Scenario(
-        name="Bot hỏi boss khi có người mới vào group",
-        description="Simulate new_member event trong group đã onboarded → expect bot reply gì đó (chào hoặc hỏi boss)",
+        name="New-member event trong group đã onboarded — silent expected",
+        description=(
+            "Telegram emits service event 'X joined the group'. Bot không có "
+            "logic auto-greet; chỉ passive identity.harvest. Test confirm: "
+            "không reply, không outbound, không crash. Boss approval flow đi qua O2 (DM)."
+        ),
         steps=[
             UserMessage(
                 "",
@@ -792,40 +884,182 @@ SCENARIOS: list[Scenario] = [
                 new_members=[{"id": "newcomer_001", "name": "Người Mới", "username": ""}],
             ),
             Expect(
-                # Bot phản hồi gì đó (chào hoặc nhắc boss confirm) — không crash
-                custom=lambda rec: None if (rec.replies or rec.outbound) else "no outbound at all",
+                custom=lambda rec: None if (not rec.replies and not rec.outbound) else "unexpected outbound on bare new-member event",
                 no_tool_errors=True,
             ),
         ],
         tags=["onboard", "group"],
     ),
+    Scenario(
+        name="Approve join: boss duyệt pending member",
+        description="Pre-insert pending membership → boss DM 'duyệt cho Khách Lạ' → expect approve_join + member activated",
+        steps=[],  # built dynamically — needs test_ctx
+        tags=["onboard", "approve"],
+    ),
+    Scenario(
+        name="Image attachment: bot nhận diện ảnh",
+        description="Boss gửi ảnh nhỏ → bot ingest, reply không crash, có nhắc tới ảnh hoặc nội dung",
+        steps=[],  # built dynamically
+        tags=["file", "image", "dm"],
+    ),
+    Scenario(
+        name="Reminder fire: source-only (không target) → vào source group",
+        description="Reminder có source_chat_id (group), KHÔNG target → expect outbound vào source group",
+        steps=[],  # built dynamically
+        tags=["reminder", "fire", "source"],
+    ),
 ]
 
 
 def _build_file_scenario(test_ctx: dict) -> Scenario:
-    """Send a small text file as attachment. Bot should ingest it and reply."""
+    """Send a small text file as attachment. Bot should ingest and surface
+    a recognizable keyword from the file in its reply."""
     from src.channels.base import Attachment
     tmp = Path("/tmp/selftest_doc.txt")
+    # Distinctive marker so the assertion can verify the bot actually read
+    # the file (not just stitching a generic reply).
     tmp.write_text(
-        "Báo cáo tuần 21: doanh thu tăng 12%, đơn hàng mới 47 cái. Cần follow-up "
-        "với khách hàng A và B trong tuần tới về hợp đồng năm 2026.",
+        "Báo cáo tuần 21: doanh thu tăng 12%, đơn hàng mới 47 cái. "
+        "Khách hàng quan trọng: ZULIPIX và QORANTEK. "
+        "Cần follow-up trong tuần tới về hợp đồng năm 2026.",
         encoding="utf-8",
     )
     att = Attachment(
         kind="file", url=str(tmp), mime_type="text/plain",
         filename="bao_cao_tuan.txt", size_bytes=tmp.stat().st_size,
     )
+
+    def _file_check(rec: Recorder) -> str | None:
+        if not rec.replies:
+            return "no reply"
+        last = rec.replies[-1].lower()
+        if len(last) < 30:
+            return f"reply too short: {last!r}"
+        # Path A: bot actually read the file → reply references unique keyword.
+        if "zulipix" in last or "qorantek" in last:
+            return None
+        # Path B: file format isn't supported (file_ingestion only handles
+        # image/PDF/DOCX). Bot should honestly disclaim, not fabricate content.
+        honest = [
+            "không hỗ trợ", "chưa hỗ trợ", "không đọc",
+            "chưa đọc", "không thể đọc",
+        ]
+        if any(h in last for h in honest):
+            return None
+        return (
+            "reply doesn't reference unique keyword from file AND lacks "
+            "an honest disclaimer about not reading it"
+        )
+
     return Scenario(
         name="DM: gửi file đính kèm",
-        description="Boss gửi file text + caption",
+        description="Boss gửi file text + caption; reply phải reference keyword đặc trưng từ file",
         steps=[
             UserMessage("tóm tắt giúp tôi file này", attachments=[att]),
-            Expect(
-                custom=lambda rec: None if (rec.replies and len(rec.replies[-1]) > 30) else "empty/short reply",
-                no_tool_errors=True,
-            ),
+            Expect(custom=_file_check, no_tool_errors=True),
         ],
         tags=["file", "dm"],
+    )
+
+
+def _build_image_scenario(test_ctx: dict) -> Scenario:
+    from src.channels.base import Attachment
+    from PIL import Image
+    tmp = Path("/tmp/selftest_image.png")
+    # Generate a small red square so the LLM has visible content to describe.
+    img = Image.new("RGB", (32, 32), color=(220, 30, 30))
+    img.save(tmp, format="PNG")
+    att = Attachment(
+        kind="photo", url=str(tmp), mime_type="image/png",
+        filename="selftest_image.png", size_bytes=tmp.stat().st_size,
+    )
+
+    def _img_check(rec: Recorder) -> str | None:
+        if not rec.replies:
+            return "no reply"
+        last = rec.replies[-1].lower()
+        # Bot's reply should mention image-related concept; for a tiny test PNG
+        # the LLM may say "không nhận diện rõ" / "ảnh nhỏ" / mention color etc.
+        markers = ["ảnh", "image", "hình", "photo", "bức", "nhỏ", "đỏ", "red"]
+        if not any(m in last for m in markers):
+            return f"reply doesn't reference the image at all: {last[:120]!r}"
+        return None
+
+    return Scenario(
+        name="Image attachment: bot nhận diện ảnh",
+        description="Boss gửi ảnh PNG nhỏ + caption",
+        steps=[
+            UserMessage("trong ảnh này có gì?", attachments=[att]),
+            Expect(custom=_img_check, no_tool_errors=True),
+        ],
+        tags=["file", "image", "dm"],
+    )
+
+
+def _build_approve_join_scenario(test_ctx: dict) -> Scenario:
+    """Pre-insert a pending membership row, then drive a boss DM to approve."""
+    stranger_id = test_ctx["stranger_internal_id"]
+    boss_id = test_ctx["boss_id"]
+
+    async def _seed(_step, _settings) -> None:
+        from src import db
+        _db = await db.get_db()
+        await db.upsert_membership(
+            _db,
+            chat_id=stranger_id,
+            boss_chat_id=str(boss_id),
+            person_type="member",
+            name="Khách Lạ",
+            status="pending",
+            request_info="Xin vào workspace để hỗ trợ dự án 2026",
+        )
+
+    async def _verify(_step, _settings) -> None:
+        from src import db
+        _db = await db.get_db()
+        row = await db.get_membership(_db, stranger_id, str(boss_id))
+        if not row:
+            raise AssertionError("membership row missing after approve")
+        if row.get("status") != "active":
+            raise AssertionError(f"membership status still {row.get('status')!r}, expected active")
+
+    return Scenario(
+        name="Approve join: boss duyệt pending member",
+        description="Pre-insert pending membership → boss DM duyệt → approve_join chạy + membership active",
+        steps=[
+            _FireFunc(_seed),
+            UserMessage(
+                f"Có yêu cầu join từ Khách Lạ (chat_id={stranger_id}). Duyệt nó vào workspace của tôi với role member."
+            ),
+            Expect(any_tool_in={"approve_join"}, no_tool_errors=True),
+            _FireFunc(_verify),
+        ],
+        tags=["onboard", "approve"],
+    )
+
+
+def _build_source_only_reminder_scenario(test_ctx: dict) -> Scenario:
+    """Fire a reminder with NO target but WITH source_chat_id → outbound goes
+    to source group (not boss DM)."""
+    boss_id = test_ctx["boss_id"]
+    source_group = test_ctx["group_conv_id"]
+    fake_reminder = {
+        "id": 999_999_998,
+        "boss_chat_id": boss_id,
+        "target_chat_id": None,
+        "target_name": "",
+        "source_chat_id": source_group,
+        "content": "Source-only reminder fire test",
+        "remind_at": int(time.time()),
+    }
+    return Scenario(
+        name="Reminder fire: source-only (không target) → vào source group",
+        description="Reminder không có target_chat_id, có source_chat_id → outbound vào source group",
+        steps=[
+            FireReminder(reminder=fake_reminder),
+            Expect(outbound_to=source_group),
+        ],
+        tags=["reminder", "fire", "source"],
     )
 
 
@@ -919,16 +1153,18 @@ async def main_async(args) -> int:
     print()
 
     # Replace placeholders with runtime-built versions that need test_ctx.
+    dynamic_builders = {
+        "Reminder fire: route tới target + cc boss": _build_fire_reminder_scenario,
+        "DM: gửi file đính kèm": _build_file_scenario,
+        "Escalation: task overdue → bot báo sếp": _build_escalate_scenario,
+        "Approve join: boss duyệt pending member": _build_approve_join_scenario,
+        "Image attachment: bot nhận diện ảnh": _build_image_scenario,
+        "Reminder fire: source-only (không target) → vào source group": _build_source_only_reminder_scenario,
+    }
     scenarios = []
     for s in SCENARIOS:
-        if s.name == "Reminder fire: route tới target + cc boss":
-            scenarios.append(_build_fire_reminder_scenario(test_ctx))
-        elif s.name == "DM: gửi file đính kèm":
-            scenarios.append(_build_file_scenario(test_ctx))
-        elif s.name == "Escalation: task overdue → bot báo sếp":
-            scenarios.append(_build_escalate_scenario(test_ctx))
-        else:
-            scenarios.append(s)
+        builder = dynamic_builders.get(s.name)
+        scenarios.append(builder(test_ctx) if builder else s)
 
     # Filter
     if args.only:
