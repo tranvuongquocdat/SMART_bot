@@ -144,6 +144,7 @@ THINKING_MAP = {
     "get_summary": "Đang tổng hợp...",
     "get_workload": "Đang xem workload...",
     "web_search": "Đang tìm kiếm web...",
+    "fetch_url": "Đang mở link...",
     "escalate_to_advisor": "Đang phân tích chiến lược...",
     "create_reminder": "Đang tạo nhắc nhở...",
     "list_reminders": "Đang xem nhắc nhở...",
@@ -209,6 +210,36 @@ async def _build_people_summary(ctx: ChatContext) -> str:
     except Exception:
         logger.exception("Failed to build people summary")
         return "(Không thể tải danh sách nhân sự)"
+
+
+async def _notify_boss_new_members(
+    boss_chat_id: str, group_label: str, new_members: list[dict],
+) -> None:
+    """When somebody joins an onboarded group, DM the boss so they can decide
+    whether to add them to the team (and via which role). Channel-agnostic:
+    `telegram.send` routes to whichever channel the boss registered with."""
+    try:
+        names = []
+        for m in new_members or []:
+            n = (m.get("name") or "").strip()
+            u = (m.get("username") or "").strip()
+            if n and u:
+                names.append(f"{n} (@{u})")
+            elif n:
+                names.append(n)
+            elif u:
+                names.append(f"@{u}")
+        if not names:
+            return
+        joined = ", ".join(names)
+        plural = "Có người" if len(names) == 1 else f"Có {len(names)} người"
+        msg = (
+            f"{plural} vừa vào group *{group_label}*: {joined}\n\n"
+            f"Anh có muốn thêm họ vào team không? (member / partner — hoặc bỏ qua)"
+        )
+        await telegram.send(boss_chat_id, msg)
+    except Exception:
+        logger.exception("[new-member-notify] failed for boss=%s", boss_chat_id)
 
 
 def _build_zalo_guidance(settings) -> str:
@@ -422,6 +453,13 @@ async def handle_message(
                 if not group_info:
                     return
                 boss_id = group_info["boss_chat_id"]
+                # Proactive: ping boss when a new member joins an onboarded
+                # group. Channel of the boss is preserved by telegram.send →
+                # _messenger_for routing (Zalo boss gets a Zalo DM).
+                if new_members:
+                    asyncio.create_task(_notify_boss_new_members(
+                        boss_id, group_name or chat_id, new_members,
+                    ))
                 msg_id = await db.save_message(chat_id, "user", text, sender_id)
                 _boss_row = await db.get_boss(boss_id) or {}
                 _llm = get_llm_client(_boss_row, _settings or Settings())

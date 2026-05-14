@@ -691,6 +691,25 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": (
+                "Mở 1 URL cụ thể để lấy nội dung. Dùng khi sếp paste link YouTube, "
+                "TikTok, bài báo, blog → tool trả metadata (oEmbed) hoặc title + "
+                "description + body rút gọn. KHÔNG dùng cho search keyword (đó là web_search). "
+                "Sau khi gọi, đọc kết quả và tóm tắt cho sếp; không bịa nội dung khi tool báo lỗi."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "URL đầy đủ (http/https)"},
+                },
+                "required": ["url"],
+            },
+        },
+    },
     # ------------------------------------------------------------------
     # Advisor tools (1)
     # ------------------------------------------------------------------

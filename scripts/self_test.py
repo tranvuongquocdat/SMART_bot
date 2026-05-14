@@ -397,7 +397,7 @@ def _check_link_actually_handled(platform: str, url_keyword: str = ""):
 
     def _check(rec: Recorder) -> str | None:
         tool_names = {tc.name for tc in rec.tool_calls}
-        if "web_search" in tool_names:
+        if "fetch_url" in tool_names or "web_search" in tool_names:
             return None
         if not rec.replies:
             return "no reply at all"
@@ -408,7 +408,7 @@ def _check_link_actually_handled(platform: str, url_keyword: str = ""):
             return None
         return (
             f"bot did not actually fetch/process the {platform} link — "
-            f"no web_search and no URL-keyword match"
+            f"no fetch_url/web_search and no URL-keyword match"
         )
 
     return _check
@@ -857,10 +857,8 @@ SCENARIOS: list[Scenario] = [
     Scenario(
         name="New-member event trong group → bot phải hỏi boss",
         description=(
-            "Theo yêu cầu boss: khi có người mới vào group đã onboarded, bot "
-            "phải chủ động hỏi sếp (DM hoặc nhắn group) — vd 'Có A vừa vào "
-            "group X, anh có muốn thêm họ vào team không?'. Silent = không có "
-            "feature, không phải pass."
+            "Khi có người mới vào group đã onboarded, bot chủ động DM boss "
+            "(qua channel của boss) hỏi có thêm vào team không."
         ),
         steps=[
             UserMessage(
@@ -870,7 +868,10 @@ SCENARIOS: list[Scenario] = [
                 new_members=[{"id": "newcomer_001", "name": "Người Mới", "username": ""}],
             ),
             Expect(
-                custom=lambda rec: None if (rec.replies or rec.outbound) else "silence — bot không proactive hỏi boss khi new member join",
+                custom=lambda rec: (
+                    None if any("Người Mới" in body for _, body in rec.outbound)
+                    else f"bot didn't DM boss about new member; outbound bodies: {[b[:60] for _, b in rec.outbound] or '∅'}"
+                ),
                 no_tool_errors=True,
             ),
         ],
@@ -908,6 +909,24 @@ SCENARIOS: list[Scenario] = [
         ),
         steps=[],  # built dynamically
         tags=["onboard", "request"],
+    ),
+    Scenario(
+        name="C1: Zalo boss + Telegram-only assignee → reminder vào group, KHÔNG DM",
+        description=(
+            "Boss có primary_channel='zalo'; assignee Long chỉ có identity Telegram. "
+            "Task từ group → reminder PHẢI vào group, KHÔNG được DM Long."
+        ),
+        steps=[],  # built dynamically
+        tags=["channel", "isolation"],
+    ),
+    Scenario(
+        name="E2: no-reply timer → bot báo sếp",
+        description=(
+            "Reminder đã fire tới target > N giờ trước; target không phản hồi → "
+            "bot tự DM boss."
+        ),
+        steps=[],  # built dynamically
+        tags=["escalate", "no-reply"],
     ),
 ]
 
@@ -1118,6 +1137,148 @@ def _build_escalate_scenario(test_ctx: dict) -> Scenario:
     )
 
 
+def _build_no_reply_escalation_scenario(test_ctx: dict) -> Scenario:
+    """E2: pre-insert a fake outbound_messages row dated 4h ago with no
+    matching inbound, run _check_no_reply_reminders, expect boss to receive
+    an escalation DM and the row's `escalated` flag to flip to 1."""
+    boss_id = test_ctx["boss_id"]
+    long_conv = test_ctx["long_conv_id"]
+    outbound_id_holder: dict[str, int | None] = {"id": None}
+
+    async def _seed(_step, _settings) -> None:
+        from src import db
+        conn = await db.get_db()
+        cur = await conn.execute(
+            """
+            INSERT INTO outbound_messages
+                (boss_chat_id, to_chat_id, to_name, content, trigger_type, created_at)
+            VALUES (?, ?, ?, ?, 'reminder', datetime('now', '-4 hours'))
+            """,
+            (str(boss_id), long_conv, "Long", "Nhắc Long nộp báo cáo Q2"),
+        )
+        await conn.commit()
+        outbound_id_holder["id"] = cur.lastrowid
+
+    async def _fire(_step, _settings) -> None:
+        from src.scheduler import _check_no_reply_reminders
+        await _check_no_reply_reminders()
+
+    async def _verify(_step, _settings) -> None:
+        from src import db
+        conn = await db.get_db()
+        oid = outbound_id_holder["id"]
+        async with conn.execute(
+            "SELECT escalated FROM outbound_messages WHERE id = ?", (oid,),
+        ) as cur:
+            row = await cur.fetchone()
+        if not row or row["escalated"] != 1:
+            raise AssertionError(
+                f"outbound row id={oid} not marked escalated; row={dict(row) if row else None}"
+            )
+
+    def _check_outbound(rec: Recorder) -> str | None:
+        # Boss must receive at least one outbound about Long.
+        for _, body in rec.outbound:
+            if "long" in body.lower() and "phản hồi" in body.lower():
+                return None
+        return f"boss didn't get a no-reply escalation about Long; bodies: {[b[:80] for _, b in rec.outbound] or '∅'}"
+
+    return Scenario(
+        name="E2: no-reply timer → bot báo sếp",
+        description="Reminder gửi 4h trước, target im lặng → _check_no_reply_reminders escalate",
+        steps=[
+            _FireFunc(_seed),
+            _FireFunc(_fire),
+            Expect(custom=_check_outbound, no_tool_errors=True),
+            _FireFunc(_verify),
+        ],
+        tags=["escalate", "no-reply"],
+    )
+
+
+def _build_channel_isolation_scenario(test_ctx: dict) -> Scenario:
+    """C1: temporarily flip the test boss's primary_channel to 'zalo' so the
+    existing Telegram-shaped assignee Long looks cross-channel. Expect the
+    deadline reminder to land in the group only, not in Long's DM.
+
+    The test reverts primary_channel after the scenario to keep other tests
+    deterministic.
+    """
+    boss = test_ctx["boss"]
+    tasks_tbl = boss.get("lark_table_tasks") or ""
+    boss_id = test_ctx["boss_id"]
+    group_conv = test_ctx["group_conv_id"]
+    long_conv = test_ctx["long_conv_id"]
+
+    overdue_ms = int(time.time() * 1000) - 2 * 3600 * 1000
+    record_id = f"recC1_{uuid.uuid4().hex[:8]}"
+    prev_channel: dict[str, str | None] = {"value": None}
+
+    def setup(_ctx: dict) -> None:
+        if tasks_tbl:
+            stash_lark_records(tasks_tbl, [{
+                "record_id": record_id,
+                "Tên task": "C1 cross-channel task",
+                "Assignee": "Long",
+                "Status": "Đang làm",
+                "Deadline": overdue_ms,
+                "Group ID": group_conv,
+            }])
+
+    async def _flip_to_zalo(_step, _settings) -> None:
+        from src import db
+        _db = await db.get_db()
+        async with _db.execute(
+            "SELECT primary_channel FROM bosses WHERE chat_id = ?", (str(boss_id),)
+        ) as cur:
+            row = await cur.fetchone()
+        prev_channel["value"] = row["primary_channel"] if row else None
+        await _db.execute(
+            "UPDATE bosses SET primary_channel = 'zalo' WHERE chat_id = ?",
+            (str(boss_id),),
+        )
+        await _db.commit()
+        # Seed notification row so _after_deadline_check picks the task up.
+        await db.upsert_task_notification(_db, record_id, str(boss_id), None)
+
+    async def _fire(_step, _settings) -> None:
+        from src.scheduler import _after_deadline_check
+        await _after_deadline_check()
+
+    async def _restore(_step, _settings) -> None:
+        from src import db
+        _db = await db.get_db()
+        await _db.execute(
+            "UPDATE bosses SET primary_channel = ? WHERE chat_id = ?",
+            (prev_channel["value"], str(boss_id)),
+        )
+        await _db.commit()
+
+    def _strict(rec: Recorder) -> str | None:
+        chat_ids = {c for c, _ in rec.outbound}
+        if group_conv not in chat_ids:
+            return f"group ({group_conv}) didn't get the reminder; saw {sorted(chat_ids) or '∅'}"
+        if long_conv in chat_ids:
+            return (
+                f"channel leak: Long's Telegram DM ({long_conv}) received the "
+                f"reminder despite boss being on Zalo"
+            )
+        return None
+
+    return Scenario(
+        name="C1: Zalo boss + Telegram-only assignee → reminder vào group, KHÔNG DM",
+        description="Verify channel isolation drops cross-channel assignee DM, group still gets it",
+        setup=setup,
+        steps=[
+            _FireFunc(_flip_to_zalo),
+            _FireFunc(_fire),
+            Expect(custom=_strict, no_tool_errors=True),
+            _FireFunc(_restore),
+        ],
+        tags=["channel", "isolation"],
+    )
+
+
 def _build_request_join_scenario(test_ctx: dict) -> Scenario:
     """Call request_join service directly with a stranger ChatContext. Verify
     that the pending membership lands in DB and the boss receives an outbound
@@ -1322,6 +1483,8 @@ async def main_async(args) -> int:
         "Reminder fire: source-only (không target) → vào source group": _build_source_only_reminder_scenario,
         "Escalation: task từ group, assignee chưa join → reminder vào group": _build_escalate_group_unknown_assignee_scenario,
         "Request join: stranger gọi request_join → pending row + boss DM": _build_request_join_scenario,
+        "C1: Zalo boss + Telegram-only assignee → reminder vào group, KHÔNG DM": _build_channel_isolation_scenario,
+        "E2: no-reply timer → bot báo sếp": _build_no_reply_escalation_scenario,
     }
     scenarios = []
     for s in SCENARIOS:

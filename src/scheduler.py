@@ -72,7 +72,9 @@ async def _evening_summary():
             logger.exception("[scheduler] Evening summary failed for %s", boss["name"])
 
 
-async def _resolve_task_targets(task: dict, person: dict | None) -> tuple[str | None, str | None]:
+async def _resolve_task_targets(
+    task: dict, person: dict | None, boss_chat_id: str | None = None,
+) -> tuple[str | None, str | None]:
     """For a task, return (primary_target, fallback_target).
 
     Routing rules:
@@ -81,9 +83,13 @@ async def _resolve_task_targets(task: dict, person: dict | None) -> tuple[str | 
       - Task from DM (no Group ID) → primary = assignee DM (when known).
       - When the assignee has no Chat ID AND task has no Group ID, both are None.
 
-    Caller decides whether to also notify the boss.
+    C1 channel-isolation: when `boss_chat_id` is supplied and the boss has a
+    `primary_channel` set, the assignee DM is dropped (set to None) if the
+    assignee lives on a different channel — group fallback then kicks in.
     """
-    from src.utils.chat_id_resolver import resolve_lark_chat_id
+    from src.utils.chat_id_resolver import (
+        resolve_lark_chat_id, is_target_on_boss_channel,
+    )
 
     group_id = task.get("Group ID")
     assignee_id: str | None = None
@@ -91,6 +97,11 @@ async def _resolve_task_targets(task: dict, person: dict | None) -> tuple[str | 
         assignee_id = await resolve_lark_chat_id(
             person["Chat ID"], person.get("Tên", "") or "",
         )
+
+    # Drop cross-channel DM so a Zalo boss never leaks across to Telegram.
+    if assignee_id and boss_chat_id:
+        if not await is_target_on_boss_channel(boss_chat_id, assignee_id):
+            assignee_id = None
 
     if group_id:
         # Group is the primary surface; assignee DM is a courtesy CC.
@@ -126,7 +137,7 @@ async def _check_deadlines():
                 assignee_name = r.get("Assignee", "").lower()
                 person = people_map.get(assignee_name)
                 task_name = r.get("Tên task", "?")
-                primary, fallback = await _resolve_task_targets(r, person)
+                primary, fallback = await _resolve_task_targets(r, person, boss["chat_id"])
 
                 # Deadline tomorrow -> nhac primary (group nếu task từ group,
                 # ngược lại DM assignee). Có CC nếu primary là group.
@@ -160,6 +171,43 @@ async def _check_deadlines():
                     )
         except Exception:
             logger.exception("[scheduler] Deadline check failed for %s", boss["name"])
+
+
+_NO_REPLY_GRACE_HOURS = 3
+
+
+async def _check_no_reply_reminders():
+    """E2 — escalate to boss when a target ignored a reminder for too long.
+
+    Every 30 minutes: scan `outbound_messages` for `trigger_type='reminder'`
+    older than _NO_REPLY_GRACE_HOURS that haven't been escalated yet. For
+    each, look at the `messages` table: if no inbound from the target since
+    the fire timestamp → DM the boss and flip escalated=1. If the target
+    did reply, just mark escalated=1 (resolved, no spam).
+    """
+    try:
+        rows = await db.get_unescalated_reminders_older_than(_NO_REPLY_GRACE_HOURS)
+    except Exception:
+        logger.exception("[scheduler] no-reply scan failed")
+        return
+
+    for row in rows:
+        try:
+            replied = await db.has_inbound_after(row["to_chat_id"], row["created_at"])
+            if not replied:
+                msg = (
+                    f"_{row.get('to_name') or 'Người được nhắc'}_ chưa phản hồi tin "
+                    f"nhắc em đã gửi ~{_NO_REPLY_GRACE_HOURS}h trước:\n"
+                    f"> {row['content'][:200]}\n\n"
+                    f"Anh có muốn em hỏi lại không?"
+                )
+                await telegram.send(row["boss_chat_id"], msg)
+            await db.mark_outbound_escalated(row["id"])
+        except Exception:
+            logger.exception(
+                "[scheduler] no-reply escalation for outbound id=%s failed",
+                row.get("id"),
+            )
 
 
 async def _check_reminders():
@@ -219,7 +267,7 @@ async def _check_deadline_push():
                     (p for p in people if assignee_name in (p.get("Tên", "") or "").lower()),
                     None,
                 )
-                primary, fallback = await _resolve_task_targets(task, person)
+                primary, fallback = await _resolve_task_targets(task, person, boss["chat_id"])
                 # If task was created from DM and assignee is unknown, the legacy
                 # notif row may carry a pre-resolved chat id — keep it as a last
                 # resort to preserve old behaviour.
@@ -276,7 +324,7 @@ async def _after_deadline_check():
                     (p for p in people if assignee_name.lower() in p.get("Tên", "").lower()),
                     None,
                 )
-                primary, fallback = await _resolve_task_targets(task, person)
+                primary, fallback = await _resolve_task_targets(task, person, boss["chat_id"])
                 task_name = task.get("Tên task", "?")
                 msg = (
                     f"Task '{task_name}' đã quá hạn rồi!\n"
@@ -666,6 +714,7 @@ async def start(settings: Settings):
     _scheduler.add_job(_check_reminders, IntervalTrigger(minutes=1))
     _scheduler.add_job(_check_deadline_push, IntervalTrigger(minutes=30))
     _scheduler.add_job(_after_deadline_check, IntervalTrigger(minutes=30))
+    _scheduler.add_job(_check_no_reply_reminders, IntervalTrigger(minutes=30))
     _scheduler.add_job(_sync_lark_to_sqlite, IntervalTrigger(seconds=30))
     _scheduler.start()
     logger.info("Scheduler started")

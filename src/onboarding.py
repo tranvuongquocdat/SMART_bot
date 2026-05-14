@@ -116,6 +116,23 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
         await _db.commit()
         logger.info("[onboarding] boss language='%s' saved for chat_id=%s", language, chat_id)
 
+        # C1 — record boss's home channel so outbound never leaks across.
+        # `chat_id` is the boss's external messenger id (the integer/string
+        # the provider gave us); the conversation row keyed on it carries
+        # the actual provider.
+        ext_lookup = await db.lookup_external_for_person(chat_id)
+        if ext_lookup:
+            provider, _ = ext_lookup
+            await _db.execute(
+                "UPDATE bosses SET primary_channel = ? WHERE chat_id = ?",
+                (provider, chat_id),
+            )
+            await _db.commit()
+            logger.info(
+                "[onboarding] boss primary_channel='%s' saved for chat_id=%s",
+                provider, chat_id,
+            )
+
         # Membership-of-self: must be keyed by the person UUID (sender_id),
         # not the workspace UUID (chat_id). Phase 1 had sender_id == chat_id
         # so add_person(chat_id, chat_id, ...) worked by coincidence; after

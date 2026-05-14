@@ -50,6 +50,30 @@ async def resolve_lark_chat_id(raw: object, name: str = "") -> str | None:
     return await db.resolve_or_create_person(provider, s, name or "", "")
 
 
+async def is_target_on_boss_channel(
+    boss_chat_id: str, target_internal_id: str | None,
+) -> bool:
+    """True when the target is reachable on the boss's home channel.
+
+    Returns True for legacy bosses with no `primary_channel` set (so existing
+    workspaces keep working). Returns False when the target's identity is
+    unknown (cannot prove same-channel → safer to skip than to leak across).
+    """
+    from src import db
+    if not target_internal_id:
+        return False
+    boss = await db.get_boss(str(boss_chat_id))
+    boss_ch = (boss or {}).get("primary_channel") or ""
+    if not boss_ch:
+        return True
+    ext = await db.lookup_external_for_person(target_internal_id)
+    if ext is None:
+        ext = await db.lookup_external_for_conversation(target_internal_id)
+    if ext is None:
+        return False
+    return ext[0] == boss_ch
+
+
 async def resolve_external_conversation(
     raw: object, *, chat_type_hint: str = "dm", title: str = "",
 ) -> str | None:
