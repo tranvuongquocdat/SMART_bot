@@ -72,6 +72,32 @@ async def _evening_summary():
             logger.exception("[scheduler] Evening summary failed for %s", boss["name"])
 
 
+async def _resolve_task_targets(task: dict, person: dict | None) -> tuple[str | None, str | None]:
+    """For a task, return (primary_target, fallback_target).
+
+    Routing rules:
+      - Task created in a group (has "Group ID") → primary = group; assignee DM
+        is a courtesy CC, only sent when their Chat ID is known.
+      - Task from DM (no Group ID) → primary = assignee DM (when known).
+      - When the assignee has no Chat ID AND task has no Group ID, both are None.
+
+    Caller decides whether to also notify the boss.
+    """
+    from src.utils.chat_id_resolver import resolve_lark_chat_id
+
+    group_id = task.get("Group ID")
+    assignee_id: str | None = None
+    if person and person.get("Chat ID"):
+        assignee_id = await resolve_lark_chat_id(
+            person["Chat ID"], person.get("Tên", "") or "",
+        )
+
+    if group_id:
+        # Group is the primary surface; assignee DM is a courtesy CC.
+        return str(group_id), assignee_id
+    return assignee_id, None
+
+
 async def _check_deadlines():
     """9h30: Check deadline sap toi -> nhan nguoi duoc giao."""
     from datetime import date, datetime, timedelta
@@ -99,34 +125,38 @@ async def _check_deadlines():
 
                 assignee_name = r.get("Assignee", "").lower()
                 person = people_map.get(assignee_name)
+                task_name = r.get("Tên task", "?")
+                primary, fallback = await _resolve_task_targets(r, person)
 
-                from src.utils.chat_id_resolver import resolve_lark_chat_id
-
-                # Deadline tomorrow -> nhac assignee
-                if tomorrow_ms <= dl < tomorrow_end and person:
-                    target_id = await resolve_lark_chat_id(
-                        person.get("Chat ID"), person.get("Tên", "") or "",
-                    )
-                    if target_id:
+                # Deadline tomorrow -> nhac primary (group nếu task từ group,
+                # ngược lại DM assignee). Có CC nếu primary là group.
+                if tomorrow_ms <= dl < tomorrow_end:
+                    if primary:
                         await telegram.send(
-                            target_id,
-                            f"Nhac nho: Task '{r.get('Tên task', '?')}' deadline ngay mai!"
+                            primary,
+                            f"Nhac nho: Task '{task_name}' deadline ngay mai!"
+                        )
+                    if fallback:
+                        await telegram.send(
+                            fallback,
+                            f"Nhac nho: Task '{task_name}' deadline ngay mai!"
                         )
 
-                # Overdue -> nhac assignee + bao boss
+                # Overdue -> nhac primary (group hoặc assignee DM) + bao boss
                 if dl < today_ms:
-                    if person and person.get("Chat ID"):
-                        assignee_id = await resolve_lark_chat_id(
-                            person["Chat ID"], person.get("Tên", "") or "",
+                    if primary:
+                        await telegram.send(
+                            primary,
+                            f"Task '{task_name}' da QUA HAN! Cap nhat tien do nhe."
                         )
-                        if assignee_id:
-                            await telegram.send(
-                                assignee_id,
-                                f"Task '{r.get('Tên task', '?')}' da QUA HAN! Cap nhat tien do nhe."
-                            )
+                    if fallback:
+                        await telegram.send(
+                            fallback,
+                            f"Task '{task_name}' da QUA HAN! Cap nhat tien do nhe."
+                        )
                     await telegram.send(
                         boss["chat_id"],
-                        f"Task qua han: '{r.get('Tên task', '?')}' ({r.get('Assignee', 'N/A')})"
+                        f"Task qua han: '{task_name}' ({r.get('Assignee', 'N/A')})"
                     )
         except Exception:
             logger.exception("[scheduler] Deadline check failed for %s", boss["name"])
@@ -180,14 +210,32 @@ async def _check_deadline_push():
                 if not notif:
                     continue
 
-                assignee_chat_id = notif.get("assignee_chat_id")
-                if assignee_chat_id:
+                # Find person row for the assignee so _resolve_task_targets can
+                # decide group vs DM. People not in Lark → person=None → fallback
+                # to the task's Group ID if any.
+                people = await lark.search_records(boss["lark_base_token"], boss["lark_table_people"])
+                assignee_name = task.get("Assignee", "").lower()
+                person = next(
+                    (p for p in people if assignee_name in (p.get("Tên", "") or "").lower()),
+                    None,
+                )
+                primary, fallback = await _resolve_task_targets(task, person)
+                # If task was created from DM and assignee is unknown, the legacy
+                # notif row may carry a pre-resolved chat id — keep it as a last
+                # resort to preserve old behaviour.
+                if not primary and not fallback:
+                    primary = notif.get("assignee_chat_id")
+
+                if primary or fallback:
                     label = "2 tiếng" if kind == "2h" else "24 tiếng"
-                    await telegram.send(
-                        assignee_chat_id,
+                    msg = (
                         f"⏰ Task '{task.get('Tên task')}' còn khoảng {label} đến deadline!\n"
-                        f"Hãy cập nhật tiến độ nhé.",
+                        f"Hãy cập nhật tiến độ nhé."
                     )
+                    if primary:
+                        await telegram.send(primary, msg)
+                    if fallback:
+                        await telegram.send(fallback, msg)
                 await db.mark_notification_sent(db._db, record_id, boss["chat_id"], kind)
         except Exception:
             logger.exception("[scheduler] Deadline push failed for %s", boss.get("name"))
@@ -228,32 +276,30 @@ async def _after_deadline_check():
                     (p for p in people if assignee_name.lower() in p.get("Tên", "").lower()),
                     None,
                 )
-                if person and person.get("Chat ID"):
-                    from src.utils.chat_id_resolver import resolve_lark_chat_id
-                    assignee_chat_id = await resolve_lark_chat_id(
-                        person["Chat ID"], person.get("Tên", "") or "",
-                    )
-                else:
-                    assignee_chat_id = None
-
+                primary, fallback = await _resolve_task_targets(task, person)
                 task_name = task.get("Tên task", "?")
-                if assignee_chat_id:
-                    msg = (
-                        f"Task '{task_name}' đã quá hạn rồi!\n"
-                        f"Bạn có thể update tiến độ cho {boss['name']} biết không?"
-                    )
-                    await telegram.send(assignee_chat_id, msg)
+                msg = (
+                    f"Task '{task_name}' đã quá hạn rồi!\n"
+                    f"Bạn có thể update tiến độ cho {boss['name']} biết không?"
+                )
+                if primary:
+                    await telegram.send(primary, msg)
                     await db.log_outbound_dm(
                         boss_chat_id=boss["chat_id"],
-                        to_chat_id=assignee_chat_id,
+                        to_chat_id=primary,
                         to_name=assignee_name,
                         content=msg,
                         trigger_type="deadline_push",
                         task_id=record_id,
                     )
+                if fallback:
+                    await telegram.send(fallback, msg)
+                if primary:
                     report_lines.append(f"Đã nhắc {assignee_name}: '{task_name}'")
                 else:
-                    report_lines.append(f"'{task_name}' — {assignee_name} chưa có Chat ID")
+                    report_lines.append(
+                        f"'{task_name}' — {assignee_name} chưa có Chat ID và task không từ group"
+                    )
 
                 await db.mark_overdue_notified(db._db, record_id, str(boss["chat_id"]))
 

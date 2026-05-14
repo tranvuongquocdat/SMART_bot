@@ -849,12 +849,10 @@ SCENARIOS: list[Scenario] = [
         tags=["file", "dm"],
     ),
     Scenario(
-        name="Escalation: task overdue → bot báo sếp",
-        description="Inject task quá hạn vào Lark stub, gọi _after_deadline_check → expect DM tới assignee + report tới boss",
-        steps=[
-            # Filled in dynamically — needs test_ctx
-        ],
-        tags=["escalate", "fire"],
+        name="Escalation: task overdue (DM) → assignee DM + boss report",
+        description="Task không có Group ID → reminder fire DM tới assignee + boss report",
+        steps=[],  # built dynamically
+        tags=["escalate", "fire", "dm"],
     ),
     Scenario(
         name="New-member event trong group → bot phải hỏi boss",
@@ -895,6 +893,12 @@ SCENARIOS: list[Scenario] = [
         description="Reminder có source_chat_id (group), KHÔNG target → expect outbound vào source group",
         steps=[],  # built dynamically
         tags=["reminder", "fire", "source"],
+    ),
+    Scenario(
+        name="Escalation: task từ group, assignee chưa join → reminder vào group",
+        description="Task có Group ID + assignee không có Chat ID → reminder fallback vào group thay vì silent",
+        steps=[],  # built dynamically
+        tags=["escalate", "fire", "group", "fallback"],
     ),
 ]
 
@@ -1043,43 +1047,130 @@ def _build_source_only_reminder_scenario(test_ctx: dict) -> Scenario:
 
 
 def _build_escalate_scenario(test_ctx: dict) -> Scenario:
-    """Inject an overdue task into Lark stub, fire after_deadline_check."""
+    """Inject an overdue task (DM context, known assignee) into Lark stub,
+    fire after_deadline_check. Strict: outbound must reach the assignee's
+    DM conversation, and the boss must receive a report."""
     boss = test_ctx["boss"]
     tasks_tbl = boss.get("lark_table_tasks") or ""
     long_conv = test_ctx["long_conv_id"]
+    long_internal = test_ctx["long_internal_id"]
     boss_id = test_ctx["boss_id"]
 
-    # Deadline 2 hours in the past
     overdue_ms = int(time.time() * 1000) - 2 * 3600 * 1000
+    # Unique record id per run so the persistent task_notifications table
+    # doesn't suppress the fire (records survive across test runs).
+    record_id = f"recOVERDUE_DM_{uuid.uuid4().hex[:8]}"
 
     def setup(_ctx: dict) -> None:
-        # Reset and inject task
         if tasks_tbl:
             stash_lark_records(tasks_tbl, [{
-                "record_id": "recOVERDUE",
-                "Tên task": "Self-test overdue task",
+                "record_id": record_id,
+                "Tên task": "Self-test overdue task DM",
                 "Assignee": "Long",
                 "Status": "Đang làm",
                 "Deadline": overdue_ms,
+                # No "Group ID" → DM routing path
             }])
 
-    async def _fire_check(_step, settings) -> None:
+    async def _seed_notif(_step, _settings) -> None:
+        # _after_deadline_check only considers tasks that already have a row
+        # in `task_notifications` — that row is created when the task is
+        # produced via create_task. Mirror that here.
+        from src import db
+        _db = await db.get_db()
+        await db.upsert_task_notification(_db, record_id, str(boss_id), long_internal)
+
+    async def _fire(_step, _settings) -> None:
         from src.scheduler import _after_deadline_check
         await _after_deadline_check()
 
-    # We can't reuse FireReminder; introduce a callable step inline via custom
+    def _strict_check(rec: Recorder) -> str | None:
+        chat_ids = {c for c, _ in rec.outbound}
+        # Scheduler dispatches via telegram.send(boss["chat_id"], ...) which
+        # resolves boss external id → internal DM conv. The test sees that
+        # internal id, not the raw boss_id string. Require: at least 2 distinct
+        # outbound destinations AND assignee DM is one of them.
+        if long_conv not in chat_ids:
+            return f"assignee DM ({long_conv}) didn't get the overdue notice; saw {sorted(chat_ids)}"
+        if len(chat_ids) < 2:
+            return f"boss didn't get a separate report; outbound only hit {sorted(chat_ids)}"
+        return None
+
     return Scenario(
-        name="Escalation: task overdue → bot báo sếp",
-        description="_after_deadline_check trên task có Deadline < now",
+        name="Escalation: task overdue (DM) → assignee DM + boss report",
+        description="Task không có Group ID → reminder route tới assignee DM + boss",
         setup=setup,
         steps=[
-            _FireFunc(_fire_check),
-            Expect(
-                custom=lambda rec: None if rec.outbound else "no outbound DM/report sent",
-                no_tool_errors=True,
-            ),
+            _FireFunc(_seed_notif),
+            _FireFunc(_fire),
+            Expect(custom=_strict_check, no_tool_errors=True),
         ],
-        tags=["escalate", "fire"],
+        tags=["escalate", "fire", "dm"],
+    )
+
+
+def _build_escalate_group_unknown_assignee_scenario(test_ctx: dict) -> Scenario:
+    """Task from a group context with an assignee who has NO Chat ID in Lark.
+    The deadline reminder must fall back to the source group, NOT just go silent."""
+    boss = test_ctx["boss"]
+    tasks_tbl = boss.get("lark_table_tasks") or ""
+    people_tbl = boss.get("lark_table_people") or ""
+    group_conv = test_ctx["group_conv_id"]
+    boss_id = test_ctx["boss_id"]
+
+    overdue_ms = int(time.time() * 1000) - 2 * 3600 * 1000
+    record_id = f"recOVERDUE_GRP_{uuid.uuid4().hex[:8]}"
+
+    def setup(_ctx: dict) -> None:
+        # Inject overdue task with Group ID set, assignee "Nam" who exists in
+        # Lark People row but has NO Chat ID (the "chưa join workspace" case).
+        if tasks_tbl:
+            stash_lark_records(tasks_tbl, [{
+                "record_id": record_id,
+                "Tên task": "Self-test overdue task GROUP",
+                "Assignee": "Nam",
+                "Status": "Đang làm",
+                "Deadline": overdue_ms,
+                "Group ID": group_conv,
+            }])
+        if people_tbl:
+            stash_lark_records(people_tbl, [{
+                "record_id": "recNAM",
+                "Tên": "Nam",
+                "Tên gọi": "Nam",
+                # No "Chat ID" — assignee chưa join workspace
+                "Type": "member",
+            }])
+
+    async def _seed_notif(_step, _settings) -> None:
+        from src import db
+        _db = await db.get_db()
+        # No assignee_chat_id because assignee chưa join
+        await db.upsert_task_notification(_db, record_id, str(boss_id), None)
+
+    async def _fire(_step, _settings) -> None:
+        from src.scheduler import _after_deadline_check
+        await _after_deadline_check()
+
+    def _strict_check(rec: Recorder) -> str | None:
+        chat_ids = {c for c, _ in rec.outbound}
+        if group_conv not in chat_ids:
+            return (
+                f"task has Group ID but reminder didn't fall back to the group "
+                f"({group_conv}); saw outbounds to {sorted(chat_ids) or '∅'}"
+            )
+        return None
+
+    return Scenario(
+        name="Escalation: task từ group, assignee chưa join → reminder vào group",
+        description="Task có Group ID + assignee không có Chat ID → fallback vào group",
+        setup=setup,
+        steps=[
+            _FireFunc(_seed_notif),
+            _FireFunc(_fire),
+            Expect(custom=_strict_check, no_tool_errors=True),
+        ],
+        tags=["escalate", "fire", "group", "fallback"],
     )
 
 
@@ -1135,10 +1226,11 @@ async def main_async(args) -> int:
     dynamic_builders = {
         "Reminder fire: route tới target + cc boss": _build_fire_reminder_scenario,
         "DM: gửi file đính kèm": _build_file_scenario,
-        "Escalation: task overdue → bot báo sếp": _build_escalate_scenario,
+        "Escalation: task overdue (DM) → assignee DM + boss report": _build_escalate_scenario,
         "Approve join: boss duyệt pending member": _build_approve_join_scenario,
         "Image attachment: bot nhận diện ảnh": _build_image_scenario,
         "Reminder fire: source-only (không target) → vào source group": _build_source_only_reminder_scenario,
+        "Escalation: task từ group, assignee chưa join → reminder vào group": _build_escalate_group_unknown_assignee_scenario,
     }
     scenarios = []
     for s in SCENARIOS:
