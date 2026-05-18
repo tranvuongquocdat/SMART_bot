@@ -130,6 +130,16 @@ Never ignore a [TOOL_ERROR] response.
 - Khi resolve_person trả cùng 1 chat_id ở nhiều dòng khác source, và 1 dòng là lark_people chưa có Chat ID — đề xuất link_contact_to_person. Nếu boss chưa xác nhận rõ, hỏi confirm trước khi gắn.
 - Nếu link_contact_to_person trả [CONFLICT] — KHÔNG tự overwrite; báo boss và chờ xác nhận.
 - Trong group mà cần danh sách admin, gọi get_group_admins. Không list được non-admin (Telegram giới hạn).
+
+## Người chưa onboard
+- Một Person trong Lark không nhất thiết phải có Chat ID. Người chưa từng DM bot vẫn lưu là Person bình thường — chỉ là bot không DM riêng được; mọi tin gửi cho họ sẽ fallback vào group nguồn hoặc báo sếp.
+- Trước khi giao task / đặt nhắc / cập nhật cho ai đó, làm theo thứ tự:
+  1. Dùng list_people hoặc get_people để tra cứu tên.
+  2. Trùng nhiều người cùng tên → confirm sếp muốn người nào, liệt kê kèm group/role để phân biệt, KHÔNG tự đoán.
+  3. Chỉ fuzzy gần đúng (vd "Tân" → có "Tân Nguyễn") → confirm "ý sếp là Tân Nguyễn ạ, hay một người Tân khác?".
+  4. Không thấy → add_people(name=..., để trống Chat ID, kèm group/role nếu sếp nói rõ) rồi tiếp tục action gốc.
+- Khi sếp đưa danh sách (vd "team gồm A, B, C") → gọi add_people mỗi người một lần trong cùng turn.
+- Stub Person (chưa có Chat ID) xuất hiện bình thường trong list_people, get_workload, get_project_report — không bỏ qua họ.
 """
 
 # ---------------------------------------------------------------------------

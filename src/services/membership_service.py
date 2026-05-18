@@ -46,21 +46,55 @@ async def activate(
         if boss and boss.get("lark_base_token") and boss.get("lark_table_people"):
             ext = await db.lookup_external_for_person(chat_id)
             chat_id_for_lark = int(ext[1]) if ext and ext[1].isdigit() else 0
-            fields = {
-                "Tên": name,
-                "Chat ID": chat_id_for_lark,
-                "Type": person_type,
-                "Ghi chú": request_info or "",
-            }
-            try:
-                created = await lark.create_record(
-                    boss["lark_base_token"], boss["lark_table_people"], fields,
-                )
-                rec_id = created.get("record_id", "")
-            except Exception:
-                logger.warning(
-                    "lark People upsert failed for chat_id=%s", chat_id, exc_info=True,
-                )
+
+            # Stub-Person fallback: a boss-created Person row with no Chat ID
+            # and the same name is the "stub" we should link into, not
+            # duplicate. Match on normalized name so typos / diacritics
+            # don't split records.
+            from src.services.people_service import _normalize_name
+            target_norm = _normalize_name(name)
+            stub = None
+            if target_norm:
+                try:
+                    existing = await lark.search_records(
+                        boss["lark_base_token"], boss["lark_table_people"],
+                    )
+                except Exception:
+                    existing = []
+                for r in existing:
+                    if r.get("Chat ID"):
+                        continue
+                    if _normalize_name(r.get("Tên", "")) == target_norm:
+                        stub = r
+                        break
+
+            if stub and stub.get("record_id"):
+                try:
+                    await lark.update_record(
+                        boss["lark_base_token"], boss["lark_table_people"],
+                        stub["record_id"], {"Chat ID": chat_id_for_lark},
+                    )
+                    rec_id = stub["record_id"]
+                except Exception:
+                    logger.warning(
+                        "lark stub link failed for %s", name, exc_info=True,
+                    )
+            else:
+                fields = {
+                    "Tên": name,
+                    "Chat ID": chat_id_for_lark,
+                    "Type": person_type,
+                    "Ghi chú": request_info or "",
+                }
+                try:
+                    created = await lark.create_record(
+                        boss["lark_base_token"], boss["lark_table_people"], fields,
+                    )
+                    rec_id = created.get("record_id", "")
+                except Exception:
+                    logger.warning(
+                        "lark People upsert failed for chat_id=%s", chat_id, exc_info=True,
+                    )
 
     await repo.upsert(
         str(chat_id), str(boss_chat_id), person_type, name,

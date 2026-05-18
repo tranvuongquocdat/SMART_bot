@@ -20,7 +20,7 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Tên task ngắn gọn, tóm tắt nội dung việc cần làm"},
-                    "assignee": {"type": "string", "description": "Tên người được giao (dùng đúng tên trong danh sách nhân sự)"},
+                    "assignee": {"type": "string", "description": "Tên người được giao. Nếu chưa có trong Lark, gọi add_people thêm trước (Chat ID không bắt buộc)."},
                     "deadline": {"type": "string", "description": "Deadline dạng YYYY-MM-DD. Nếu sếp nói 'thứ 6', 'tuần sau', tự quy đổi ra ngày cụ thể"},
                     "priority": {
                         "type": "string",
@@ -128,7 +128,7 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Tên đầy đủ của người cần thêm"},
-                    "chat_id": {"type": "integer", "description": "Chat ID Telegram (nếu biết). Thường chưa có, bỏ trống"},
+                    "chat_id": {"type": "integer", "description": "Chat ID kênh đã DM bot (Telegram/Zalo/...). Khi sếp thêm thủ công thường chưa có, bỏ trống."},
                     "username": {"type": "string", "description": "Username Telegram (không có @ phía trước)"},
                     "group": {"type": "string", "description": "Nhóm / phòng ban, ví dụ: Tech, Media, Sale, Marketing"},
                     "person_type": {
@@ -524,7 +524,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "create_reminder",
-            "description": "Tạo nhắc nhở vào một thời điểm cụ thể. Khi giờ tới, bot tự gửi tin cho người nhận (DM riêng). Mỗi call tạo 1 reminder cho 1 đích (1 người hoặc sếp nếu target trống). Cần nhắc NHIỀU NGƯỜI (vd 'nhắc cả nhóm', 'nhắc team'): gọi tool này NHIỀU LẦN trong 1 turn — mỗi người một call, cùng `remind_at`. Trước khi gọi, dùng list_people / check_team_engagement để lấy danh sách tên có Chat ID.",
+            "description": "Tạo nhắc nhở vào một thời điểm cụ thể. Khi giờ tới, bot gửi cho người nhận (DM riêng nếu có Chat ID; fallback group nguồn hoặc báo sếp nếu chưa). Mỗi call tạo 1 reminder cho 1 đích (1 người hoặc sếp nếu target trống). Cần nhắc NHIỀU NGƯỜI: gọi tool này NHIỀU LẦN trong 1 turn — mỗi người một call, cùng `remind_at`. Nếu target chưa có Person row, gọi add_people trước (Chat ID không bắt buộc).",
             "parameters": {
                 "type": "object",
                 "properties": {

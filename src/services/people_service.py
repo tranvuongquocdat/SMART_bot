@@ -2,6 +2,7 @@
 People CRUD tools + effort check.
 All functions take a ChatContext as first argument.
 """
+import unicodedata
 from datetime import datetime
 
 from src import db
@@ -14,6 +15,16 @@ from src.utils.dates import date_to_ms
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _normalize_name(s: str) -> str:
+    # Lowercase + strip combining marks + collapse whitespace so fuzzy match
+    # treats "Tan", "TÂN", " tân " as the same query and avoids duplicate stubs.
+    if not s:
+        return ""
+    nfkd = unicodedata.normalize("NFKD", str(s))
+    stripped = "".join(c for c in nfkd if not unicodedata.combining(c))
+    return " ".join(stripped.lower().split())
+
 
 def _fmt_person(r: dict) -> str:
     parts = [f"Tên: {r.get('Tên', '')}"]
@@ -134,10 +145,11 @@ async def get_person(
             records = await lark.search_records(ws["lark_base_token"], ws["lark_table_people"])
         except Exception:
             continue
+        q_norm = _normalize_name(query)
         for r in records:
-            full = r.get("Tên", "")
-            nick = r.get("Tên gọi", "")
-            if query.lower() in full.lower() or (nick and query.lower() in nick.lower()):
+            full = _normalize_name(r.get("Tên", ""))
+            nick = _normalize_name(r.get("Tên gọi", ""))
+            if q_norm and (q_norm in full or (nick and q_norm in nick)):
                 all_matches.append((r, ws))
 
     if not all_matches:
