@@ -21,6 +21,7 @@ from src.infrastructure import cohere_client as cohere
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
 from src.infrastructure import openai_client
+from src.repositories.boss_repo import BossRepo
 
 
 @asynccontextmanager
@@ -159,7 +160,7 @@ async def debug_test_message(request: Request):
         raise HTTPException(400, "either 'text' or 'attach' required")
 
     if not boss_id:
-        bosses = await db.get_all_bosses()
+        bosses = await (await db._repo("boss", BossRepo)).list_all()
         if not bosses:
             raise HTTPException(404, "no bosses in DB; onboard one first")
         boss_id = bosses[0]["chat_id"]

@@ -10,6 +10,7 @@ import logging
 from datetime import date
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
 from src.agent.llm_for_ctx import get_default_llm
@@ -165,7 +166,7 @@ async def is_group_onboarding(group_chat_id: str) -> bool:
 async def start(group_chat_id: str, sender_id: str) -> None:
     """Entry point — begin workspace selection. Admin rights are optional; if the bot
     lacks them, admin-only operations will degrade gracefully at the channel layer."""
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
     if not bosses:
         await _send_and_save(
             group_chat_id,

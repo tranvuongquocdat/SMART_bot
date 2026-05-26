@@ -14,6 +14,7 @@ and falls back to inferring provider by shape only when the contact is
 totally unknown.
 """
 from __future__ import annotations
+from src.repositories.boss_repo import BossRepo
 
 
 def infer_provider(chat_id: str) -> str:
@@ -62,7 +63,7 @@ async def is_target_on_boss_channel(
     from src import db
     if not target_internal_id:
         return False
-    boss = await db.get_boss(str(boss_chat_id))
+    boss = await (await db._repo("boss", BossRepo)).get(str(boss_chat_id))
     boss_ch = (boss or {}).get("primary_channel") or ""
     if not boss_ch:
         return True

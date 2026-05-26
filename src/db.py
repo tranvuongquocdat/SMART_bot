@@ -430,48 +430,7 @@ def _ephemeral_repo(db_or_none, cls):
     return None
 
 
-# ---------------------------------------------------------------------------
-# bosses
-# ---------------------------------------------------------------------------
-
-async def get_boss(db_or_chat_id, chat_id_or_path=None) -> Optional[dict]:
-    """get_boss(chat_id) or get_boss(db, chat_id) — both calling styles supported."""
-    if isinstance(db_or_chat_id, aiosqlite.Connection):
-        chat_id = chat_id_or_path
-        repo = BossRepo(db_or_chat_id)
-    else:
-        chat_id = db_or_chat_id
-        repo = await _repo("boss", BossRepo)
-    return await repo.get(chat_id)
-
-
-async def create_boss(
-    chat_id: str,
-    name: str,
-    company: str = "",
-    lark_base_token: Optional[str] = None,
-    lark_table_people: Optional[str] = None,
-    lark_table_tasks: Optional[str] = None,
-    lark_table_projects: Optional[str] = None,
-    lark_table_ideas: Optional[str] = None,
-    lark_table_reminders: Optional[str] = None,
-    lark_table_notes: Optional[str] = None,
-    email: str = "",
-    db_path: str = "data/history.db",
-) -> None:
-    repo: BossRepo = await _repo("boss", BossRepo)
-    await repo.create(
-        chat_id=chat_id, name=name, company=company,
-        lark_base_token=lark_base_token, lark_table_people=lark_table_people,
-        lark_table_tasks=lark_table_tasks, lark_table_projects=lark_table_projects,
-        lark_table_ideas=lark_table_ideas, lark_table_reminders=lark_table_reminders,
-        lark_table_notes=lark_table_notes, email=email,
-    )
-
-
-async def get_all_bosses(db_path: str = "data/history.db") -> list[dict]:
-    repo: BossRepo = await _repo("boss", BossRepo)
-    return await repo.list_all()
+# bosses table — see src/repositories/boss_repo.BossRepo
 
 
 # ---------------------------------------------------------------------------
@@ -546,34 +505,9 @@ async def lookup_conversation_by_external_id(
     return await repo.lookup_conversation_by_external_id(external_id)
 
 
-# ---------------------------------------------------------------------------
-# legacy people_map wrappers (delegate to memberships)
-# ---------------------------------------------------------------------------
-
-async def get_person(chat_id: str, db_path: str = "data/history.db") -> Optional[dict]:
-    repo: MembershipRepo = await _repo("membership", MembershipRepo)
-    return await repo.get_person_legacy(chat_id)
-
-
-async def add_person(
-    chat_id: str, boss_chat_id: str, person_type: str, name: str = "",
-    db_path: str = "data/history.db",
-) -> None:
-    """Legacy facade. New code must call `services.membership_service.activate()` directly."""
-    from src.services import membership_service
-    await membership_service.activate(
-        chat_id=str(chat_id),
-        boss_chat_id=str(boss_chat_id),
-        person_type=person_type,
-        name=name or "",
-        source="boss_add",
-    )
-
-
-async def delete_person(chat_id: str, db_path: str = "data/history.db") -> None:
-    repo: MembershipRepo = await _repo("membership", MembershipRepo)
-    await repo.delete_person_legacy(chat_id)
-
+# legacy people_map wrappers — see MembershipRepo.get_person_legacy /
+# .delete_person_legacy. add_person is removed; new code calls
+# services.membership_service.activate() directly.
 
 # ---------------------------------------------------------------------------
 # group_map
@@ -637,68 +571,8 @@ async def update_note(
     return await repo.upsert(boss_chat_id, note_type, ref_id, content)
 
 
-# ---------------------------------------------------------------------------
-# reminders
-# ---------------------------------------------------------------------------
-
-async def create_reminder(
-    boss_chat_id: str, content: str, remind_at: datetime,
-    target_chat_id: Optional[str] = None, target_name: str = "",
-    source_chat_id: Optional[str] = None,
-    db_path: str = "data/history.db",
-) -> int:
-    repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    return await repo.create(
-        boss_chat_id, content, remind_at, target_chat_id, target_name,
-        source_chat_id,
-    )
-
-
-async def get_due_reminders(
-    now: Optional[datetime] = None, db_path: str = "data/history.db",
-) -> list[dict]:
-    repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    return await repo.get_due(now)
-
-
-async def mark_reminder_done(reminder_id: int, db_path: str = "data/history.db") -> None:
-    repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    await repo.mark_done(reminder_id)
-
-
-async def list_reminders(
-    boss_chat_id: str, status: str = "pending", limit: int = 50,
-    db_path: str = "data/history.db",
-) -> list[dict]:
-    repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    return await repo.list_for_boss(boss_chat_id, status, limit)
-
-
-async def update_reminder(
-    reminder_id: int, boss_chat_id: str, *,
-    content: Optional[str] = None, remind_at: Optional[datetime] = None,
-    update_target: bool = False, target_chat_id: Optional[str] = None,
-    target_name: str = "", db_path: str = "data/history.db",
-) -> bool:
-    repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    return await repo.update(
-        reminder_id, boss_chat_id,
-        content=content, remind_at=remind_at, update_target=update_target,
-        target_chat_id=target_chat_id, target_name=target_name,
-    )
-
-
-async def delete_reminder(
-    reminder_id: int, boss_chat_id: str, db_path: str = "data/history.db",
-) -> bool:
-    repo: ReminderRepo = await _repo("reminder", ReminderRepo)
-    return await repo.delete(reminder_id, boss_chat_id)
-
-
-async def sync_reminder_from_lark(db, sqlite_id: int, content: str, status: str):
-    repo = _ephemeral_repo(db, ReminderRepo) or await _repo("reminder", ReminderRepo)
-    await repo.sync_from_lark(sqlite_id, content, status)
-
+# reminders table — see src/repositories/reminder_repo.ReminderRepo
+# (Use ReminderRepo(conn).sync_from_lark(...) when a connection is in scope.)
 
 # ---------------------------------------------------------------------------
 # token_usage
@@ -752,42 +626,7 @@ async def clear_onboarding_state(chat_id: str) -> None:
     await repo.clear_onboarding_state(chat_id)
 
 
-# ---------------------------------------------------------------------------
-# memberships
-# ---------------------------------------------------------------------------
-
-async def get_memberships(user_id_or_db, user_id_str=None) -> list[dict]:
-    """get_memberships(user_id_str) or get_memberships(db, user_id_str)."""
-    if isinstance(user_id_or_db, aiosqlite.Connection):
-        uid = user_id_str
-        repo = MembershipRepo(user_id_or_db)
-    else:
-        uid = user_id_or_db
-        repo = await _repo("membership", MembershipRepo)
-    return await repo.list_for_user(uid)
-
-
-async def get_all_memberships_for_boss(boss_chat_id: str) -> list[dict]:
-    repo: MembershipRepo = await _repo("membership", MembershipRepo)
-    return await repo.list_for_boss(boss_chat_id)
-
-
-async def get_membership(db, chat_id: str, boss_chat_id: str) -> dict | None:
-    repo = _ephemeral_repo(db, MembershipRepo) or await _repo("membership", MembershipRepo)
-    return await repo.get(chat_id, boss_chat_id)
-
-
-async def upsert_membership(db, chat_id: str, boss_chat_id: str, person_type: str,
-                             name: str, status: str = "active",
-                             request_info: str = None, lark_record_id: str = None):
-    repo = _ephemeral_repo(db, MembershipRepo) or await _repo("membership", MembershipRepo)
-    await repo.upsert(chat_id, boss_chat_id, person_type, name, status, request_info, lark_record_id)
-
-
-async def delete_membership(db, chat_id: str, boss_chat_id: str):
-    repo = _ephemeral_repo(db, MembershipRepo) or await _repo("membership", MembershipRepo)
-    await repo.delete(chat_id, boss_chat_id)
-
+# memberships table — see src/repositories/membership_repo.MembershipRepo
 
 # ---------------------------------------------------------------------------
 # pending_approvals + task_notifications

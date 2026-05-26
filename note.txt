@@ -10,3 +10,10 @@
 - quan trọng: mở rộng tính năng đọc được link, link có thể là file, youtube, tiktok, báo,...
 - có web search web fetch mak lại reject bảo ko đọc được link, kỳ lạ
 - vẫn nhắc lại, flow hiện tại quá cứng nhắc, user dùng rất tù, bot bị ngu đi vì bị limit
+
+
+
+tinh chỉnh xíu:
+- nói chuyện lịch sự, mặc định là tiếng việt cả cho tới khi khách hàng muốn đổi
+- bot trả lời hơi dài nhất là phân phân tích video hay phân tích các thứ, prompt để bot trả lời ngắn gonj súc tích đúng trọng tâm hơn
+- văn phong chưa giống thư ký lắm, vẫn khá giống bot

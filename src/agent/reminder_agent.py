@@ -15,6 +15,8 @@ from src.config import Settings
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
 from src.agent.llm_for_ctx import get_llm_for_ctx
+from src.repositories.boss_repo import BossRepo
+from src.repositories.reminder_repo import ReminderRepo
 
 logger = logging.getLogger("agent.reminder")
 
@@ -91,7 +93,7 @@ async def send_reminder(reminder: dict, settings: Settings) -> None:
         personal_note_row = await db.get_note(boss_chat_id, "personal", str(boss_chat_id))
         personal_note = personal_note_row["content"] if personal_note_row else ""
 
-        boss = await db.get_boss(boss_chat_id)
+        boss = await (await db._repo("boss", BossRepo)).get(boss_chat_id)
         company = boss.get("company", "") if boss else ""
         company_info = f" — {company}" if company else ""
         language = boss.get("language", "vi") if boss else "vi"
@@ -151,7 +153,7 @@ async def send_reminder(reminder: dict, settings: Settings) -> None:
     # Main delivery succeeded → mark done immediately so any failure in the
     # best-effort follow-ups (CC boss, source-group notify, outbound log)
     # cannot leave status=pending and trigger a re-fire next minute.
-    await db.mark_reminder_done(reminder["id"])
+    await (await db._repo("reminder", ReminderRepo)).mark_done(reminder["id"])
     if dest_chat_id == target_id:
         try:
             await db.log_outbound_dm(

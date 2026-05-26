@@ -11,10 +11,12 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.config import Settings
 from src.context import ChatContext
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
+from src.repositories.reminder_repo import ReminderRepo
 
 logger = logging.getLogger("scheduler")
 
@@ -48,7 +50,7 @@ def _make_ctx(boss: dict) -> ChatContext:
 async def _morning_review():
     """8h sang: Advisor chay smart daily review cho moi sep."""
     from src.advisor import run_daily_review
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
     for boss in bosses:
         try:
             ctx = _make_ctx(boss)
@@ -62,7 +64,7 @@ async def _morning_review():
 async def _evening_summary():
     """17h: tong ket ngay."""
     from src.services.summary_service import get_summary
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
     for boss in bosses:
         try:
             ctx = _make_ctx(boss)
@@ -113,7 +115,7 @@ async def _check_deadlines():
     """9h30: Check deadline sap toi -> nhan nguoi duoc giao."""
     from datetime import date, datetime, timedelta
 
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
     for boss in bosses:
         try:
             ctx = _make_ctx(boss)
@@ -220,7 +222,7 @@ async def _check_reminders():
     """
     from src import agent  # noqa: PLC0415
 
-    reminders = await db.get_due_reminders()
+    reminders = await (await db._repo("reminder", ReminderRepo)).get_due()
     for r in reminders:
         try:
             # send_reminder owns the SQLite mark-done transition (right
@@ -229,7 +231,7 @@ async def _check_reminders():
             await agent.send_reminder(r, _settings)
             lark_rec_id = r.get("lark_record_id")
             if lark_rec_id:
-                boss = await db.get_boss(r["boss_chat_id"])
+                boss = await (await db._repo("boss", BossRepo)).get(r["boss_chat_id"])
                 tbl = (boss or {}).get("lark_table_reminders", "")
                 base = (boss or {}).get("lark_base_token", "")
                 if tbl and base:
@@ -254,7 +256,7 @@ async def _check_deadline_push():
     h24_ms = now_ms + 24 * 3600 * 1000
     h2_ms  = now_ms + 2  * 3600 * 1000
 
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
     for boss in bosses:
         try:
             tasks = await lark.search_records(boss["lark_base_token"], boss["lark_table_tasks"])
@@ -317,7 +319,7 @@ async def _after_deadline_check():
     from datetime import datetime, timezone
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
 
     for boss in bosses:
         try:
@@ -454,7 +456,7 @@ async def _sync_lark_to_sqlite():
     Reminders block runs every call (every 30s). Tasks status sync + Notes block
     run only on the every-5-min gate.
     """
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
     now = datetime.utcnow()
     do_full_sync = (now.minute % 5 == 0 and now.second < 35)
     settings_tz = ZoneInfo(_settings.timezone) if _settings else ZoneInfo("Asia/Ho_Chi_Minh")
@@ -585,7 +587,7 @@ async def _reverse_sync_reminders_for_boss(boss: dict, settings_tz: ZoneInfo) ->
             )
             continue
         remind_dt = naive.replace(tzinfo=settings_tz).astimezone(ZoneInfo("UTC")).replace(tzinfo=None)
-        new_id = await db.create_reminder(
+        new_id = await (await db._repo("reminder", ReminderRepo)).create(
             boss_chat_id=boss_chat_id,
             content=rec.get("Nội dung", ""),
             remind_at=remind_dt,
@@ -737,7 +739,7 @@ async def _run_dynamic_reviews():
 
             owner_id = review["owner_id"]
             if owner_id not in bosses_cache:
-                bosses_cache[owner_id] = await db.get_boss(owner_id)
+                bosses_cache[owner_id] = await (await db._repo("boss", BossRepo)).get(owner_id)
             boss = bosses_cache[owner_id]
             if not boss:
                 continue
@@ -812,7 +814,7 @@ async def _run_dynamic_reviews():
 
 async def _seed_default_reviews():
     """One-time seed: add default morning/evening reviews for bosses without any review config."""
-    bosses = await db.get_all_bosses()
+    bosses = await (await db._repo("boss", BossRepo)).list_all()
     for boss in bosses:
         existing = await db.list_scheduled_reviews(db._db, str(boss["chat_id"]))
         if not existing:

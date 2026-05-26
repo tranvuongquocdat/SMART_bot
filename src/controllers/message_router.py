@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.channels.base import IncomingMessage
 from src.container import AppContainer
 
@@ -88,7 +89,7 @@ class MessageRouter:
         sender_id = incoming.sender_id
         if not sender_id:
             return False
-        boss = await db.get_boss(sender_id)
+        boss = await (await db._repo("boss", BossRepo)).get(sender_id)
         if boss is None:
             return False
         status = (boss.get("status") or "active").lower()

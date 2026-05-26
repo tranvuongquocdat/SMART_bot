@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 from src import db as db_mod
 from src.context import ChatContext
+from src.repositories.boss_repo import BossRepo
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
@@ -330,7 +331,7 @@ async def update_task(
                 f"{k}: {ms_to_date(v) if k == 'Deadline' else v}"
                 for k, v in fields.items()
             )
-            boss = await db_mod.get_boss(str(ctx.boss_chat_id))
+            boss = await BossRepo(await db_mod.get_db()).get(str(ctx.boss_chat_id))
             if boss:
                 await telegram.send(
                     ctx.boss_chat_id,

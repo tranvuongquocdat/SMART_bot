@@ -5,18 +5,20 @@ Replaces keyword-based join state machine in agent.py and onboarding.py.
 import logging
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.context import ChatContext
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
 from src.services import membership_service
+from src.repositories.membership_repo import MembershipRepo
 
 logger = logging.getLogger("tools.join")
 
 
 async def list_available_workspaces(ctx: ChatContext) -> str:
     """Returns workspaces this user can join (not already an active member)."""
-    all_bosses = await db.get_all_bosses()
-    memberships = await db.get_memberships(str(ctx.sender_chat_id))
+    all_bosses = await (await db._repo("boss", BossRepo)).list_all()
+    memberships = await (await db._repo("membership", MembershipRepo)).list_for_user(str(ctx.sender_chat_id))
     active_boss_ids = {m["boss_chat_id"] for m in memberships}
     # Also exclude own workspace
     active_boss_ids.add(str(ctx.sender_chat_id))
@@ -35,7 +37,7 @@ async def request_join(ctx: ChatContext, target_boss_id: str, role: str, intro: 
     """Creates a pending membership and notifies the target boss."""
     _db = await db.get_db()
 
-    await db.upsert_membership(
+    await (await db._repo("membership", MembershipRepo)).upsert(
         _db,
         chat_id=str(ctx.sender_chat_id),
         boss_chat_id=str(target_boss_id),
@@ -45,7 +47,7 @@ async def request_join(ctx: ChatContext, target_boss_id: str, role: str, intro: 
         request_info=intro,
     )
 
-    boss = await db.get_boss(target_boss_id)
+    boss = await (await db._repo("boss", BossRepo)).get(target_boss_id)
     if not boss:
         return f"Could not find workspace for boss_id {target_boss_id}."
 
@@ -67,7 +69,7 @@ async def request_join(ctx: ChatContext, target_boss_id: str, role: str, intro: 
 async def approve_join(ctx: ChatContext, membership_chat_id: str, role: str = None) -> str:
     """Approve a join request. Routes the write through membership_service.activate()."""
     _db = await db.get_db()
-    membership = await db.get_membership(_db, str(membership_chat_id), str(ctx.boss_chat_id))
+    membership = await MembershipRepo(_db).get(str(membership_chat_id), str(ctx.boss_chat_id))
     if not membership or membership["status"] != "pending":
         return f"No pending join request found for chat_id={membership_chat_id}."
 
@@ -103,11 +105,11 @@ async def approve_join(ctx: ChatContext, membership_chat_id: str, role: str = No
 async def reject_join(ctx: ChatContext, membership_chat_id: str) -> str:
     """Reject a join request and notify the requester."""
     _db = await db.get_db()
-    membership = await db.get_membership(_db, str(membership_chat_id), str(ctx.boss_chat_id))
+    membership = await MembershipRepo(_db).get(str(membership_chat_id), str(ctx.boss_chat_id))
     if not membership or membership["status"] != "pending":
         return f"No pending join request found for chat_id={membership_chat_id}."
 
-    await db.upsert_membership(
+    await (await db._repo("membership", MembershipRepo)).upsert(
         _db,
         chat_id=str(membership_chat_id),
         boss_chat_id=str(ctx.boss_chat_id),

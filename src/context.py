@@ -1,6 +1,8 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
 from src import db as db_mod
+from src.repositories.boss_repo import BossRepo
+from src.repositories.membership_repo import MembershipRepo
 
 _db = None
 
@@ -43,10 +45,10 @@ async def resolve(chat_id: str, sender_id: str, is_group: bool,
         group = await db_mod.get_group(_db, chat_id)
         if not group:
             return None
-        boss = await db_mod.get_boss(_db, group["boss_chat_id"])
+        boss = await BossRepo(_db).get(group["boss_chat_id"])
         if not boss:
             return None
-        membership = await db_mod.get_membership(_db, str(sender_id), str(boss["chat_id"]))
+        membership = await MembershipRepo(_db).get(str(sender_id), str(boss["chat_id"]))
         sender_type = membership["person_type"] if membership else "unknown"
         sender_name = membership["name"] if membership else str(sender_id)
         return _build_ctx(
@@ -61,10 +63,10 @@ async def resolve(chat_id: str, sender_id: str, is_group: bool,
         )
 
     # --- Direct message ---
-    memberships = await db_mod.get_memberships(_db, str(sender_id))
+    memberships = await MembershipRepo(_db).list_for_user(str(sender_id))
 
     # If sender is a boss, ensure their own workspace is in the list
-    boss_self = await db_mod.get_boss(_db, str(sender_id))
+    boss_self = await BossRepo(_db).get(str(sender_id))
     if boss_self and str(boss_self.get("chat_id", "")) == str(sender_id):
         self_m = {
             "chat_id": str(sender_id),
@@ -84,7 +86,7 @@ async def resolve(chat_id: str, sender_id: str, is_group: bool,
         m = next((m for m in memberships if m["boss_chat_id"] == str(preferred_boss_id)), None)
         if not m:
             return None
-        boss = await db_mod.get_boss(_db, m["boss_chat_id"])
+        boss = await BossRepo(_db).get(m["boss_chat_id"])
         if not boss:
             return None
         return _build_ctx(boss, sender_id, m["name"], m["person_type"],
@@ -93,7 +95,7 @@ async def resolve(chat_id: str, sender_id: str, is_group: bool,
     # Single workspace: use directly
     if len(memberships) == 1:
         m = memberships[0]
-        boss = await db_mod.get_boss(_db, m["boss_chat_id"])
+        boss = await BossRepo(_db).get(m["boss_chat_id"])
         if not boss:
             return None
         return _build_ctx(boss, sender_id, m["name"], m["person_type"],
@@ -101,7 +103,7 @@ async def resolve(chat_id: str, sender_id: str, is_group: bool,
 
     # Multiple workspaces: prefer boss's own workspace, else first
     primary = next((m for m in memberships if m["person_type"] == "boss"), memberships[0])
-    boss = await db_mod.get_boss(_db, primary["boss_chat_id"])
+    boss = await BossRepo(_db).get(primary["boss_chat_id"])
     if not boss:
         return None
     return _build_ctx(boss, sender_id, primary["name"], primary["person_type"],

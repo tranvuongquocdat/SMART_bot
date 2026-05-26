@@ -96,7 +96,7 @@ async def test_create_reminder_lark_failure_keeps_db_row(in_memory_db, monkeypat
 
 
 async def test_update_reminder_syncs_lark(in_memory_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(in_memory_db).create(
         boss_chat_id="b1", content="old",
         remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
     )
@@ -121,7 +121,7 @@ async def test_update_reminder_syncs_lark(in_memory_db, monkeypatch):
 
 
 async def test_update_reminder_lark_fail_returns_graceful_message(in_memory_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(in_memory_db).create(
         boss_chat_id="b1", content="old",
         remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
     )
@@ -137,7 +137,7 @@ async def test_update_reminder_lark_fail_returns_graceful_message(in_memory_db, 
 
 
 async def test_delete_reminder_lark_first(in_memory_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(in_memory_db).create(
         boss_chat_id="b1", content="x",
         remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
     )
@@ -164,7 +164,7 @@ async def test_delete_reminder_lark_first(in_memory_db, monkeypatch):
 
 
 async def test_delete_reminder_lark_fail_keeps_db(in_memory_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(in_memory_db).create(
         boss_chat_id="b1", content="x",
         remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
     )
@@ -187,7 +187,7 @@ async def test_delete_reminder_lark_fail_keeps_db(in_memory_db, monkeypatch):
 
 
 async def test_delete_reminder_no_lark_record_id_skips_lark_call(in_memory_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(in_memory_db).create(
         boss_chat_id="b1", content="x",
         remind_at=__import__("datetime").datetime(2026, 5, 4, 10),
     )

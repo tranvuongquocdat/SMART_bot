@@ -8,6 +8,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.config import Settings
 from src.context import ChatContext
 from src.agent.llm_for_ctx import get_llm_for_ctx
@@ -150,7 +151,7 @@ async def run_advisor(
     settings: Settings,
 ) -> str:
     """Strategy analysis triggered when CEO asks a strategic question."""
-    boss = await db.get_boss(ctx.boss_chat_id)
+    boss = await (await db._repo("boss", BossRepo)).get(ctx.boss_chat_id)
     company = boss.get("company", "") if boss else ""
     company_info = f" — {company}" if company else ""
 
@@ -177,7 +178,7 @@ async def run_daily_review(
     custom_prompt: str = "",
 ) -> str:
     """Smart morning briefing triggered by cron. Supports custom prompt override."""
-    boss = await db.get_boss(ctx.boss_chat_id)
+    boss = await (await db._repo("boss", BossRepo)).get(ctx.boss_chat_id)
     company = boss.get("company", "") if boss else ""
     company_info = f" ({company})" if company else ""
 

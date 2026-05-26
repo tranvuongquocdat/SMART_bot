@@ -8,6 +8,7 @@ import logging
 from typing import Literal, Optional
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
 from src.repositories.membership_repo import MembershipRepo
@@ -42,7 +43,7 @@ async def activate(
 
     rec_id = lark_record_id
     if not rec_id:
-        boss = await db.get_boss(str(boss_chat_id))
+        boss = await (await db._repo("boss", BossRepo)).get(str(boss_chat_id))
         if boss and boss.get("lark_base_token") and boss.get("lark_table_people"):
             ext = await db.lookup_external_for_person(chat_id)
             chat_id_for_lark = int(ext[1]) if ext and ext[1].isdigit() else 0
@@ -102,7 +103,7 @@ async def activate(
     )
 
     if was_pending:
-        boss = await db.get_boss(str(boss_chat_id))
+        boss = await (await db._repo("boss", BossRepo)).get(str(boss_chat_id))
         company = (boss or {}).get("company") or (boss or {}).get("name", "the workspace")
         try:
             await telegram.send(

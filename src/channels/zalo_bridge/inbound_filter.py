@@ -25,6 +25,7 @@ Zalo-only logic. Telegram has its own clean separation (bot token).
 from __future__ import annotations
 
 import logging
+from src.repositories.boss_repo import BossRepo
 
 logger = logging.getLogger("channels.zalo.filter")
 
@@ -70,10 +71,10 @@ class ZaloInboundFilter:
         #   • Zalo onboarding: boss.chat_id == DM conversation.internal_id
         # Check both before declaring "not a boss".
         person_id = await db.lookup_person_by_external("zalo", zalo_uid)
-        if person_id and (await db.get_boss(person_id)) is not None:
+        if person_id and (await (await db._repo("boss", BossRepo)).get(person_id)) is not None:
             return True
         conv_id = await db.lookup_conversation_by_external("zalo", zalo_uid)
-        if conv_id and (await db.get_boss(conv_id)) is not None:
+        if conv_id and (await (await db._repo("boss", BossRepo)).get(conv_id)) is not None:
             return True
         return False
 

@@ -49,7 +49,7 @@ async def test_activate_links_existing_stub_row_by_name(in_memory_db, monkeypatc
         "src.services.membership_service.lark.create_record", create_mock,
     )
     monkeypatch.setattr(
-        "src.services.membership_service.db.get_boss",
+        "src.repositories.boss_repo.BossRepo.get",
         AsyncMock(return_value=_BOSS_ROW),
     )
     monkeypatch.setattr(
@@ -99,7 +99,7 @@ async def test_activate_creates_new_row_when_no_stub_match(
         "src.services.membership_service.lark.create_record", create_mock,
     )
     monkeypatch.setattr(
-        "src.services.membership_service.db.get_boss",
+        "src.repositories.boss_repo.BossRepo.get",
         AsyncMock(return_value=_BOSS_ROW),
     )
     monkeypatch.setattr(

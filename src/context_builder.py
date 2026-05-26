@@ -7,6 +7,8 @@ import logging
 from datetime import datetime, timezone
 
 from src import db
+from src.repositories.boss_repo import BossRepo
+from src.repositories.membership_repo import MembershipRepo
 
 logger = logging.getLogger("context_builder")
 
@@ -23,10 +25,10 @@ async def build(sender_id: str, chat_id: str) -> dict:
         "language": str,
     }
     """
-    memberships = await db.get_memberships(str(sender_id))
+    memberships = await (await db._repo("membership", MembershipRepo)).list_for_user(str(sender_id))
 
     # Include boss's own workspace if they are a boss
-    boss_self = await db.get_boss(sender_id)
+    boss_self = await (await db._repo("boss", BossRepo)).get(sender_id)
     if boss_self and not any(m["boss_chat_id"] == str(sender_id) for m in memberships):
         memberships = [{
             "chat_id": str(sender_id),
@@ -39,7 +41,7 @@ async def build(sender_id: str, chat_id: str) -> dict:
 
     resolved = []
     for m in memberships:
-        boss = await db.get_boss(m["boss_chat_id"])
+        boss = await (await db._repo("boss", BossRepo)).get(m["boss_chat_id"])
         if boss:
             resolved.append({
                 "workspace": boss.get("company", str(m["boss_chat_id"])),
@@ -153,7 +155,7 @@ async def build_group_context(group_chat_id: str, boss_chat_id: str) -> dict:
     # Fetch project info from Lark if linked
     project = None
     if project_id:
-        boss = await db.get_boss(boss_chat_id)
+        boss = await (await db._repo("boss", BossRepo)).get(boss_chat_id)
         if boss:
             try:
                 table = boss.get("lark_table_projects", "")
@@ -190,7 +192,7 @@ async def build_group_context(group_chat_id: str, boss_chat_id: str) -> dict:
         if m and m["name"]:
             recent_participants.append(m["name"])
         else:
-            boss_row = await db.get_boss(sid)
+            boss_row = await (await db._repo("boss", BossRepo)).get(sid)
             if boss_row:
                 recent_participants.append(boss_row["name"])
 

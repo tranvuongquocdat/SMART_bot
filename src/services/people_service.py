@@ -10,6 +10,7 @@ from src.context import ChatContext
 from src.infrastructure import lark_client as lark
 from src.services import membership_service
 from src.utils.dates import date_to_ms
+from src.repositories.membership_repo import MembershipRepo
 
 
 # ---------------------------------------------------------------------------
@@ -308,7 +309,7 @@ async def delete_people(ctx: ChatContext, search_name: str) -> str:
                 from src.utils.chat_id_resolver import resolve_lark_chat_id
                 internal_id = await resolve_lark_chat_id(chat_id_val)
                 if internal_id:
-                    await db.delete_person(internal_id)
+                    await (await db._repo("membership", MembershipRepo)).delete_person_legacy(internal_id)
             except Exception:
                 pass
         deleted += 1

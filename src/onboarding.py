@@ -14,6 +14,7 @@ import json
 import logging
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.infrastructure import qdrant_client as qdrant
 from src.infrastructure import lark_client as lark
 from src.agent.llm_for_ctx import get_default_llm
@@ -26,6 +27,7 @@ from src.agent.onboarding_agent import (
 )
 from src.channels import telegram_singleton as telegram
 from src.channels import telegram_singleton as tg
+from src.repositories.membership_repo import MembershipRepo
 
 logger = logging.getLogger("onboarding")
 
@@ -119,7 +121,7 @@ async def _complete_boss(chat_id: str, state: dict) -> None:
         table_notes = ws["table_notes"]
         logger.info("[onboarding] Lark workspace provisioned for chat_id=%s", chat_id)
 
-        await db.create_boss(
+        await (await db._repo("boss", BossRepo)).create(
             chat_id, name, company,
             base_token, table_people, table_tasks, table_projects, table_ideas,
             lark_table_reminders=table_reminders,
@@ -244,7 +246,7 @@ async def _complete_member(chat_id: str, state: dict) -> None:
 
     stranger_channel = await _stranger_channel(chat_id)
     all_bosses = _filter_bosses_for_channel(
-        await db.get_all_bosses(), stranger_channel,
+        await (await db._repo("boss", BossRepo)).list_all(), stranger_channel,
     )
     boss = next(
         (b for b in all_bosses
@@ -269,7 +271,7 @@ async def _complete_member(chat_id: str, state: dict) -> None:
         _db = await db.get_db()
         # See _complete_boss for why we key the membership by sender_id, not chat_id.
         person_id = str(state.get("sender_id") or chat_id)
-        await db.upsert_membership(
+        await (await db._repo("membership", MembershipRepo)).upsert(
             _db,
             chat_id=person_id,
             boss_chat_id=str(boss["chat_id"]),
@@ -355,7 +357,7 @@ async def maybe_handle_reset_phrase(
 
     # Already onboarded somewhere → escape-hatch, not a destructive reset.
     if sender_id:
-        memberships = await db.get_memberships(str(sender_id))
+        memberships = await (await db._repo("membership", MembershipRepo)).list_for_user(str(sender_id))
         active = [m for m in (memberships or []) if (m.get("status") or "") == "active"]
         if active:
             roles = ", ".join({m.get("person_type", "?") for m in active})
@@ -405,7 +407,7 @@ async def handle_onboard_message(text: str, chat_id: str, sender_id: str | None 
     # pending row to the wrong workspace (the "lẫn lộn zalo và tele" bug).
     stranger_channel = await _stranger_channel(chat_id)
     all_bosses = _filter_bosses_for_channel(
-        await db.get_all_bosses(), stranger_channel,
+        await (await db._repo("boss", BossRepo)).list_all(), stranger_channel,
     )
     boss_list = "\n".join(
         f"chat_id={b['chat_id']}: {b['name']} — {b.get('company', '')}"
@@ -423,6 +425,29 @@ async def handle_onboard_message(text: str, chat_id: str, sender_id: str | None 
 
     user_type = state.get("type")
 
+    # Defensive: LLM sometimes marks confirmed=true while required fields are
+    # still null (collector was over-eager). Don't let that send the "đang
+    # tạo workspace" reply (which is a lie — provisioning won't fire). Reset
+    # confirmed and ask for the next missing field instead.
+    if state.get("confirmed") is True and not (
+        (user_type == "boss" and _boss_fields_complete(state))
+        or (user_type in ("member", "partner") and _member_fields_complete(state))
+    ):
+        state["confirmed"] = None
+        missing = next(
+            (f for f in ("type", "name", "company") if not state.get(f)),
+            None,
+        )
+        ask = {
+            "type":    "Anh/chị là sếp, nhân viên hay đối tác ạ?",
+            "name":    "Anh/chị tên gì ạ?",
+            "company": "Tên công ty là gì ạ?",
+        }
+        reply = ask.get(missing, reply) if missing else reply
+        await db.save_onboarding_state(chat_id, state)
+        await _send_and_save(chat_id, reply)
+        return
+
     # Boss path completion
     if user_type == "boss" and _boss_fields_complete(state):
         confirmed = state.get("confirmed")
@@ -431,10 +456,14 @@ async def handle_onboard_message(text: str, chat_id: str, sender_id: str | None 
             await _complete_boss(chat_id, state)
             return
         elif confirmed is False:
-            # User wants to restart — clear collected fields
+            # Genuine rejection — clear collected info but keep `type` so the
+            # next turn still knows we're on the boss path (prompt's new rule
+            # routes corrections to confirmed=null, so reaching here means
+            # user really said "huỷ / làm lại").
             await db.save_onboarding_state(chat_id, {
-                "type": None, "name": None, "company": None,
+                "type": "boss", "name": None, "company": None,
                 "language": None, "confirmed": None,
+                "sender_id": state.get("sender_id"),
             })
             await _send_and_save(chat_id, reply)
             return
@@ -473,7 +502,7 @@ async def handle_join_inquiry(chat_id: str) -> str:
     """Called when user wants to see available companies. Returns listing message."""
     stranger_channel = await _stranger_channel(chat_id)
     bosses = _filter_bosses_for_channel(
-        await db.get_all_bosses(), stranger_channel,
+        await (await db._repo("boss", BossRepo)).list_all(), stranger_channel,
     )
     if not bosses:
         return "Hiện chưa có tổ chức nào được đăng ký trên hệ thống."
@@ -530,7 +559,7 @@ async def handle_join_message(text: str, chat_id: str) -> str:
         name = name_result.get("name", "Không rõ")
 
         _db = await db.get_db()
-        await db.upsert_membership(
+        await (await db._repo("membership", MembershipRepo)).upsert(
             _db,
             chat_id=str(chat_id),
             boss_chat_id=str(boss["chat_id"]),

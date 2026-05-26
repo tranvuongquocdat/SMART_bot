@@ -13,6 +13,7 @@ indexed SELECT per LLM round — negligible vs the LLM call itself.
 from __future__ import annotations
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.config import Settings
 from src.context import ChatContext
 from src.infrastructure.llm.base import LLMClient
@@ -35,7 +36,7 @@ async def get_llm_for_ctx(ctx: ChatContext) -> LLMClient:
         settings = Settings()
     else:
         settings = _settings_cache
-    boss = await db.get_boss(ctx.boss_chat_id) or {}
+    boss = await (await db._repo("boss", BossRepo)).get(ctx.boss_chat_id) or {}
     return get_llm_client(boss, settings)
 
 

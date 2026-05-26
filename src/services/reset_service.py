@@ -8,6 +8,7 @@ import json
 import logging
 
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.context import ChatContext
 from src.channels import telegram_singleton as telegram
 from src.infrastructure import lark_client as lark
@@ -25,7 +26,7 @@ SEPARATOR = (
 
 async def initiate_reset(ctx: ChatContext) -> str:
     """Step 1: Start reset flow. Ask boss to type company name in UPPERCASE."""
-    boss = await db.get_boss(ctx.boss_chat_id)
+    boss = await (await db._repo("boss", BossRepo)).get(ctx.boss_chat_id)
     company = boss.get("company", str(ctx.boss_chat_id)) if boss else str(ctx.boss_chat_id)
     upper = company.upper()
 
@@ -87,7 +88,7 @@ async def execute_reset(ctx: ChatContext, confirmation: str) -> str:
 
 async def _do_reset(ctx: ChatContext) -> str:
     boss_id = ctx.boss_chat_id
-    boss = await db.get_boss(boss_id)
+    boss = await (await db._repo("boss", BossRepo)).get(boss_id)
     if not boss:
         return "Workspace not found."
 

@@ -3,7 +3,9 @@ _workspace.py — Shared cross-workspace credential resolution.
 Used by tools that accept workspace_ids parameter.
 """
 from src import db
+from src.repositories.boss_repo import BossRepo
 from src.context import ChatContext
+from src.repositories.membership_repo import MembershipRepo
 
 
 async def resolve_workspaces(ctx: ChatContext, workspace_ids: str | list) -> list[dict]:
@@ -25,14 +27,14 @@ async def resolve_workspaces(ctx: ChatContext, workspace_ids: str | list) -> lis
         # Check if user has an active_workspace_id set (from switch_workspace)
         active_ws_id = await _get_active_workspace_id(ctx.sender_chat_id)
         if active_ws_id and active_ws_id != str(ctx.boss_chat_id):
-            boss = await db.get_boss(int(active_ws_id))
+            boss = await (await db._repo("boss", BossRepo)).get(int(active_ws_id))
             if boss:
                 return [_boss_to_workspace(boss, ctx.sender_type)]
         return [_ctx_to_workspace(ctx)]
 
-    memberships = await db.get_memberships(str(ctx.sender_chat_id))
+    memberships = await (await db._repo("membership", MembershipRepo)).list_for_user(str(ctx.sender_chat_id))
     # Include own boss workspace
-    boss_self = await db.get_boss(ctx.sender_chat_id)
+    boss_self = await (await db._repo("boss", BossRepo)).get(ctx.sender_chat_id)
     if boss_self and not any(m["boss_chat_id"] == str(ctx.sender_chat_id) for m in memberships):
         memberships = [{
             "boss_chat_id": str(ctx.sender_chat_id),
@@ -48,7 +50,7 @@ async def resolve_workspaces(ctx: ChatContext, workspace_ids: str | list) -> lis
 
     result = []
     for m in active_memberships:
-        boss = await db.get_boss(m["boss_chat_id"])
+        boss = await (await db._repo("boss", BossRepo)).get(m["boss_chat_id"])
         if boss:
             result.append(_boss_to_workspace(boss, m.get("person_type", "member")))
     return result

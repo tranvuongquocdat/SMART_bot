@@ -38,7 +38,7 @@ async def test_tenant_active_passes_through_to_secretary():
     router = MessageRouter(container)
     msg = _incoming()
 
-    with patch("src.controllers.message_router.db.get_boss",
+    with patch("src.repositories.boss_repo.BossRepo.get",
                new_callable=AsyncMock,
                return_value={"chat_id": "uuid-sender", "status": "active"}), \
          patch("src.agent.secretary_agent.handle_message",
@@ -54,7 +54,7 @@ async def test_tenant_suspended_drops_silently():
     router = MessageRouter(container)
     msg = _incoming()
 
-    with patch("src.controllers.message_router.db.get_boss",
+    with patch("src.repositories.boss_repo.BossRepo.get",
                new_callable=AsyncMock,
                return_value={"chat_id": "uuid-sender", "status": "suspended"}), \
          patch("src.agent.secretary_agent.handle_message",
@@ -70,7 +70,7 @@ async def test_tenant_cancelled_drops_silently():
     router = MessageRouter(container)
     msg = _incoming()
 
-    with patch("src.controllers.message_router.db.get_boss",
+    with patch("src.repositories.boss_repo.BossRepo.get",
                new_callable=AsyncMock,
                return_value={"chat_id": "uuid-sender", "status": "cancelled"}), \
          patch("src.agent.secretary_agent.handle_message",
@@ -88,7 +88,7 @@ async def test_unknown_sender_passes_through():
     router = MessageRouter(container)
     msg = _incoming()
 
-    with patch("src.controllers.message_router.db.get_boss",
+    with patch("src.repositories.boss_repo.BossRepo.get",
                new_callable=AsyncMock,
                return_value=None), \
          patch("src.agent.secretary_agent.handle_message",

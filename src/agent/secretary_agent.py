@@ -23,6 +23,7 @@ from src.agent.tool_definitions import TOOL_DEFINITIONS
 from src.agent.llm_for_ctx import get_llm_for_ctx, get_default_llm
 from src.infrastructure.llm.factory import get_llm_client
 from src.utils.sentinels import strip_sentinels
+from src.repositories.boss_repo import BossRepo
 
 logger = logging.getLogger("agent")
 
@@ -348,7 +349,7 @@ async def _build_turn_messages(
 
     tz = ZoneInfo(_settings.timezone)
     current_time = datetime.now(tz).strftime("%Y-%m-%d %H:%M (%A)")
-    boss = await db.get_boss(boss_chat_id)
+    boss = await (await db._repo("boss", BossRepo)).get(boss_chat_id)
     company = boss.get("company", "") if boss else ""
     company_info = f" — {company}" if company else ""
 
@@ -515,7 +516,7 @@ async def handle_message(
                         boss_id, group_name or chat_id, new_members,
                     ))
                 msg_id = await db.save_message(chat_id, "user", text, sender_id)
-                _boss_row = await db.get_boss(boss_id) or {}
+                _boss_row = await (await db._repo("boss", BossRepo)).get(boss_id) or {}
                 _llm = get_llm_client(_boss_row, _settings or Settings())
                 _clean = strip_sentinels(text)
                 vector, _dim = await _llm.embed(_clean)

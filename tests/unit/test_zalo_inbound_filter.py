@@ -33,7 +33,7 @@ async def test_dm_from_registered_boss_forwards():
     f = ZaloInboundFilter(onboard_phrase="thư ký ơi")
     with patch("src.db.lookup_person_by_external",
                new_callable=AsyncMock, return_value="P-1"), \
-         patch("src.db.get_boss",
+         patch("src.repositories.boss_repo.BossRepo.get",
                new_callable=AsyncMock, return_value={"chat_id": "P-1"}):
         assert await f.should_forward(_ev(text="anything")) is True
 
@@ -58,7 +58,7 @@ async def test_dm_from_known_person_who_is_not_boss_drops():
     f = ZaloInboundFilter(onboard_phrase="thư ký ơi")
     with patch("src.db.lookup_person_by_external",
                new_callable=AsyncMock, return_value="P-known"), \
-         patch("src.db.get_boss",
+         patch("src.repositories.boss_repo.BossRepo.get",
                new_callable=AsyncMock, return_value=None):
         assert await f.should_forward(_ev(text="hello")) is False
 
@@ -83,7 +83,7 @@ async def test_group_unregistered_with_boss_mention_forwards():
                new_callable=AsyncMock, return_value=None), \
          patch("src.db.lookup_person_by_external",
                new_callable=AsyncMock, return_value="P-boss"), \
-         patch("src.db.get_boss",
+         patch("src.repositories.boss_repo.BossRepo.get",
                new_callable=AsyncMock, return_value={"chat_id": "P-boss"}):
         ev = _ev(thread_type="group", text="@bot đăng ký", is_mentioned=True)
         assert await f.should_forward(ev) is True

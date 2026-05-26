@@ -12,6 +12,7 @@ from src.channels import telegram_singleton as telegram
 from src.config import Settings
 from src.context import ChatContext
 from src.infrastructure import lark_client as lark
+from src.repositories.reminder_repo import ReminderRepo
 
 
 def _local_remind_string_to_utc_naive(remind_at: str) -> datetime:
@@ -82,7 +83,7 @@ async def create_reminder(
         stored_content = f"[task:{task_keyword}] {stored_content}"
 
     source_chat_id = str(ctx.chat_id) if ctx.is_group else None
-    reminder_id = await db.create_reminder(
+    reminder_id = await (await db._repo("reminder", ReminderRepo)).create(
         boss_chat_id=ctx.boss_chat_id,
         content=stored_content,
         remind_at=remind_dt,
@@ -145,7 +146,7 @@ async def list_reminders(
     if status not in ("pending", "done", "all"):
         return "Tham so status phai la: pending, done, hoac all."
 
-    rows = await db.list_reminders(ctx.boss_chat_id, status=status, limit=limit)
+    rows = await (await db._repo("reminder", ReminderRepo)).list_for_boss(ctx.boss_chat_id, status=status, limit=limit)
     if not rows:
         return "Khong co nhac nho nao."
 
@@ -192,7 +193,7 @@ async def update_reminder(
             if not target_name:
                 target_name = target
 
-    ok = await db.update_reminder(
+    ok = await (await db._repo("reminder", ReminderRepo)).update(
         reminder_id,
         ctx.boss_chat_id,
         **kwargs,
@@ -258,7 +259,7 @@ async def delete_reminder(ctx: ChatContext, reminder_id: int) -> str:
             )
             return f"Lark dang loi, chua xoa duoc #{reminder_id} — anh thu lai sau."
 
-    ok = await db.delete_reminder(reminder_id, ctx.boss_chat_id)
+    ok = await (await db._repo("reminder", ReminderRepo)).delete(reminder_id, ctx.boss_chat_id)
     if not ok:
         return f"Khong tim thay nhac nho #{reminder_id}."
     return f"Da xoa nhac nho #{reminder_id}."

@@ -45,7 +45,7 @@ async def _passthrough(fn, **kw):
 
 
 async def test_reverse_sync_pulls_time_change(setup_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(setup_db).create(
         boss_chat_id="b1", content="x",
         remind_at=datetime(2026, 5, 4, 10),
     )
@@ -73,7 +73,7 @@ async def test_reverse_sync_pulls_time_change(setup_db, monkeypatch):
 
 
 async def test_reverse_sync_tombstones_vanished(setup_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(setup_db).create(
         boss_chat_id="b1", content="x",
         remind_at=datetime(2026, 5, 4, 10),
     )
@@ -141,7 +141,7 @@ async def test_reverse_sync_skips_unparseable_time(setup_db, monkeypatch, caplog
 
 
 async def test_reverse_sync_reconciles_unsynced_db_row(setup_db, monkeypatch):
-    rid = await db.create_reminder(
+    rid = await ReminderRepo(setup_db).create(
         boss_chat_id="b1", content="needs sync",
         remind_at=datetime(2026, 5, 4, 10),
     )

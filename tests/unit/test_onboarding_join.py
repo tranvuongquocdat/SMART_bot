@@ -10,7 +10,7 @@ def clear_sessions():
 
 @pytest.mark.asyncio
 async def test_list_companies_starts_join_flow():
-    with patch("src.onboarding.db.get_all_bosses", new_callable=AsyncMock,
+    with patch("src.repositories.boss_repo.BossRepo.list_all", new_callable=AsyncMock,
                return_value=[{"chat_id": "1", "name": "Anh X", "company": "Công ty A"}]):
         reply = await onboarding.handle_join_inquiry(chat_id=999)
     assert "Công ty A" in reply
@@ -19,7 +19,7 @@ async def test_list_companies_starts_join_flow():
 
 @pytest.mark.asyncio
 async def test_no_companies_returns_empty_message():
-    with patch("src.onboarding.db.get_all_bosses", new_callable=AsyncMock, return_value=[]):
+    with patch("src.repositories.boss_repo.BossRepo.list_all", new_callable=AsyncMock, return_value=[]):
         reply = await onboarding.handle_join_inquiry(chat_id=999)
     assert 999 not in onboarding._join_sessions
     assert "chưa có" in reply.lower() or "không có" in reply.lower()
@@ -64,7 +64,7 @@ async def test_get_info_creates_pending_membership():
     }
     with patch("src.onboarding._ai_classify", new_callable=AsyncMock,
                return_value={"name": "Anh Bình"}), \
-         patch("src.onboarding.db.upsert_membership", new_callable=AsyncMock) as mock_upsert, \
+         patch("src.repositories.membership_repo.MembershipRepo.upsert", new_callable=AsyncMock) as mock_upsert, \
          patch("src.onboarding.tg.send_message", new_callable=AsyncMock):
         reply = await onboarding.handle_join_message("Tôi là Bình, freelance design", chat_id=999)
     mock_upsert.assert_called_once()
