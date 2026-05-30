@@ -1,151 +1,148 @@
-# Group Note Bot — Design Spec (Draft v1, Đợt 1)
+# Group Note Bot — Thiết kế chi tiết (Bản thảo v1, Đợt 1)
 
-**Status:** Draft · Đợt 1 of 2 (Product · Architecture · Identity · Group Note · Capture)
-**Created:** 2026-05-30
-**Branch:** `main` (rebuild, post-collapse)
-**Reference (legacy code):** `git show archive/legacy:<path>`
+**Trạng thái:** Bản thảo · Đợt 1/2 (Sản phẩm · Kiến trúc · Định danh · Group Note · Capture)
+**Ngày tạo:** 2026-05-30
+**Branch:** `main` (rebuild, đã collapse)
+**Tham chiếu code cũ:** `git show archive/legacy:<path>`
 
-## How to read this document
+## Cách đọc tài liệu
 
-This is the first half of the design spec. Đợt 2 will cover Agent layer, LLM
-abstraction, Plugin architecture, Web admin, Tech stack, and consolidated open
-questions.
+Đây là nửa đầu của spec. Đợt 2 sẽ cover: Agent layer, LLM abstraction, Plugin
+architecture, Web admin, Tech stack, và tổng hợp open questions.
 
-**Iteration:**
-- Read each section. Reply per section.
-- Phrases: `section X: <change>` · `section X expand` · `section X looks good` · `Đợt 1 OK`.
-- Sections marked **(open)** carry unresolved decisions surfaced inline.
-- When Đợt 1 is approved, I write Đợt 2. When the full spec is approved, we
-  invoke `writing-plans` to generate the implementation plan.
+**Cách lặp review:**
+- Anh đọc từng section, reply theo section.
+- Cú pháp: `section X: <thay đổi>` · `section X expand` · `section X looks good` · `Đợt 1 OK`.
+- Section gắn nhãn **(mở)** = decision chưa chốt, em đã surface tại chỗ.
+- Khi Đợt 1 OK → em viết Đợt 2. Khi cả spec OK → em invoke `writing-plans`
+  để generate implementation plan.
 
-## Contents
+## Mục lục
 
-1. Product Vision & Scope
-2. Architecture Overview
-3. Identity & Channel Linking
-4. Group Note (Core Artifact)
-5. Capture Flow & Data Model
+1. Tầm nhìn sản phẩm & phạm vi
+2. Tổng quan kiến trúc
+3. Định danh & Kết nối kênh
+4. Group Note (hiện vật cốt lõi)
+5. Capture flow & Data model
 
-Sections 6–11 in Đợt 2.
+Section 6–11 ở Đợt 2.
 
 ---
 
-## 1. Product Vision & Scope
+## 1. Tầm nhìn sản phẩm & phạm vi
 
-### 1.1 Problem statement
+### 1.1 Vấn đề
 
-Vietnamese SME bosses ("sếp") live inside chat — Zalo primary, Telegram
-secondary. They manage multiple group chats (sales, marketing, tech,
-partners). They:
+Sếp SME Việt Nam sống trong chat — Zalo là chính, Telegram phụ. Họ quản nhiều
+group chat (sale, marketing, tech, đối tác). Họ:
 
-- Miss decisions buried in long threads.
-- Forget what was agreed last week.
-- Don't know what action items are open across groups.
-- Can't easily find "who said what about X" weeks ago.
-- Spend mornings scrolling.
+- Sót quyết định bị chôn trong thread dài.
+- Quên đã chốt gì tuần trước.
+- Không biết các task đang mở rải rác ở các nhóm.
+- Khó tra "ai nói gì về X" cách đây vài tuần.
+- Mất buổi sáng để scroll.
 
-Existing tools (Asana, Notion, Slack AI, Otter) don't fit: they require
-migrating off Zalo, target English-first desktop users, or are too
-generic/heavy.
+Tool có sẵn (Asana, Notion, Slack AI, Otter) không phù hợp: bắt rời Zalo,
+target user English-first/desktop-first, hoặc quá generic / nặng.
 
-### 1.2 Target user
+### 1.2 Đối tượng
 
-Primary persona — Vietnamese SME owner / team leader who:
+**Persona chính** — sếp SME / leader team Việt Nam:
 
-- Uses Zalo for >80% of work communication
-- Manages 3–15 group chats
-- Has 5–50 employees / partners
-- Is non-technical (won't paste API keys without a UI guiding them)
-- Pays VND, prefers bank transfer over card
+- Dùng Zalo cho >80% giao tiếp công việc
+- Quản 3–15 group chat
+- Có 5–50 nhân viên / đối tác
+- Không phải dân tech (không tự paste API key vào setting nếu thiếu UI)
+- Trả VND, thích chuyển khoản hơn thẻ
 
-Secondary user — employees of the sếp. They interact with the bot **only**
-in groups where their sếp is present. They cannot DM the bot or own
-configuration. This sidesteps the entire identity-resolution problem.
+**Persona phụ** — nhân viên của sếp. Tương tác với bot **chỉ** trong group
+mà sếp có mặt. Không DM bot, không có cấu hình riêng. Cách này né hoàn
+toàn bài toán identity-resolution.
 
-### 1.3 Product anchor — the "group note"
+### 1.3 Trục sản phẩm — "group note"
 
-The bot's primary artifact is a **living document per group chat**. Each
-group has ONE markdown note that is auto-updated from conversation,
-manually editable, and the source of truth for every other op:
+Hiện vật chính của bot là **1 trang document sống cho mỗi group chat**.
+Mỗi group có DUY NHẤT 1 markdown note, tự update từ cuộc trò chuyện,
+sếp edit được, và là nguồn sự thật cho mọi operation khác:
 
-- Summaries → re-emit the note
-- Q&A → search the note + raw history
-- Action items → extracted view of the note's "Việc đang mở" section
-- Cross-group digest (deferred) → roll-up of all notes for one sếp
+- Tóm tắt → re-emit note
+- Q&A → search note + lịch sử raw
+- Action items → view trích từ section "Việc đang mở" của note
+- Digest cross-group (hoãn) → roll-up note của tất cả group của sếp
 
-This collapses many features into one persistent artifact: **1 group = 1
-always-updated note**.
+Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ ràng:
+**1 group = 1 note luôn được cập nhật**.
 
-### 1.4 MVP scope (Phase 0)
+### 1.4 Phạm vi MVP (Phase 0)
 
-| Layer | Capability |
+| Layer | Khả năng |
 |---|---|
-| **Capture** | All messages in any group where the linked sếp is a member. Raw text + sender display name. |
-| **Group note** | One markdown note per group, 7 sections (§4.2). Auto-update on debounce + threshold. User-editable on web. |
-| **In-group ops** | `@bot summarize` / `@bot refresh note` · `@bot Q&A` over note + history · auto action-item detection embedded in note |
-| **DM with sếp** | Cross-group Q&A · "tóm tắt group X tuần này" · list open action items · No scheduled push. |
-| **Web (user)** | 8-section sidebar (Dashboard, Groups, Action Items, Digests-disabled, Channels, Plugins, Usage, Settings). See Đợt 2 §9. |
-| **Web (super)** | 3 pages — Bosses, Payments, Revenue. Role-gated via env var. |
-| **Channel** | Zalo (priority) + Telegram. Lark Messenger deferred. |
+| **Capture** | Mọi message trong group nào có sếp linked. Lưu text raw + tên hiển thị người gửi. |
+| **Group note** | 1 note markdown/group, 7 section (§4.2). Auto-update theo debounce + threshold. Sếp edit được trên web. |
+| **Op in-group** | `@bot tóm tắt` / `@bot refresh note` · `@bot Q&A` trên note + history · auto-detect action item nhúng vào note |
+| **DM với sếp** | Q&A cross-group · "tóm tắt group X tuần này" · list việc đang mở · KHÔNG có push tự động |
+| **Web (user)** | Sidebar 8 section (Dashboard, Groups, Action Items, Digests-disabled, Channels, Plugins, Usage, Settings). Đợt 2 §9. |
+| **Web (super)** | 3 page — Bosses, Payments, Revenue. Role-gated qua env var. |
+| **Channel** | Zalo (ưu tiên) + Telegram. Lark Messenger hoãn. |
 | **AI** | Provider abstraction (OpenAI / Groq / Anthropic / Gemini / Custom). 2-tier fast/smart. BYO key. |
-| **Plugins** | Architecture wired; **0 plugins ship.** |
+| **Plugin** | Kiến trúc sẵn sàng; **0 plugin ship**. |
 | **DB** | PostgreSQL + Qdrant. |
-| **Auth (user)** | Google OAuth + email/password fallback. |
-| **Auth (channel)** | Deep-link linking via DM `/start <token>`. |
-| **Subscription** | Manual: VietQR display + admin marks paid in superadmin. |
+| **Auth (user)** | Google OAuth + email/password (fallback). |
+| **Auth (channel)** | Deep-link qua DM `/start <token>`. |
+| **Subscription** | Manual: hiện VietQR + superadmin click "đã thanh toán". |
 
-### 1.5 Deferred (Phase 1+)
+### 1.5 Hoãn (Phase 1+)
 
-- Daily digest DM (toggleable + scheduled)
+- Daily digest DM (toggle + lịch)
 - Stalled-work alerts
-- **Media ingest beyond text** — decision in §1.7
-- Plugins shipped: Google Calendar, Lark Base
+- **Media ingest ngoài text** — decision ở §1.7 + §5.4
+- Plugin ship: Google Calendar, Lark Base
 - Lark Messenger channel
-- Auto-detect payment (Casso/SePay webhook)
+- Auto-detect thanh toán (Casso/SePay webhook)
 - People insights, mood analytics
-- Multi-currency, international subscription
+- Đa tiền tệ, subscription quốc tế
 
-### 1.6 Non-goals
+### 1.6 KHÔNG làm
 
-- We do not build a billing engine. Sếp pays via bank transfer; we mark
-  paid in admin. No Stripe, no auto-invoice.
-- We do not build cross-channel identity resolution. "Anh Tân" stays as
-  display text — no map to a `user_id`.
-- We do not DM employees. The bot only DMs the linked sếp.
-- We do not offer self-hosted single-tenant. Multi-tenant from day 1.
+- Không build billing engine. Sếp chuyển khoản; em click "đã thanh toán"
+  trong admin. Không Stripe, không auto-invoice.
+- Không build cross-channel identity resolution. "Anh Tân" để nguyên text
+  như hiển thị — không map về `user_id`.
+- Không DM nhân viên. Bot chỉ DM sếp đã linked.
+- Không offer self-hosted single-tenant. Multi-tenant từ ngày 1.
 
-### 1.7 Open
+### 1.7 Mở
 
-- **(open) Media ingest in MVP** — see §5.4 for the A / B / C
-  trade-off. Recommendation: B (URL + voice transcribe).
+- **(mở) Media ingest trong MVP** — xem §5.4, so sánh A / B / C.
+  Em recommend **B** (URL fetch + voice transcribe).
 
 ---
 
-## 2. Architecture Overview
+## 2. Tổng quan kiến trúc
 
-### 2.1 Component layers
+### 2.1 Phân lớp
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              Channels (inbound + outbound)                      │
 │  ┌──────────┐  ┌─────────────┐  ┌──────────────────┐            │
-│  │  Zalo    │  │  Telegram   │  │  Lark Messenger  │ (deferred) │
+│  │  Zalo    │  │  Telegram   │  │  Lark Messenger  │ (hoãn)     │
 │  │  OA SDK  │  │  Bot SDK    │  │  (Phase 1)       │            │
 │  └────┬─────┘  └──────┬──────┘  └────────┬─────────┘            │
 └───────┼───────────────┼──────────────────┼──────────────────────┘
         ▼               ▼                  ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Channel Router                            │
-│   Normalises inbound events → InboundMessage                   │
-│   Resolves sender boss_id via account_links                    │
-│   Drops if no linked boss is a member of the chat              │
+│   Chuẩn hoá event inbound → InboundMessage                     │
+│   Resolve boss_id qua bảng account_links                       │
+│   Drop nếu không có sếp linked nào trong chat                  │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                     Capture & Indexing                          │
-│   • messages table (PostgreSQL)                                │
+│   • bảng messages (PostgreSQL)                                 │
 │   • FTS tsvector index (unaccent + simple)                     │
-│   • Qdrant vector store (semantic) — async upsert              │
+│   • Qdrant vector store (semantic) — upsert async              │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -159,19 +156,19 @@ always-updated note**.
 │                                                                 │
 │   Tools:                                                        │
 │     - core: search_history, refresh_note, edit_note, ...       │
-│     - plugin: dynamically loaded per boss                      │
+│     - plugin: load động per-boss                                │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       LLM Abstraction                           │
 │   (Đợt 2 §7)                                                    │
 │                                                                 │
-│   Provider clients (1 file each):                              │
+│   Provider clients (1 file/cái):                                │
 │     - OpenAICompatibleClient (OpenAI, Groq, OpenRouter, …)     │
 │     - AnthropicClient                                          │
 │     - GeminiClient                                             │
 │                                                                 │
-│   ModelRegistry: name → capabilities, cost, tier               │
+│   ModelRegistry: tên model → capabilities, cost, tier          │
 │   Router: pick(boss_config, op_type) → (provider, model)       │
 └─────────────────────────────────────────────────────────────────┘
 
@@ -191,62 +188,62 @@ always-updated note**.
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Scheduler                                 │
 │                                                                 │
-│   - Note debounce flush                                        │
-│   - Subscription expiry checks                                 │
-│   - (Phase 1) Daily digest send                                │
+│   - Flush note debounce                                        │
+│   - Check subscription hết hạn                                 │
+│   - (Phase 1) Gửi daily digest                                 │
 │   - (Phase 1) Stalled-work alerts                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### 2.2 Data flow — happy paths
+### 2.2 Luồng data — happy paths
 
-**Passive capture** (every inbound message):
+**Capture thụ động** (mỗi inbound message):
 
 ```
 Channel webhook
    ▼
-Channel adapter normalises
+Channel adapter chuẩn hoá
    ▼
-Router lookups account_links → boss_id   (if none → drop)
+Router lookup account_links → boss_id   (không có → drop)
    ▼
 messages INSERT  (Postgres + FTS index + Qdrant upsert async)
    ▼
-NoteUpdater.schedule(boss_id, chat_id)   (debounce 10 min, threshold 30 msg)
+NoteUpdater.schedule(boss_id, chat_id)   (debounce 10 phút, threshold 30 msg)
    ▼
-LLM (smart tier) rebuilds group_note markdown
+LLM (smart tier) rebuild markdown của group_note
    ▼
 group_notes UPDATE + group_note_versions INSERT
 ```
 
-**On-demand op** (`@bot` mention in group):
+**Op on-demand** (`@bot` trong group):
 
 ```
 Tagged message → router → boss_id resolved
    ▼
 Agent.handle(InGroupResponder)
-   ▼     tools = core + enabled plugins for boss
-         context = current group_note + recent messages (capped)
-LLM (smart for reasoning ops, fast for short ack ops)
+   ▼     tools = core + plugins đã bật cho boss
+         context = group_note hiện tại + messages gần đây (giới hạn)
+LLM (smart cho reasoning, fast cho ack ngắn)
    ▼
-Outbound: reply in same group
+Outbound: reply trong cùng group
    ▼
 outbound_messages INSERT
 ```
 
-### 2.3 Tenant model
+### 2.3 Multi-tenant
 
-- Multi-tenant from day 1. One server process, N bosses.
-- Every domain table has `boss_id`. Every query filters by `boss_id` at
-  the repository layer. No PG row-level-security (kept simple, enforced
-  in code).
-- Cross-boss objects: `users` (which contains superadmin), platform-wide
-  configs (LLM defaults, plugin manifests).
+- Multi-tenant từ ngày 1. 1 server process, N sếp.
+- Mọi bảng domain có cột `boss_id`. Mọi query filter theo `boss_id` ở
+  tầng repository. Không dùng PG row-level-security (kept simple,
+  enforce ở code).
+- Object cross-boss: `users` (chứa cả superadmin), config platform-wide
+  (LLM defaults, plugin manifests).
 
-### 2.4 Runtime topology
+### 2.4 Topology vận hành
 
 ```
 ┌─────────────────────────────────────────────────┐
-│ Single FastAPI app (one Python process)         │
+│ 1 FastAPI app (1 Python process)                │
 │                                                 │
 │ Routers:                                        │
 │   /api/channels/zalo/webhook                    │
@@ -258,7 +255,7 @@ outbound_messages INSERT
 │                                                 │
 │ Background tasks (asyncio):                     │
 │   - NoteUpdater queue worker                    │
-│   - Subscription expiry checker (daily)         │
+│   - Subscription expiry checker (hàng ngày)     │
 │   - (Phase 1) digest scheduler                  │
 └─────────────────────────────────────────────────┘
        │
@@ -267,56 +264,56 @@ outbound_messages INSERT
        └─ External LLM APIs
 ```
 
-Single process keeps deploy simple. If scale demands, NoteUpdater lifts
-to a separate worker process trivially (its inputs are message events).
+1 process = deploy đơn giản. Khi scale yêu cầu, NoteUpdater nâng thành
+worker process riêng dễ dàng (input của nó là message events).
 
-### 2.5 Open
+### 2.5 Mở
 
-- **(open) Single-process vs split web/worker** — single is fine for first
-  ~50 bosses. Split deferred until LLM calls saturate request handling.
+- **(mở) Single-process vs split web/worker** — single OK cho ~50 sếp
+  đầu. Split hoãn tới khi LLM call saturate request handling.
 
 ---
 
-## 3. Identity & Channel Linking
+## 3. Định danh & Kết nối kênh
 
-### 3.1 Web account (boss → users)
+### 3.1 Tài khoản web (boss → users)
 
-- Sếp signs up via Google OAuth (primary) or email/password (fallback).
-- One `users` row per sếp. Stores: id, email, name, google_sub,
+- Sếp đăng ký qua Google OAuth (chính) hoặc email/password (fallback).
+- 1 row `users` per sếp. Cột: id, email, name, google_sub,
   password_hash (nullable), role, subscription_status, subscription_plan,
   subscription_expiry.
-- `role ∈ {boss, superadmin}`. Superadmin auto-set when email matches
-  `SUPERADMIN_EMAILS` env var at login.
+- `role ∈ {boss, superadmin}`. Auto-set superadmin khi email khớp env
+  `SUPERADMIN_EMAILS` lúc login.
 
-### 3.2 Channel linking via deep-link
+### 3.2 Linking kênh qua deep-link
 
-Bot is platform-owned (1 Zalo OA, 1 Telegram bot, 1 Lark app). Each boss
-links their channel identity via DM-deep-link:
+Bot do platform sở hữu (1 Zalo OA, 1 Telegram bot, 1 Lark app). Mỗi sếp
+link identity kênh qua DM-deep-link:
 
 ```
-Web (logged-in sếp):
-  Click [Connect Zalo] on /channels page
+Web (sếp đã login):
+  Click [Kết nối Zalo] ở page /channels
      │
-     ▼  server generates token (16 url-safe bytes), TTL 10 min
-     │  stores in linking_tokens
+     ▼  server generate token (16 url-safe bytes), TTL 10 phút
+     │  lưu vào linking_tokens
      │
-     ▼  redirect to deep-link:
+     ▼  redirect tới deep-link:
         https://zalo.me/<OA_ID>?param=<token>            (Zalo)
         https://t.me/<BOT_USERNAME>?start=<token>        (Telegram)
 
-Sếp's phone:
-  Zalo/Telegram opens chat with our bot.
-  Pre-populates "/start <token>" — sếp taps send.
+Điện thoại sếp:
+  Zalo/Telegram mở chat với bot.
+  Pre-populate "/start <token>" — sếp tap Gửi.
      │
-     ▼  bot receives DM
-     │  parses token from payload
-     │  looks up linking_tokens → boss_id
-     │  INSERT into account_links (boss_id, provider, provider_user_id, linked_at)
-     │  DELETE the token row
-     │  replies "✓ Đã kết nối Zalo. Em là bot của anh ở đây."
+     ▼  bot nhận DM
+     │  parse token từ payload
+     │  lookup linking_tokens → boss_id
+     │  INSERT account_links (boss_id, provider, provider_user_id, linked_at)
+     │  DELETE token row
+     │  reply "✓ Đã kết nối Zalo. Em là bot của anh ở đây."
 
 Web (auto-refresh):
-  Channels page shows: Zalo ✓ Connected
+  Page channels hiện: Zalo ✓ Connected
 ```
 
 ### 3.3 Schema
@@ -341,16 +338,16 @@ linking_tokens (
 CREATE INDEX idx_linking_tokens_expires ON linking_tokens(expires_at);
 ```
 
-### 3.4 Group membership detection
+### 3.4 Phát hiện thành viên nhóm
 
-When a message arrives from a group chat:
+Khi message đến từ 1 group chat:
 
 ```python
 # Pseudo
 async def resolve_group_owner(chat_id, provider):
     member_ids = await channel.list_members(chat_id)
     if not member_ids:
-        # Lazy fallback if channel API restricts membership read:
+        # Fallback nếu channel API hạn chế đọc membership:
         member_ids = await message_repo.distinct_senders(chat_id, days=30)
     rows = await db.fetch(
         "SELECT boss_id FROM account_links "
@@ -360,66 +357,66 @@ async def resolve_group_owner(chat_id, provider):
     return [r["boss_id"] for r in rows]
 ```
 
-If no linked boss in chat → bot drops the event silently (no reply, no
-capture).
+Không có sếp linked nào trong chat → bot drop event im lặng (không reply,
+không capture).
 
-### 3.5 Multi-boss in same group (edge case)
+### 3.5 Nhiều sếp cùng nhóm (edge case)
 
-If two linked bosses are in the same group, both should see the group in
-their respective dashboards.
+Nếu 2 sếp đã linked cùng nằm trong 1 group, cả 2 đều nên thấy group
+trong dashboard của mình.
 
-- `group_notes` is keyed by `(boss_id, provider, chat_id)` — same group
-  renders as TWO notes (one per boss), each owned and edited independently.
-- Bot replies in the group once. Attribution: whichever boss `@bot`
-  mentioned; on bare mention, the older-linked boss.
+- `group_notes` key theo `(boss_id, provider, chat_id)` — cùng 1 group
+  render thành 2 note (1/sếp), edit độc lập.
+- Bot reply trong group 1 lần. Attribution: sếp nào tag `@bot` là sếp
+  đó; nếu tag trống, lấy sếp link sớm nhất.
 
-### 3.6 Open
+### 3.6 Mở
 
-- **(open) Multi-boss UX: split vs dedupe.** Split is simpler (each boss's
-  experience is independent). Listed for Đợt 2.
+- **(mở) UX nhiều sếp: tách vs gộp.** Tách đơn giản hơn (mỗi sếp
+  experience độc lập). List vào Đợt 2.
 
 ---
 
-## 4. Group Note (Core Artifact)
+## 4. Group Note (hiện vật cốt lõi)
 
-### 4.1 Why one note per group
+### 4.1 Tại sao 1 note/group
 
-Without a persistent artifact, every Q&A starts from raw messages →
-expensive context, inconsistent answers. With a rolling note:
+Không có hiện vật bền vững → mỗi lần Q&A đều start từ message raw →
+context tốn, câu trả lời không nhất quán. Có rolling note thì:
 
-- Decision history is preserved (not lost in scroll-back).
-- Action items have a single home.
-- LLM Q&A context shrinks from ~50k tokens of raw chat to ~1k tokens of
-  current note + relevant retrieval.
-- Sếp has a UI to read: "the state of this group" in one screen.
+- Lịch sử quyết định được bảo tồn (không bị mất trong scroll-back).
+- Action item có nơi sống duy nhất.
+- Context của LLM Q&A giảm từ ~50k token raw chat xuống ~1k token note
+  + retrieval.
+- Sếp có UI đọc "tình trạng group" trong 1 màn hình.
 
-### 4.2 Section schema (7 fixed sections)
+### 4.2 Schema 7 section
 
-Sections without content are hidden on render. Headers are templated by
-code; the LLM fills sections.
+Section không có content thì ẩn khi render. Header do code template;
+LLM fill content.
 
 ```markdown
 # {group_name}
-Last updated: {iso_timestamp} · {msg_count_7d}/day · status: {emoji}
+Cập nhật lần cuối: {iso_timestamp} · {msg_count_7d}/ngày · trạng thái: {emoji}
 
-## ⚡ Cần sếp xử lý          (hide if empty)
-- short bullets that explicitly need the boss's action
+## ⚡ Cần sếp xử lý          (ẩn nếu trống)
+- bullet ngắn, việc rõ ràng đang cần sếp action
 
-## 📌 Đang focus              (3–5 bullets max)
-- what the group is actively working on right now
+## 📌 Đang focus              (max 3–5 bullet)
+- group đang đẩy chuyện gì hiện tại
 
-## ✅ Việc đang mở            (task list with owner + deadline)
-- [ ] {person} — {task} · {deadline_or_open}
-- ⚠ {person} — {task} · OVERDUE {Nd}
+## ✅ Việc đang mở            (task list — chủ + hạn)
+- [ ] {person} — {task} · {hạn_hoặc_open}
+- ⚠ {person} — {task} · QUÁ HẠN {Nd}
 
-## 🚧 Đang tắc / Rủi ro      (hide if empty)
-- blockers, stalled work, risks
+## 🚧 Đang tắc / Rủi ro      (ẩn nếu trống)
+- blocker, việc tắc, risk
 
-## 📜 Đã quyết                (decisions log, append-only)
-- {decision} ({attributed_to}, {date})
+## 📜 Đã quyết                (log quyết định, append-only)
+- {quyết định} ({attributed_to}, {date})
 
-## 💬 Câu hỏi treo            (hide if empty)
-- open questions visible to the team
+## 💬 Câu hỏi treo            (ẩn nếu trống)
+- câu hỏi mở, visible cho team
 
 ## 👥 Người active (7d)
 - {name} ({count}) · ...
@@ -428,64 +425,63 @@ Last updated: {iso_timestamp} · {msg_count_7d}/day · status: {emoji}
 - [{period}](archive link)
 ```
 
-**Design rules:**
-- Exceptions first (⚡, 🚧). Boss scans top.
-- Persistent value below. `📜 Đã quyết` is append-only history.
-- LLM never deletes from `📜 Đã quyết`. Manual edit only.
-- `👥 Người active` is computed from message counts, not LLM-inferred.
+**Nguyên tắc design:**
+- Exception đặt trước (⚡, 🚧). Sếp scan top thấy ngay.
+- Giá trị bền vững ở dưới. `📜 Đã quyết` là log append-only.
+- LLM **không bao giờ** xoá entry trong `📜 Đã quyết`. Chỉ manual edit
+  xoá được.
+- `👥 Người active` tính từ count message, không phải LLM suy ra.
 
-### 4.3 Update lifecycle
+### 4.3 Vòng đời update
 
-Three triggers (any of which queues an update):
+3 trigger (bất kỳ cái nào queue update):
 
-| Trigger | When | Why |
+| Trigger | Khi nào | Lý do |
 |---|---|---|
-| **Debounce 10 min** | Group has had a message in the last X minutes; X has elapsed since the last new message | Conversation has settled |
-| **Threshold 30 msg** | 30 messages have arrived since the last note update | Don't wait too long for active groups |
-| **On-demand** | `@bot refresh note` in group, or web "Refresh" button | User control |
+| **Debounce 10 phút** | Group có message trong X phút trước; X phút trôi kể từ message mới nhất | Cuộc trò chuyện đã lắng |
+| **Threshold 30 msg** | 30 message mới kể từ lần update note gần nhất | Đừng đợi quá lâu cho group đông |
+| **On-demand** | `@bot refresh note` trong group, hoặc nút "Refresh" trên web | User chủ động |
 
-Update procedure:
+Quy trình update:
 
 ```
-1. Acquire lock (boss_id, chat_id)   (asyncio.Lock for MVP)
-2. Load current group_note.content
-3. Load new messages since group_note.last_seen_message_id
+1. Acquire lock (boss_id, chat_id)   (asyncio.Lock cho MVP)
+2. Load group_note.content hiện tại
+3. Load message mới từ group_note.last_seen_message_id
 4. Build LLM prompt:
-   - System: "Update the group note. Preserve sections X, Y as-is
-              (manually edited). Update only D, E, F, G.
-              Preserve '📜 Đã quyết' as append-only."
-   - Input: current note + delta messages
-5. LLM (smart tier) emits new markdown
-6. Validate: all 7 section headers present (renderer hides empties)
+   - System: "Update group note. Giữ nguyên section X, Y (đã edit thủ
+              công). Chỉ update D, E, F, G. Section '📜 Đã quyết' chỉ
+              append, không xoá."
+   - Input: note hiện tại + delta messages
+5. LLM (smart tier) emit markdown mới
+6. Validate: đủ 7 header (renderer ẩn cái rỗng)
 7. UPDATE group_notes SET content, last_seen_message_id, updated_at
-   INSERT INTO group_note_versions for history
+   INSERT group_note_versions cho history
 8. Release lock
 ```
 
-### 4.4 Manual edits & conflict resolution
+### 4.4 Edit thủ công & merge conflict
 
-Web UI shows the note in a markdown editor. Sếp clicks "Edit", saves.
+Web UI hiện note trong markdown editor. Sếp click "Edit", save.
 
-To prevent the next auto-update from overwriting manual changes:
+Để lần update tự động sau không ghi đè edit thủ công:
 
-- On save, record `manually_edited_sections` (set of header names whose
-  content differs from the LLM's last-emitted version).
-- On next auto-update, LLM is instructed: "Sections {A, B, C} were
-  manually edited and must be preserved as-is. Update only {D, E, F, G}."
-- Per-section granularity, not per-line. A `Let bot manage this section
-  again` toggle clears the flag for that section.
+- Khi save, record `manually_edited_sections` (set tên header có content
+  khác với version cuối LLM emit).
+- Lần auto-update sau, LLM được instruct: "Section {A, B, C} đã edit
+  thủ công, giữ nguyên. Chỉ update {D, E, F, G}."
+- Granularity = per-section, không per-line. Toggle `Cho bot quản section
+  này lại` clear flag cho section đó.
 
-`group_notes.manually_edited_sections` is a JSONB array of section
-header strings.
+`group_notes.manually_edited_sections` là JSONB array tên section.
 
-### 4.5 Versioning & archive
+### 4.5 Versioning & lưu trữ
 
-- Every update inserts a row into `group_note_versions`. ~few kB each.
-- Web shows version timeline with diff view.
-- After 30 days, old versions compact to: 50 most recent + monthly
-  snapshot rows.
+- Mỗi lần update INSERT 1 row vào `group_note_versions`. ~vài kB/cái.
+- Web hiện timeline version + diff view.
+- Sau 30 ngày, version cũ compact: giữ 50 cái gần nhất + monthly snapshot.
 
-### 4.6 Storage schema
+### 4.6 Schema DB
 
 ```sql
 group_notes (
@@ -515,39 +511,39 @@ group_note_versions (
 CREATE INDEX idx_group_note_versions_note ON group_note_versions(group_note_id, emitted_at DESC);
 ```
 
-### 4.7 Open
+### 4.7 Mở
 
-- **(open) Section schema fixed vs configurable per boss.** Fixed for MVP.
-  Configurable adds prompt-template parameterisation. Listed for Đợt 2.
+- **(mở) Schema 7 section cố định vs cấu hình được per-boss.** Cố định
+  cho MVP. Cấu hình được = thêm param vào prompt template. List Đợt 2.
 
 ---
 
-## 5. Capture Flow & Data Model
+## 5. Capture flow & Data model
 
-### 5.1 Inbound message pipeline
+### 5.1 Pipeline nhận message
 
 ```
 Channel webhook
    ▼
-Channel adapter parses platform event → InboundMessage
+Channel adapter parse event platform → InboundMessage
    ▼
-Router resolves boss_id via account_links
-   │   if no linked boss in chat → drop silently
+Router resolve boss_id qua account_links
+   │   không có linked boss → drop im lặng
    ▼
 Persist:
   1. INSERT INTO messages
-  2. tsvector auto-built (Postgres TRIGGER)
-  3. EMBED + UPSERT to Qdrant   (async, doesn't block webhook ack)
+  2. tsvector auto-build (Postgres TRIGGER)
+  3. EMBED + UPSERT Qdrant   (async, không block webhook ack)
    ▼
-Schedule NoteUpdater for (boss_id, chat_id)
+Schedule NoteUpdater cho (boss_id, chat_id)
    ▼
-Return 200 OK to channel webhook
+Return 200 OK cho channel webhook
 ```
 
-Embedding is async because it adds 100–500ms latency and shouldn't block
-webhook acks (channels retry on slow responses).
+Embedding async vì tốn 100–500ms, không nên block webhook ack (channel
+retry khi response chậm).
 
-### 5.2 `messages` schema
+### 5.2 Schema `messages`
 
 ```sql
 messages (
@@ -557,21 +553,21 @@ messages (
   chat_id            TEXT NOT NULL,
   chat_type          TEXT NOT NULL,        -- 'group' | 'dm'
 
-  provider_msg_id    TEXT,                 -- platform's msg id, for dedup
+  provider_msg_id    TEXT,                 -- msg id của platform, để dedup
   reply_to_msg_id    BIGINT REFERENCES messages(id),
 
-  sender_provider_id TEXT,                 -- platform user id
-  sender_name        TEXT,                 -- display name (no resolution!)
+  sender_provider_id TEXT,                 -- user id của platform
+  sender_name        TEXT,                 -- tên hiển thị (KHÔNG resolve!)
 
-  text               TEXT,                 -- raw text body
+  text               TEXT,                 -- body raw
   media_kind         TEXT,                 -- NULL | 'voice' | 'image' | 'file' | 'sticker' | 'url'
-  media_url          TEXT,                 -- where to fetch
-  media_text         TEXT,                 -- extracted text (transcript, OCR, fetched body)
+  media_url          TEXT,                 -- nơi fetch
+  media_text         TEXT,                 -- text trích (transcript, OCR, fetched body)
 
-  ts                 TIMESTAMPTZ NOT NULL, -- platform timestamp
+  ts                 TIMESTAMPTZ NOT NULL, -- timestamp của platform
   ingested_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-  fts                tsvector,             -- updated by trigger
+  fts                tsvector,             -- update qua trigger
 
   UNIQUE (provider, chat_id, provider_msg_id)
 );
@@ -579,67 +575,66 @@ CREATE INDEX idx_messages_chat ON messages(boss_id, provider, chat_id, ts DESC);
 CREATE INDEX idx_messages_fts ON messages USING GIN(fts);
 ```
 
-**Notes:**
-- `media_text` is the searchable text equivalent of media. Voice →
-  transcript. URL → fetched article body. Image → OCR (Phase 1). FTS
-  indexes both `text` and `media_text`.
-- `sender_name` is the display name **at capture time**. No lookup, no
-  normalisation. Explicit "no identity resolution" choice.
-- Dedup via `UNIQUE(provider, chat_id, provider_msg_id)` so channel
-  retries are idempotent.
+**Lưu ý:**
+- `media_text` là text equivalent để search. Voice → transcript. URL →
+  body bài báo fetched. Image → OCR (Phase 1). FTS index cả `text` và
+  `media_text`.
+- `sender_name` là tên hiển thị **tại lúc capture**. Không lookup,
+  không normalise. Đây là lựa chọn "không identity resolution" rõ ràng.
+- Dedup qua `UNIQUE(provider, chat_id, provider_msg_id)` để channel retry
+  idempotent.
 
 ### 5.3 Indexing: FTS + Qdrant
 
 **Postgres FTS:**
-- Used for keyword lookups ("did anyone say X").
-- Vietnamese: `simple` config + `unaccent` extension + `pg_trgm` for
-  diacritic-insensitive matching.
-- Indexes `text` and `media_text`.
+- Dùng cho keyword lookup ("có ai nói X không").
+- Tiếng Việt: config `simple` + extension `unaccent` + `pg_trgm` để
+  match không phân biệt dấu.
+- Index trên `text` và `media_text`.
 
 **Qdrant:**
-- **Single collection**, `boss_id` in payload filter. Avoids
-  N-collection management overhead. Boss-filter is fast.
-- Embedding: `text-embedding-3-small` (1536 dims) for MVP. Switchable
-  via the LLM-abstraction layer in Đợt 2.
-- Granularity: **per-message** for MVP. Most Zalo messages are short.
-  Paragraph chunking deferred.
-- Payload: `{boss_id, provider, chat_id, ts, sender_name}` for
-  filterable retrieval.
+- **1 collection duy nhất**, filter qua payload `boss_id`. Tránh
+  overhead quản N collection. Boss-filter chạy nhanh.
+- Embedding: `text-embedding-3-small` (1536 dims) cho MVP. Switch được
+  qua LLM-abstraction ở Đợt 2.
+- Granularity: **per-message** cho MVP. Message Zalo phần lớn ngắn.
+  Paragraph chunking hoãn.
+- Payload: `{boss_id, provider, chat_id, ts, sender_name}` để filterable.
 
 **Hybrid retrieval (Q&A):**
 ```
-1. FTS pre-filter (boss_id, chat_id?, optional date range) → ≤500 candidates
-2. Vector rank top-20 of those (Qdrant with payload filter)
-3. Pass to LLM together with current group_note
+1. FTS pre-filter (boss_id, chat_id?, optional date range) → ≤500 candidate
+2. Vector rank top-20 trong đó (Qdrant với payload filter)
+3. Pass cho LLM cùng group_note hiện tại
 ```
 
-### 5.4 Media handling — open decision
+### 5.4 Xử lý media — decision mở
 
-| Option | What lands in MVP | Effort | Risk if we skip |
+| Option | MVP có gì | Effort | Risk nếu skip |
 |---|---|---|---|
-| **A. Text only** | Voice / image / file / URL stored as `media_kind` + `media_url`; `media_text` empty. Note ignores. | 0 | Note misses ~30–50% of group content for typical Zalo SME. |
-| **B. URL fetch + voice transcribe** | `media_text` populated for URL (fetched body) and voice (Whisper-style transcribe). Note covers their content. | +2 weeks | Image OCR + file extract still missing — smaller gap. |
-| **C. Full media ingest** | A + B + image OCR + PDF/docx extract. | +4 weeks | Slow ship. |
+| **A. Chỉ text** | Voice / image / file / URL lưu `media_kind` + `media_url`; `media_text` rỗng. Note bỏ qua. | 0 | Note miss ~30–50% content của group Zalo SME điển hình. |
+| **B. URL fetch + voice transcribe** | `media_text` populate cho URL (body fetched) và voice (Whisper-style transcribe). Note cover content của chúng. | +2 tuần | Image OCR + file extract vẫn thiếu — gap nhỏ hơn. |
+| **C. Full media ingest** | A + B + OCR ảnh + extract PDF/docx. | +4 tuần | Ship chậm. |
 
-Recommendation: **B**. Voice-heavy Zalo reality justifies the cost.
-Image / file in Phase 1.
+Recommendation: **B**. Group Zalo voice-heavy → cost xứng đáng. Image /
+file để Phase 1.
 
-### 5.5 Retention & privacy
+### 5.5 Lưu trữ & quyền riêng tư
 
-**MVP policy:**
-- `messages`: retained indefinitely while subscription active.
-- On subscription expiry: bot stops capturing (channel webhook drops).
-  Existing data retained 90 days; then a "delete or export" prompt is
-  shown on web; default action after 30 days post-prompt is delete.
-- `group_note_versions` older than 30 days are compacted: 50 most recent
-  + monthly snapshots.
-- No analytics dataset is shared off-platform. No third-party
-  content telemetry.
+**Policy MVP:**
+- `messages`: giữ vô thời hạn khi subscription còn active.
+- Subscription hết hạn: bot stop capture (channel webhook drop). Data hiện
+  có giữ 90 ngày; sau đó web hiện prompt "delete hoặc export"; default
+  sau 30 ngày kể từ prompt là delete.
+- `group_note_versions` cũ hơn 30 ngày → compact: 50 cái gần nhất +
+  monthly snapshot.
+- Không share dataset analytics off-platform. Không telemetry content
+  cho bên thứ 3.
 
-**Per-boss data export (Phase 1):** Web button "Download my data" → ZIP
-of messages + notes as markdown. Trust feature.
+**Export data per-boss (Phase 1):** Nút "Tải dữ liệu của tôi" trên web →
+ZIP chứa messages + notes dạng markdown. Feature tạo trust.
 
-### 5.6 Outbound message logging
+### 5.6 Log message gửi đi
 
 ```sql
 outbound_messages (
@@ -656,28 +651,29 @@ outbound_messages (
 );
 ```
 
-Used for debugging, observability, audit ("did the bot actually reply?"),
-and future digest construction.
+Dùng cho: debug, observability, audit ("bot có thật sự reply không?"),
+và build digest tương lai.
 
-### 5.7 Open
+### 5.7 Mở
 
-- **(open) Voice transcription** — API (OpenAI/Groq Whisper) vs own
-  (whisper.cpp). API for MVP; own for Phase 2 if cost matters.
-- **(open) Image OCR** — deferred to Phase 1.
-- **(open) GDPR-style right-to-be-forgotten for individuals** — defer.
+- **(mở) Voice transcription** — API (OpenAI/Groq Whisper) vs tự host
+  (whisper.cpp). API cho MVP; tự host Phase 2 nếu cost quan trọng.
+- **(mở) Image OCR** — hoãn Phase 1.
+- **(mở) Quyền "xoá tôi khỏi data" cho cá nhân được mention** — hoãn.
 
 ---
 
 ## Đợt 2 preview
 
-Coming after Đợt 1 is approved:
+Sau khi Đợt 1 OK:
 
 - §6 Agent layer — operation routing, tool calling chain, **multi-agent
-  decision**, context window management
+  hay không**, quản context window
 - §7 LLM abstraction — provider clients, ModelRegistry, 2-tier routing,
-  capability gap fallback
-- §8 Plugin architecture — manifest format, OAuth flow, settings auto-render
-- §9 Web admin — user pages + superadmin pages, auth, channels wizard
+  fallback khi gap capability
+- §8 Plugin architecture — manifest format, OAuth flow, settings
+  auto-render
+- §9 Web admin — user pages + superadmin pages, auth, channel wizard
 - §10 Tech stack & infra — PG + Qdrant + FastAPI + HTMX, Docker, env,
   observability
-- §11 Consolidated open questions
+- §11 Tổng hợp open questions
