@@ -1,21 +1,22 @@
-# Group Note Bot — Thiết kế chi tiết (Bản thảo v1, Đợt 1)
+# Group Note Bot — Thiết kế chi tiết (Bản thảo v1)
 
-**Trạng thái:** Bản thảo · Đợt 1/2 (Sản phẩm · Kiến trúc · Định danh · Group Note · Capture)
+**Trạng thái:** Bản thảo · Full v1 (Đợt 1 + Đợt 2)
 **Ngày tạo:** 2026-05-30
 **Branch:** `main` (rebuild, đã collapse)
 **Tham chiếu code cũ:** `git show archive/legacy:<path>`
 
 ## Cách đọc tài liệu
 
-Đây là nửa đầu của spec. Đợt 2 sẽ cover: Agent layer, LLM abstraction, Plugin
-architecture, Web admin, Tech stack, và tổng hợp open questions.
+Đây là spec đầy đủ Bản thảo v1, gồm 11 section. Anh đọc, anh note, rồi
+mình trao đổi 1 lượt cuối.
 
 **Cách lặp review:**
-- Anh đọc từng section, reply theo section.
-- Cú pháp: `section X: <thay đổi>` · `section X expand` · `section X looks good` · `Đợt 1 OK`.
-- Section gắn nhãn **(mở)** = decision chưa chốt, em đã surface tại chỗ.
-- Khi Đợt 1 OK → em viết Đợt 2. Khi cả spec OK → em invoke `writing-plans`
-  để generate implementation plan.
+- Đọc qua một lượt. Có gì note vào.
+- Reply gọn theo section: `section X: <thay đổi>` · `section X expand` ·
+  `section X looks good` · hoặc một message gom các điểm.
+- Open questions tổng hợp ở §11; close bằng cú pháp ngắn (ví dụ
+  `media ingest: B`).
+- Khi tất cả OK → em invoke `writing-plans` tạo implementation plan.
 
 ## Mục lục
 
@@ -24,8 +25,12 @@ architecture, Web admin, Tech stack, và tổng hợp open questions.
 3. Định danh & Kết nối kênh
 4. Group Note (hiện vật cốt lõi)
 5. Capture flow & Data model
-
-Section 6–11 ở Đợt 2.
+6. Agent layer
+7. LLM abstraction
+8. Plugin architecture
+9. Web admin
+10. Tech stack & infrastructure
+11. Tổng hợp open questions
 
 ---
 
@@ -81,7 +86,7 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 | **Group note** | 1 note markdown/group, 7 section (§4.2). Auto-update theo debounce + threshold. Sếp edit được trên web. |
 | **Op in-group** | `@bot tóm tắt` / `@bot refresh note` · `@bot Q&A` trên note + history · auto-detect action item nhúng vào note |
 | **DM với sếp** | Q&A cross-group · "tóm tắt group X tuần này" · list việc đang mở · KHÔNG có push tự động |
-| **Web (user)** | Sidebar 8 section (Dashboard, Groups, Action Items, Digests-disabled, Channels, Plugins, Usage, Settings). Đợt 2 §9. |
+| **Web (user)** | Sidebar 8 section (Dashboard, Groups, Action Items, Digests-disabled, Channels, Plugins, Usage, Settings). §9. |
 | **Web (super)** | 3 page — Bosses, Payments, Revenue. Role-gated qua env var. |
 | **Channel** | Zalo (ưu tiên) + Telegram. Lark Messenger hoãn. |
 | **AI** | Provider abstraction (OpenAI / Groq / Anthropic / Gemini / Custom). 2-tier fast/smart. BYO key. |
@@ -146,8 +151,7 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Agent Layer                               │
-│   (Đợt 2 §6)                                                    │
+│                       Agent Layer (§6)                          │
 │                                                                 │
 │   Operations:                                                   │
 │     - GroupNoteUpdater  (debounce/threshold)                   │
@@ -160,8 +164,7 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│                       LLM Abstraction                           │
-│   (Đợt 2 §7)                                                    │
+│                       LLM Abstraction (§7)                      │
 │                                                                 │
 │   Provider clients (1 file/cái):                                │
 │     - OpenAICompatibleClient (OpenAI, Groq, OpenRouter, …)     │
@@ -176,8 +179,7 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
   ─────────────
 
 ┌─────────────────────────────────────────────────────────────────┐
-│                       Web Application                           │
-│   (Đợt 2 §9)                                                    │
+│                       Web Application (§9)                      │
 │                                                                 │
 │   - User pages: Dashboard, Groups, Notes, Channels, ...        │
 │   - Superadmin pages: Bosses, Payments, Revenue                │
@@ -373,7 +375,7 @@ trong dashboard của mình.
 ### 3.6 Mở
 
 - **(mở) UX nhiều sếp: tách vs gộp.** Tách đơn giản hơn (mỗi sếp
-  experience độc lập). List vào Đợt 2.
+  experience độc lập). Em recommend tách.
 
 ---
 
@@ -513,8 +515,8 @@ CREATE INDEX idx_group_note_versions_note ON group_note_versions(group_note_id, 
 
 ### 4.7 Mở
 
-- **(mở) Schema 7 section cố định vs cấu hình được per-boss.** Cố định
-  cho MVP. Cấu hình được = thêm param vào prompt template. List Đợt 2.
+- **(mở) Schema 7 section cố định vs cấu hình được per-boss.** Em
+  recommend cố định cho MVP.
 
 ---
 
@@ -596,7 +598,7 @@ CREATE INDEX idx_messages_fts ON messages USING GIN(fts);
 - **1 collection duy nhất**, filter qua payload `boss_id`. Tránh
   overhead quản N collection. Boss-filter chạy nhanh.
 - Embedding: `text-embedding-3-small` (1536 dims) cho MVP. Switch được
-  qua LLM-abstraction ở Đợt 2.
+  qua LLM-abstraction ở §7.
 - Granularity: **per-message** cho MVP. Message Zalo phần lớn ngắn.
   Paragraph chunking hoãn.
 - Payload: `{boss_id, provider, chat_id, ts, sender_name}` để filterable.
@@ -657,23 +659,775 @@ và build digest tương lai.
 ### 5.7 Mở
 
 - **(mở) Voice transcription** — API (OpenAI/Groq Whisper) vs tự host
-  (whisper.cpp). API cho MVP; tự host Phase 2 nếu cost quan trọng.
+  (whisper.cpp). Em recommend API cho MVP.
 - **(mở) Image OCR** — hoãn Phase 1.
 - **(mở) Quyền "xoá tôi khỏi data" cho cá nhân được mention** — hoãn.
 
 ---
 
-## Đợt 2 preview
+## 6. Agent layer
 
-Sau khi Đợt 1 OK:
+### 6.1 Operations & routing
 
-- §6 Agent layer — operation routing, tool calling chain, **multi-agent
-  hay không**, quản context window
-- §7 LLM abstraction — provider clients, ModelRegistry, 2-tier routing,
-  fallback khi gap capability
-- §8 Plugin architecture — manifest format, OAuth flow, settings
-  auto-render
-- §9 Web admin — user pages + superadmin pages, auth, channel wizard
-- §10 Tech stack & infra — PG + Qdrant + FastAPI + HTMX, Docker, env,
-  observability
-- §11 Tổng hợp open questions
+3 loại operation:
+
+| Operation | Trigger | Mục tiêu | Output |
+|---|---|---|---|
+| **GroupNoteUpdater** | Debounce/threshold (§4.3) | Rebuild markdown của group_note | UPDATE group_notes |
+| **InGroupResponder** | `@bot` mention trong group | Trả lời tại group | Outbound message |
+| **DMResponder** | Sếp DM cho bot | Trả lời sếp riêng | Outbound DM |
+
+Router quyết định op từ inbound event:
+- DM từ linked boss → DMResponder
+- Group msg có `@bot` mention → InGroupResponder
+- Mọi group msg khác → chỉ trigger NoteUpdater (no reply)
+
+### 6.2 Single agent vs multi-agent
+
+Đây là câu hỏi anh đặt rõ. Em phân tích:
+
+**Multi-agent (kiểu LangGraph)**: 1 op = nhiều LLM call cho nhiều
+"agent" specialised (vd ResearcherAgent → SearcherAgent → WriterAgent).
+Pro: phân vai bài bản. Con: latency tăng 3–10x, debug khó, prompt phình.
+
+**Single agent per op**: mỗi op = 1 LLM call có tool. Tool dispatcher chạy
+tool, LLM tiếp tục. Simple, debug dễ, latency thấp.
+
+Em recommend **single agent per op** vì:
+- Op của mình không phức tạp đến mức cần phân vai (NoteUpdater = "rebuild
+  markdown từ input"; Responder = "trả lời câu hỏi với tool")
+- Multi-agent thường wins khi task có planning phức tạp nhiều bước —
+  ở đây không có.
+- Cost & latency là constraint thực tế.
+
+Nhưng giữa các op vẫn "đa agent" theo nghĩa **3 op = 3
+prompt/persona/model tier khác nhau**:
+- **NoteUpdater**: prompt "biên tập markdown", smart model, tool tối
+  thiểu (chỉ `edit_note`)
+- **InGroupResponder**: prompt "thư ký trong group", smart hoặc fast tuỳ
+  message, full core tool + plugin tool
+- **DMResponder**: prompt "thư ký riêng cho sếp", smart, full tool
+
+**Quyết định:** single-agent per op, 3 op tách biệt. Multi-agent giữ
+làm option Phase 2 nếu trải nghiệm thật cho thấy task quá phức tạp.
+
+### 6.3 Tool calling
+
+Follow chuẩn OpenAI function calling. Tool đăng ký vào dispatcher:
+
+```python
+@dataclass
+class ToolSpec:
+    name: str
+    description: str
+    parameters: dict             # JSON Schema
+    handler: Callable[[dict, BossContext], Awaitable[ToolResult]]
+```
+
+**Core tools (always available):**
+
+| Tool | Mô tả |
+|---|---|
+| `search_history(query, group?, days?)` | Hybrid FTS + vector retrieval trên messages |
+| `read_group_note(group_id)` | Trả về note hiện tại |
+| `refresh_group_note(group_id)` | Trigger NoteUpdater on-demand |
+| `edit_group_note(group_id, section, new_content)` | Sửa 1 section (bot dùng cho DMResponder) |
+| `list_action_items(group_id?, status?)` | List task từ section "Việc đang mở" |
+| `mark_action_item(item_id, status)` | Đánh dấu done/cancel |
+| `list_groups()` | Liệt kê group sếp đang link |
+| `current_time()` | Thời gian hiện tại theo TZ sếp |
+
+**Plugin tools** (load động per-boss, §8).
+
+**Tool calling loop:**
+
+```python
+async def agent_loop(op_ctx, max_depth=5):
+    messages = build_initial(op_ctx)
+    for step in range(max_depth):
+        resp = await llm.chat(messages, tools=tools_for(op_ctx))
+        if not resp.tool_calls:
+            return resp.content
+        for call in resp.tool_calls:
+            result = await dispatcher.call(call, op_ctx)
+            messages.append(tool_message(call.id, result))
+    log.warn("max depth reached")
+    return last_response.content or "(em xin lỗi, em hơi loạn)"
+```
+
+- Max depth = 5 → ngăn loop dại
+- Retry: 2 lần trên transient error (timeout, 5xx, rate-limit)
+- Mỗi tool call có timeout (default 30s)
+- Log mọi tool call vào `tool_call_log` để debug
+
+### 6.4 Context window management
+
+Mỗi op có "context budget" theo tier model:
+
+| Op | Smart model budget | Cấu trúc context |
+|---|---|---|
+| NoteUpdater | ~8k tokens | system prompt (~1k) + note hiện tại (~2k) + delta messages (~5k, trim đầu nếu quá) |
+| InGroupResponder | ~6k tokens | system prompt (~1k) + group_note (~2k) + retrieval top-20 (~2k) + recent 10 msg (~1k) |
+| DMResponder | ~10k tokens | system prompt (~1k) + (group_note nếu hỏi 1 nhóm) (~2k) + retrieval (~3k) + recent DM history (~2k) + tools list (~2k) |
+
+Token counter (tiktoken hoặc provider-native) enforce hard limit. Trim
+policy theo thứ tự:
+1. Drop messages cũ nhất trong delta
+2. Drop retrieval kết quả thấp điểm
+3. Truncate group_note giữ section ⚡, 🚧, ✅ (drop 📜 nếu phải)
+
+### 6.5 Mở
+
+- **(mở) Multi-agent cho Phase 2** — khi nào kéo lên? Trigger: nếu single
+  agent fail thường xuyên ở task phức tạp.
+- **(mở) Tool call caching** — vd `list_groups()` đổi hiếm, có cache 60s?
+
+---
+
+## 7. LLM abstraction
+
+### 7.1 Interface
+
+```python
+class LLMClient(ABC):
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        model: str,
+        tools: list[ToolSpec] | None = None,
+        max_tokens: int = 2048,
+        temperature: float = 0.7,
+    ) -> ChatResponse: ...
+
+    async def embed(
+        self,
+        texts: list[str],
+        model: str,
+    ) -> list[list[float]]: ...
+```
+
+3 implementation:
+- `OpenAICompatibleClient(base_url, api_key)` — cover OpenAI, Groq,
+  OpenRouter, DeepSeek, Cerebras, Fireworks, Together, xAI, Ollama, vLLM
+- `AnthropicClient(api_key)` — schema khác (system prompt, tool_use)
+- `GeminiClient(api_key)` — schema khác
+
+### 7.2 ModelRegistry
+
+File config `config/models.yaml`:
+
+```yaml
+- name: gpt-4o-mini
+  provider: openai
+  endpoint: openai_compat
+  base_url: https://api.openai.com/v1
+  tier: smart                                  # smart | fast
+  ctx_max: 128000
+  capabilities: [tool_use, json_mode, vision]
+  cost_per_1m_input_usd: 0.15
+  cost_per_1m_output_usd: 0.60
+
+- name: llama-3.3-70b-versatile
+  provider: groq
+  endpoint: openai_compat
+  base_url: https://api.groq.com/openai/v1
+  tier: fast
+  ctx_max: 128000
+  capabilities: [tool_use]
+  cost_per_1m_input_usd: 0.59
+  cost_per_1m_output_usd: 0.79
+
+- name: claude-haiku-4-5
+  provider: anthropic
+  endpoint: anthropic
+  tier: smart
+  ctx_max: 200000
+  capabilities: [tool_use, vision]
+  cost_per_1m_input_usd: 1.00
+  cost_per_1m_output_usd: 5.00
+
+# Thêm model mới = thêm row, không sửa code
+```
+
+Reload khi server start. Superadmin có thể thêm row qua web ở Phase 2.
+
+### 7.3 Router & 2-tier routing
+
+```python
+def pick_model(boss: Boss, op: Operation) -> tuple[str, str]:
+    """Returns (provider, model_name)."""
+    tier = TIER_BY_OP[op]   # NoteUpdater→smart, ack→fast, Responder→smart, ...
+    if tier == "smart":
+        return boss.smart_provider, boss.smart_model
+    return boss.fast_provider, boss.fast_model
+```
+
+Mỗi op trong code khai báo tier mặc định. Sếp config 2 model qua web;
+nếu chỉ 1 model → cả 2 tier dùng cùng.
+
+### 7.4 Capability gap fallback
+
+Khi op yêu cầu capability mà model boss chọn không có:
+
+```python
+def resolve_capability(model_name: str, required: list[str], boss: Boss) -> str:
+    caps = registry.get(model_name).capabilities
+    missing = set(required) - set(caps)
+    if not missing:
+        return model_name
+    # fallback theo priority: smart > vision > tool_use
+    for candidate in [boss.smart_model, boss.vision_model_default]:
+        cc = registry.get(candidate).capabilities
+        if not (set(required) - set(cc)):
+            log.warn(f"fallback {model_name} → {candidate} ({missing})")
+            return candidate
+    raise CapabilityMissing(required, model_name)
+```
+
+Vd: boss chọn Groq Llama 3.3 cho fast nhưng op cần vision → fallback
+sang smart (gpt-4o).
+
+Cảnh báo trên web khi save config: "Fast model không có vision → khi
+xử lý ảnh sẽ tự fallback sang Smart model."
+
+### 7.5 Cost tracking
+
+Mỗi LLM call:
+
+```sql
+token_usage (
+  id           BIGSERIAL PRIMARY KEY,
+  boss_id      INTEGER NOT NULL REFERENCES users(id),
+  operation    TEXT NOT NULL,        -- 'note_update' | 'in_group' | 'dm' | 'embed'
+  provider     TEXT NOT NULL,
+  model        TEXT NOT NULL,
+  tokens_in    INTEGER NOT NULL,
+  tokens_out   INTEGER NOT NULL,
+  cost_usd     NUMERIC(10, 6) NOT NULL,
+  latency_ms   INTEGER NOT NULL,
+  called_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  status       TEXT NOT NULL          -- 'ok' | 'error' | 'rate_limited'
+);
+CREATE INDEX idx_token_usage_boss_time ON token_usage(boss_id, called_at DESC);
+```
+
+Web `/usage` chart từ bảng này (cost theo ngày, theo op, theo model).
+
+### 7.6 Mở
+
+- **(mở) Streaming response** — bot reply có stream chunk được không?
+  Cải UX cảm giác nhanh. Defer (channel SDK support tricky).
+- **(mở) Prompt caching** (Anthropic, OpenAI) — giảm cost khi reuse
+  system prompt. Phase 2.
+
+---
+
+## 8. Plugin architecture
+
+### 8.1 Plugin folder
+
+Mỗi plugin = 1 thư mục trong `plugins/`:
+
+```
+plugins/
+└── google_calendar/
+    ├── manifest.toml          # metadata
+    ├── tools.py               # tool definitions + handlers
+    ├── auth.py                # OAuth start + callback
+    ├── settings_schema.json   # config form schema (JSON Schema)
+    ├── README.md              # cho user đọc khi enable
+    └── assets/
+        └── icon.svg
+```
+
+### 8.2 Manifest
+
+```toml
+# plugins/google_calendar/manifest.toml
+id          = "google_calendar"
+name        = "Google Calendar"
+version     = "0.1.0"
+description = "Push action item / deadline thành Calendar event"
+icon        = "assets/icon.svg"
+
+[auth]
+type        = "oauth2"
+scopes      = ["https://www.googleapis.com/auth/calendar.events"]
+
+[capabilities]
+tools       = ["create_event", "list_events", "delete_event"]
+```
+
+### 8.3 Tools
+
+```python
+# plugins/google_calendar/tools.py
+from app.plugin_api import tool, ToolContext
+
+@tool(
+    name="gcal_create_event",
+    description="Tạo Google Calendar event từ action item",
+    parameters={
+        "type": "object",
+        "properties": {
+            "title":        {"type": "string"},
+            "start_iso":    {"type": "string"},
+            "duration_min": {"type": "integer", "default": 30},
+            "description":  {"type": "string"},
+        },
+        "required": ["title", "start_iso"],
+    },
+)
+async def create_event(ctx: ToolContext, title, start_iso, duration_min=30, description=""):
+    token    = await ctx.get_oauth_token()
+    settings = await ctx.get_settings()   # default_calendar_id, ...
+    # call Google API
+    ...
+    return {"event_id": "...", "url": "..."}
+```
+
+Tool prefix `gcal_` tránh collision với core tool / plugin khác.
+
+### 8.4 OAuth flow
+
+```
+1. Sếp click "Connect" trên web /plugins/google_calendar
+2. Web call plugin.auth.start(boss_id) → trả về URL Google consent
+3. Sếp click URL, login Google, accept scopes
+4. Google redirect về /api/oauth/plugin/google_calendar/callback?code=...&state=...
+5. Endpoint gọi plugin.auth.callback(boss_id, code) → exchange code
+   lấy access_token + refresh_token
+6. Lưu vào boss_integrations (auth_blob_enc, encrypted)
+7. Redirect web về /plugins/google_calendar (đã connected)
+```
+
+Schema:
+
+```sql
+boss_integrations (
+  id              BIGSERIAL PRIMARY KEY,
+  boss_id         INTEGER NOT NULL REFERENCES users(id),
+  plugin_id       TEXT NOT NULL,
+  enabled         BOOLEAN NOT NULL DEFAULT TRUE,
+  auth_blob_enc   BYTEA,                  -- encrypted token JSON
+  settings_json   JSONB NOT NULL DEFAULT '{}'::jsonb,
+  connected_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (boss_id, plugin_id)
+);
+```
+
+### 8.5 Settings auto-render
+
+`settings_schema.json` (JSON Schema chuẩn):
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "default_calendar_id": {
+      "type": "string",
+      "title": "Calendar mặc định",
+      "x-enum-from": "list_calendars"
+    },
+    "auto_push_deadlines": {
+      "type": "boolean",
+      "title": "Tự đẩy deadline từ group lên Calendar",
+      "default": false
+    },
+    "reminder_minutes": {
+      "type": "integer",
+      "title": "Nhắc trước (phút)",
+      "default": 30,
+      "minimum": 0,
+      "maximum": 1440
+    }
+  },
+  "required": ["default_calendar_id"]
+}
+```
+
+Web có generic `<JsonSchemaForm>` (HTMX + Alpine) render thành form HTML.
+`x-enum-from` = gọi 1 plugin handler để populate dropdown động (vd list
+calendar Google của sếp).
+
+### 8.6 Plugin loading
+
+App startup scan `plugins/`:
+
+```python
+plugins_registry: dict[str, Plugin] = {}
+
+for plugin_dir in PLUGINS_ROOT.glob("*/"):
+    manifest = load_manifest(plugin_dir / "manifest.toml")
+    tools_module = import_module(f"plugins.{plugin_dir.name}.tools")
+    auth_module  = import_module(f"plugins.{plugin_dir.name}.auth")
+    plugins_registry[manifest.id] = Plugin(manifest, tools_module, auth_module)
+```
+
+Thêm plugin = drop folder + restart server. **Không sửa core.**
+
+### 8.7 Per-boss tool composition
+
+Khi build context cho LLM call:
+
+```python
+tools = list(CORE_TOOLS)
+enabled = await boss_integrations_repo.list_enabled(boss_id)
+for inst in enabled:
+    plugin = plugins_registry[inst.plugin_id]
+    tools.extend(plugin.get_tools(boss_id))
+```
+
+Boss A không bật Notion → LLM của boss A không thấy Notion tool. Context
+gọn, không hallucinate gọi sai.
+
+### 8.8 Mở
+
+- **(mở) Plugin sandboxing** — plugin code in-process, có quyền đọc DB
+  & file system. Phase 0 trust mọi plugin do em viết. Phase 2 nếu mở
+  3rd-party → tách process (kiểu MCP) hoặc Wasm.
+- **(mở) Plugin version & migrate** — manifest.version tăng → khi nào
+  invalidate auth/settings? Hoãn.
+
+---
+
+## 9. Web admin
+
+### 9.1 Auth & session
+
+- **Google OAuth** (primary) qua Authlib. Email/password (fallback) cho
+  ai không có Google account.
+- Session cookie HTTP-only, Secure, SameSite=Lax, TTL 30 ngày.
+- `role` từ `users.role`. Superadmin auto-set khi email trong env
+  `SUPERADMIN_EMAILS`.
+
+### 9.2 Sitemap (user pages)
+
+```
+/login                   — Google OAuth + email/password
+/                        — Dashboard
+/groups                  — List group đã capture
+/groups/:id              — Group detail (note + history + action items + members)
+/action-items            — Tổng hợp action item cross-group
+/digests                 — (Phase 1, MVP show "Coming soon")
+/channels                — Connect Zalo / Telegram / Lark Messenger
+/plugins                 — Marketplace + manage installed
+/plugins/:id             — Plugin detail (OAuth + settings form)
+/usage                   — Token + cost dashboard
+/settings/general        — Tên bot, ngôn ngữ, TZ, retention
+/settings/ai             — Provider + model + custom provider
+/settings/account        — Email, đổi mật khẩu, đăng xuất
+/subscription            — Gói + VietQR + lịch sử thanh toán
+```
+
+### 9.3 Sitemap (superadmin pages)
+
+Chỉ visible khi `role=superadmin`:
+
+```
+/admin/bosses            — List + detail + set expiry + add payment
+/admin/payments          — Log payment + [+ Add payment]
+/admin/revenue           — Chart MRR / ARR / top customer
+```
+
+### 9.4 Dashboard widgets
+
+```
+┌────────────┬────────────┬────────────┬────────────┐
+│ N groups   │ K open     │ Digest:    │ Tháng này  │
+│ across M   │ action     │ (Coming    │ $X /       │
+│ channels   │ items      │  soon)     │ Y M tok    │
+└────────────┴────────────┴────────────┴────────────┘
+┌──────────────────────────┬──────────────────────────┐
+│ Hoạt động 7 ngày qua     │ Cảnh báo                 │
+│ [bar chart messages/day] │ • Zalo OA token sắp hết  │
+│                          │ • 3 task quá hạn         │
+└──────────────────────────┴──────────────────────────┘
+```
+
+### 9.5 Group detail page
+
+Mục đích = sếp thấy bot đang làm gì trong group, edit note, scan action item:
+
+```
+┌───────────────────────────────────────────────────┐
+│ ← Groups · Team Sale Q2                          │
+│                                                   │
+│ [Note] [History] [Action Items] [Members]        │
+│ ───────                                           │
+│                                                   │
+│ ┌─ Group note ─────────────────────────────────┐ │
+│ │ # Team Sale Q2                                │ │
+│ │ Cập nhật 30/5 14:32 · 47 msg/ngày             │ │
+│ │ ...                                           │ │
+│ │ (markdown rendered, click Edit để sửa)        │ │
+│ └──────────────────────────────────────────────┘ │
+│                                                   │
+│ [Edit] [Refresh now] [Export]                    │
+└───────────────────────────────────────────────────┘
+```
+
+- **Note tab**: render note + Edit/Refresh/Export
+- **History tab**: timeline version note + diff view
+- **Action Items tab**: filter view của section "Việc đang mở"
+- **Members tab**: list người gửi (display name), count message 7d
+
+### 9.6 Channel wizard
+
+Mỗi channel có flow guide ngắn:
+
+```
+/channels → [ Connect Zalo ]
+  ↓
+Modal: "Em sẽ mở Zalo, bot tự DM anh. Anh chỉ tap Gửi."
+  ↓ Click "Tiếp"
+Deep-link → Zalo app
+  ↓ (Sếp tap Gửi message /start <token>)
+Bot reply, web detect (poll hoặc Server-Sent Events)
+  ↓
+Channels page hiện ✓
+```
+
+Telegram & Lark Messenger tương tự (URL scheme khác).
+
+### 9.7 Tech stack web
+
+- **Backend**: FastAPI, cùng process với bot
+- **Templating**: Jinja2 server-side render
+- **Interaction**: HTMX cho partial update (no full SPA)
+- **Client state**: Alpine.js cho toggle/dropdown nhẹ
+- **CSS**: Tailwind (utility-first)
+- **Form**: HTML form + HTMX submit (no React)
+- **Charts**: Chart.js trên Usage/Revenue page
+
+Lý do: web admin scale nhỏ (1 sếp = 1 user, ít concurrent), không cần
+SPA. HTMX = 1/5 code so với React. Sửa nhanh, dễ ship.
+
+### 9.8 Mở
+
+- **(mở) i18n** — UI tiếng Việt mặc định. Toggle EN có cần? MVP chỉ VN.
+- **(mở) Mobile-responsive** — Tailwind breakpoint đủ, không PWA.
+
+---
+
+## 10. Tech stack & infrastructure
+
+### 10.1 Stack
+
+| Layer | Chọn | Lý do |
+|---|---|---|
+| **Language** | Python 3.12+ | Ecosystem AI/LLM, team đã quen |
+| **Backend framework** | FastAPI | Async-first, OpenAPI sẵn, share với web admin |
+| **DB driver** | asyncpg | Fastest async Postgres driver |
+| **ORM** | None (SQL raw qua repositories) | Tránh ORM ma thuật, query rõ ràng |
+| **Migration** | Alembic | Chuẩn Python |
+| **Vector DB** | Qdrant 1.x (Docker) | Đã quen, scale tốt |
+| **Embed model** | text-embedding-3-small (1536d) | Cân bằng cost/chất lượng |
+| **Voice STT** | OpenAI Whisper API (MVP) | Cost & latency |
+| **URL fetch** | httpx + trafilatura | Extract content sạch |
+| **Channel — Zalo** | Zalo OA HTTPS API + webhook | (không có Python SDK chính chủ) |
+| **Channel — Telegram** | python-telegram-bot v21+ | Async, mature |
+| **Channel — Lark Messenger** | lark-oapi SDK (Phase 1) | Official |
+| **Auth — Google OAuth** | Authlib | Maintained, async |
+| **Password hash** | bcrypt (passlib) | Standard |
+| **Encryption (token blob)** | cryptography (Fernet) | Symmetric, key trong env |
+| **Web template** | Jinja2 | Built-in FastAPI |
+| **Web interaction** | HTMX | Server-rendered + partial update |
+| **CSS** | Tailwind CSS | Utility-first |
+| **Charts** | Chart.js | Light, đủ cho dashboard |
+| **Scheduler** | APScheduler (async) | Cron + interval, in-process |
+| **Logging** | structlog → JSON | Easy parse |
+| **Settings** | pydantic-settings | Type-safe env loading |
+| **Test** | pytest + pytest-asyncio | Standard |
+
+### 10.2 Project structure (đề xuất)
+
+```
+src/
+├── main.py                    # FastAPI app factory + lifespan
+├── config.py                  # pydantic-settings
+├── container.py               # DI: build clients, register repos
+│
+├── channels/                  # inbound + outbound per channel
+│   ├── base.py                # InboundMessage, OutboundMessage protocols
+│   ├── zalo.py
+│   ├── telegram.py
+│   └── lark_msg.py            # (Phase 1)
+│
+├── router.py                  # event → operation routing
+│
+├── repositories/              # DB access, all async
+│   ├── users.py
+│   ├── account_links.py
+│   ├── messages.py
+│   ├── group_notes.py
+│   ├── outbound_messages.py
+│   ├── boss_integrations.py
+│   ├── payments.py
+│   └── token_usage.py
+│
+├── agent/                     # operation handlers
+│   ├── note_updater.py
+│   ├── in_group_responder.py
+│   ├── dm_responder.py
+│   ├── tools/                 # core tool implementations
+│   │   ├── search.py
+│   │   ├── notes.py
+│   │   ├── action_items.py
+│   │   └── ...
+│   └── dispatcher.py          # tool registry + call
+│
+├── llm/                       # LLM abstraction
+│   ├── base.py                # LLMClient interface
+│   ├── openai_compat.py
+│   ├── anthropic.py
+│   ├── gemini.py
+│   ├── registry.py            # ModelRegistry
+│   └── router.py              # pick_model
+│
+├── plugins/                   # workspace cho plugin dirs
+│   └── (rỗng ở Phase 0)
+│
+├── web/
+│   ├── routes/
+│   │   ├── app.py             # user pages
+│   │   ├── admin.py           # superadmin pages
+│   │   ├── api.py             # JSON endpoints cho HTMX
+│   │   └── oauth.py           # callbacks (Google + plugin)
+│   ├── templates/             # Jinja2
+│   ├── static/                # CSS, JS, icons
+│   └── deps.py                # session, role gate
+│
+├── scheduler/                 # APScheduler jobs
+│   ├── note_flush.py
+│   ├── subscription_check.py
+│   └── (Phase 1 jobs)
+│
+├── infra/                     # external client wrappers
+│   ├── db.py                  # asyncpg pool factory
+│   ├── qdrant.py
+│   └── observability.py
+│
+└── utils/
+    ├── dates.py
+    ├── crypto.py              # Fernet
+    ├── text.py                # diacritic normalize, ...
+    └── markdown.py            # render group note section-skip-empty
+
+migrations/                    # Alembic
+config/
+├── models.yaml                # ModelRegistry
+└── prompts/                   # Long prompt templates (Jinja2)
+tests/
+├── unit/
+└── integration/
+docker/
+├── docker-compose.yml         # dev: postgres + qdrant + app
+└── Dockerfile
+pyproject.toml
+```
+
+### 10.3 Deployment (MVP)
+
+```
+┌─────────────────────────────────────────────────┐
+│  1 VPS (Ubuntu 22+, 4 vCPU / 8 GB RAM đủ đầu)  │
+│                                                 │
+│  Docker Compose:                                │
+│   - app           (FastAPI, port 80/443)        │
+│   - postgres:16   (port 5432, volume)           │
+│   - qdrant:1.x    (port 6333, volume)           │
+│                                                 │
+│  Reverse proxy: Caddy (auto HTTPS)              │
+│  Domain: app.botname.com → app                  │
+└─────────────────────────────────────────────────┘
+```
+
+Khi scale (>50 sếp, LLM cost cao): tách Qdrant ra VPS riêng, app chạy
+multi-instance sau load balancer.
+
+### 10.4 Env config
+
+`.env`:
+
+```bash
+# DB
+POSTGRES_DSN=postgres://user:pass@localhost:5432/groupnote
+QDRANT_URL=http://localhost:6333
+
+# Auth
+GOOGLE_OAUTH_CLIENT_ID=...
+GOOGLE_OAUTH_CLIENT_SECRET=...
+SESSION_SECRET=<random 64 bytes>
+FERNET_KEY=<base64 32 bytes>      # for token blob encryption
+
+# Superadmin
+SUPERADMIN_EMAILS=tranvuongquocdat@gmail.com
+
+# Platform LLM (cho free trial / fallback)
+PLATFORM_OPENAI_API_KEY=<optional>
+
+# Channels
+ZALO_OA_ID=...
+ZALO_OA_SECRET=...
+ZALO_WEBHOOK_VERIFY=...
+TELEGRAM_BOT_TOKEN=...
+LARK_APP_ID=...                   # Phase 1
+LARK_APP_SECRET=...
+
+# Subscription (cho hiển thị VietQR)
+BANK_ACCOUNT_NUMBER=...
+BANK_ACCOUNT_NAME=...
+BANK_BIN=...
+```
+
+### 10.5 Observability
+
+- **Logging**: structlog → JSON → stdout → `journalctl` hoặc file.
+  Fields bắt buộc: `boss_id`, `operation`, `provider`, `model`,
+  `tokens_*`, `latency_ms`, `request_id`.
+- **Metrics**: `/metrics` endpoint format Prometheus (in-process). Key:
+  - `messages_ingested_total{provider,boss_id}`
+  - `note_updates_total{boss_id,status}`
+  - `llm_calls_total{provider,model,status}`
+  - `llm_call_latency_seconds`
+  - `outbound_messages_total{channel,status}`
+- **Tracing**: defer Phase 2 (OpenTelemetry).
+- **Health**: `/healthz` → `{status, db, qdrant}` cho monitor.
+
+### 10.6 Mở
+
+- **(mở) Multi-region** — server ở SG/Singapore cho latency Zalo
+  webhook + LLM API. Defer.
+- **(mở) Backup** — pg_dump cron daily lên S3-compatible. Defer chi tiết.
+
+---
+
+## 11. Tổng hợp open questions
+
+| § | Open question | Em recommend |
+|---|---|---|
+| 1.7 / 5.4 | Media ingest trong MVP | **B**: URL fetch + voice transcribe |
+| 2.5 | Single-process vs split web/worker | Single cho MVP, split khi >50 sếp |
+| 3.6 | Nhiều sếp cùng nhóm: tách vs gộp | **Tách** (mỗi sếp 1 note độc lập) |
+| 4.7 | Schema 7 section cố định vs cấu hình per-boss | **Cố định** cho MVP |
+| 5.7 | Voice STT: API vs tự host | API (Whisper) cho MVP |
+| 5.7 | Image OCR | Hoãn Phase 1 |
+| 5.7 | Right-to-be-forgotten cá nhân được mention | Hoãn |
+| 6.5 | Multi-agent (LangGraph) cho Phase 2 | Defer, theo dõi failure rate |
+| 6.5 | Tool call caching | Defer |
+| 7.6 | Streaming LLM response | Defer (channel SDK support tricky) |
+| 7.6 | Prompt caching Anthropic/OpenAI | Phase 2 |
+| 8.8 | Plugin sandboxing | Trust 1st-party MVP, Wasm/MCP nếu mở 3rd-party |
+| 8.8 | Plugin version & migrate | Defer |
+| 9.8 | i18n web UI | VN-only MVP |
+| 9.8 | Mobile responsive | Tailwind breakpoint đủ, không PWA |
+| 10.6 | Multi-region | Defer |
+| 10.6 | Backup pg_dump cron | Defer chi tiết |
+
+**Cách close questions:**
+
+- Reply ngắn: `media ingest: B` · `nhiều sếp: tách` · `section schema: cố định` · ...
+- Hoặc reply 1 message gom tất cả thay đổi anh muốn.
+- Hoặc `Spec OK` để duyệt theo em recommend → em commit final + invoke
+  `writing-plans` tạo implementation plan.
