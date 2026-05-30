@@ -24,3 +24,6 @@ data/
 
 # Local-only material
 reference for SMART/
+
+# Claude Code runtime + worktrees
+.claude/
