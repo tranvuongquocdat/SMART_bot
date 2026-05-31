@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 import src.agents  # force import all op modules at startup
 from src.agents.dispatcher import OperationDispatcher
+from src.agents.triggers import TriggerEngine
 from src.events.bus import InMemoryEventBus
 from src.infra.db import create_pool
 from src.infra.observability import configure_logging
@@ -40,6 +41,8 @@ async def lifespan(app: FastAPI):
     )
     app.state.op_dispatcher = OperationDispatcher(app.state.bus, app.state)
     app.state.op_dispatcher.attach_all()
+    app.state.trigger_engine = TriggerEngine(app.state.bus)
+    app.state.trigger_engine.attach_all()
     yield
     await app.state.db_pool.close()
 
