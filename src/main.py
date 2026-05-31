@@ -9,6 +9,7 @@ from src.infra.qdrant import create_qdrant
 from src.llm.api_keys import make_api_key_provider
 from src.llm.native import NativeGateway
 from src.llm.registry import ModelRegistry
+from src.memory.internal import InternalMemoryProvider, ensure_collection
 from src.repositories.base import BossContext
 from src.repositories.feature_budgets import FeatureBudgetsRepo
 from src.repositories.llm_routes import LLMRoutesRepo
@@ -28,6 +29,12 @@ async def lifespan(app: FastAPI):
         llm_routes_repo=LLMRoutesRepo(app.state.db_pool, _admin_ctx),
         feature_budgets_repo=FeatureBudgetsRepo(app.state.db_pool, _admin_ctx),
         api_key_provider=make_api_key_provider(app.state.db_pool),
+    )
+    await ensure_collection(app.state.qdrant)
+    app.state.memory_provider = InternalMemoryProvider(
+        pool=app.state.db_pool,
+        qdrant=app.state.qdrant,
+        llm_gateway=app.state.llm_gateway,
     )
     yield
     await app.state.db_pool.close()

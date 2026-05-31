@@ -38,6 +38,72 @@ class MemoryEntriesRepo(BossScopedRepo):
             )
             return _row_to_memory(row) if row else None
 
+    async def get_by_id(self, memory_id: int) -> Memory | None:
+        async with self.pool.acquire() as c:
+            row = await c.fetchrow(
+                "SELECT * FROM memory_entries WHERE id=$1 AND boss_id=$2",
+                memory_id,
+                self.ctx.boss_id,
+            )
+            return _row_to_memory(row) if row else None
+
+    async def list_by_scope(
+        self, scope: MemoryScope, limit: int = 100
+    ) -> list[Memory]:
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT * FROM memory_entries
+                WHERE boss_id=$1 AND scope=$2
+                ORDER BY updated_at DESC LIMIT $3
+                """,
+                self.ctx.boss_id,
+                scope.value,
+                limit,
+            )
+            return [_row_to_memory(r) for r in rows]
+
+    async def list_by_ids(self, ids: "list[int]") -> list[Memory]:
+        if not ids:
+            return []
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT * FROM memory_entries
+                WHERE id = ANY($1::BIGINT[]) AND boss_id=$2
+                """,
+                ids,
+                self.ctx.boss_id,
+            )
+        by_id = {r["id"]: _row_to_memory(r) for r in rows}
+        return [by_id[i] for i in ids if i in by_id]
+
+    async def update_content(self, memory_id: int, content: str) -> None:
+        async with self.pool.acquire() as c:
+            await c.execute(
+                """
+                UPDATE memory_entries
+                SET content=$3, updated_at=NOW()
+                WHERE id=$1 AND boss_id=$2
+                """,
+                memory_id,
+                self.ctx.boss_id,
+                content,
+            )
+
+    async def set_qdrant_point(self, memory_id: int, qdrant_point_id: str) -> None:
+        async with self.pool.acquire() as c:
+            await c.execute(
+                """
+                UPDATE memory_entries
+                SET qdrant_point_id=$3, updated_at=NOW()
+                WHERE id=$1 AND boss_id=$2
+                """,
+                memory_id,
+                self.ctx.boss_id,
+                qdrant_point_id,
+            )
+
     async def list(self, scope: MemoryScope, limit: int = 100) -> list[Memory]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(
