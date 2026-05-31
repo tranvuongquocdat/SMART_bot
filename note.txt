@@ -25,7 +25,7 @@ Tinh chỉnh version tiếp theo:
 - Lấy phần group note làm cốt lõi, thiết kế để các phần khác là mở rộng.
 - bàn luận kỹ cùng tôi
 
-Note spec:
+Note spec v2:
 - set up kiểu module để sau mở rộng ra thành bot mess, whatsapp hoặc các nền tảng khác cũng dễ hơn
 - ko cần support lark message channel, chỉ cần lark base
 - đã support boss dùng multi platform luôn chưa
@@ -34,4 +34,15 @@ Note spec:
 - phần 3: update: tôi muốn tự quản lý acc zalo bot gốc qua giao diện luôn, số message đã nhận và phản hồi của từng acc, vì là zalo có thể sẽ ko dùng zalo OA mà dùng acc cá nhân như hiện tại, nên là cần phân bổ acc nào sẽ phục vụ sếp nào, zalo OA sẽ set up sau
 - Rất chú ý phần migrate data, nhiều lần tôi làm việc với b mà data migration nma ko đồng bộ toàn bộ dẫn tới lỗi hệ thống khi update code
 - phần note group thì tham khảo thêm các bên như anthropic hay bydance đang làm, có nhiều kỹ thuật tốt đấy
+- phần media: code cũ đã có cơ chế để đọc được cả youtube, url, file full rồi mà
+- voice thì chưa cần support thật, để phase sau
+- nhớ là ko dùng zalo OA đâu đấy, zalo tham khảo code cũ
+- hạn chế dùng icon kiểu n ⚡, 🚧, ✅ (drop 📜 nếu phải) trong hệ thống, trông rất dại
+- UX UI cần sự chuyên nghiệp, tinh gọn, ko phải trông kiểu AI
+- trang superadmin có thể quản lý thêm các model có trong hệ thống (dạng model mặc định ấy)
+- phần các tính năng như nhắc lịch, kiểm soát dự án,... đang được xử lý ntn, vì các phần này rất quan trọng cho các bên, và cách mix model đang được tinh chỉnh ntn, chưa thấy nêu rõ
+
+Note spec v2.1:
+- Đúng vậy, không dùng code để map event, rất là không linh động, phần agent thiết kế thế cũng cứng quá, tham khảo các pattern để thiết kế agent linh động ở opensource tốt 2026
+- phần agent đúng là set up tù túng quá, cần module hoá để dễ develop sau này chứ thiết kế như giờ làm cho việc mở rộng hoặc tinh chỉnh rất khó khăn
 - 

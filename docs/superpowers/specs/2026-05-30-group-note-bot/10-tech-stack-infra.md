@@ -33,13 +33,34 @@
 | **Settings** | pydantic-settings | Type-safe env loading |
 | **Test** | pytest + pytest-asyncio | Standard |
 
-## 10.2 Project structure (đề xuất)
+## 10.2 Project structure
+
+Layering nguyên tắc (xem [§15.1](./15-agent-dispatch-extension.md#151-nguyên-tắc-cứng)):
+
+- **domain/**: entity dataclass, value object, không I/O
+- **repositories/**: I/O DB thuần, trả entity (không trả dict raw)
+- **services/**: business logic — gọi repos + memory + retrieval + LLM
+- **agents/**: operation = capability bundle (declarative, §15.2)
+- **web/schemas/**: DTO request/response (tách khỏi domain entity)
+
+Mọi extension point (operation, tool, memory provider, retrieval stage,
+LLM gateway, trigger, media adapter, resolver) có registry riêng,
+decorator declare. Add impl = drop file, không sửa core.
 
 ```
 src/
 ├── main.py                    # FastAPI app factory + lifespan
 ├── config.py                  # pydantic-settings
-├── container.py               # DI: build clients, register repos
+├── container.py               # DI: build providers, register repos/services
+│
+├── domain/                    # entity dataclass + value object (không I/O)
+│   ├── boss.py
+│   ├── message.py
+│   ├── group_note.py
+│   ├── bot_account.py
+│   ├── reminder.py
+│   ├── memory.py              # Memory dataclass + MemoryScope enum
+│   └── ...
 │
 ├── channels/                  # inbound + outbound per channel
 │   ├── base.py                # ChannelAdapter, InboundMessage, OutboundMessage protocols
@@ -48,84 +69,146 @@ src/
 │   └── (telegram / messenger / whatsapp Phase 1+)
 │
 ├── bot_accounts/              # quản lý bot acc (platform pool + boss-owned)
-│   ├── manager.py             # load credentials, assign, status update
-│   ├── ownership.py           # platform vs boss_owned logic + accept flow
-│   ├── zalo_session.py        # cookie / QR login flow
+│   ├── manager.py
+│   ├── ownership.py
+│   ├── zalo_session.py
 │   └── (telegram_session.py Phase 1+)
 │
 ├── events/                    # in-process EventBus (§14)
-│   ├── bus.py                 # publish/subscribe, OTel-compatible trace
-│   └── subscribers/           # built-in subs (note_updater, metrics, ...)
+│   ├── bus.py                 # InMemoryEventBus impl
+│   ├── schema.py              # Pydantic event payload models + version field
+│   └── subscribers/           # declared via @subscribe decorator
 │
-├── prompts/                   # prompt registry (§7)
-│   ├── loader.py              # prompts.get(key, version)
-│   └── (templates seed file)
-│
-├── router.py                  # event → operation routing
-│
-├── repositories/              # DB access, all async
-│   ├── users.py               # +boss_profile JSONB (§6.4 memory tier)
-│   ├── account_links.py
-│   ├── bot_accounts.py        # +ownership + accept status
-│   ├── bot_account_assignments.py
-│   ├── messages.py
-│   ├── group_notes.py
-│   ├── note_templates.py      # §4.8 template system
-│   ├── outbound_messages.py
-│   ├── boss_integrations.py
-│   ├── reminders.py
-│   ├── pins.py                # §6 pin_message tool
-│   ├── media_cache.py
-│   ├── models.py              # ModelRegistry DB
-│   ├── prompts.py             # §7 prompt registry
-│   ├── feature_routing.py
-│   ├── payments.py
-│   └── token_usage.py         # OTel-named fields (§14)
-│
-├── agent/                     # operation handlers
+├── agents/                    # operation = capability bundle (§15.2)
+│   ├── base.py                # Operation Protocol, @operation decorator
+│   ├── registry.py            # OperationRegistry — auto-scan
+│   ├── dispatcher.py          # EventBus → op dispatcher (§15.3, ~30 dòng)
+│   ├── context.py             # build_context(deps_type, event) — DI
+│   ├── triggers.py            # @trigger decorator + Debounce/Threshold (§15.8)
 │   ├── note_updater.py
 │   ├── in_group_responder.py
 │   ├── dm_responder.py
-│   ├── tools/                 # core tool implementations
-│   │   ├── search.py
-│   │   ├── notes.py
-│   │   ├── action_items.py
-│   │   └── ...
-│   └── dispatcher.py          # tool registry + call
+│   └── reminder_firer.py
 │
-├── llm/                       # LLM abstraction
-│   ├── base.py                # LLMClient interface
-│   ├── openai_compat.py
-│   ├── anthropic.py
-│   ├── gemini.py
-│   ├── registry.py            # ModelRegistry
-│   └── router.py              # pick_model
+├── tools/                     # tool registry — unify core + plugin (§15.4)
+│   ├── base.py                # @tool decorator, ToolSpec, ToolContext, ToolResult
+│   ├── registry.py            # auto-scan src/tools/core/ + plugins/*/tools.py
+│   ├── dispatcher.py          # call(tool, args, ctx) + parallel batch
+│   └── core/
+│       ├── search.py          # search_history, find_exact_quote
+│       ├── notes.py           # read/edit/refresh_group_note, pin/unpin
+│       ├── action_items.py
+│       ├── reminders.py
+│       ├── memory.py          # remember / forget → MemoryProvider.write / forget
+│       ├── meta.py            # list_groups, current_time
+│       └── web.py             # fetch_url
 │
-├── plugins/                   # workspace cho plugin dirs
+├── memory/                    # MemoryProvider Protocol (§15.5)
+│   ├── base.py                # MemoryProvider Protocol, MemoryScope
+│   ├── internal.py            # InternalMemoryProvider (MVP) — memory_entries
+│   ├── reflective.py          # nightly episodic → semantic compaction (Phase 1)
+│   └── (mem0.py / letta.py Phase 1)
+│
+├── retrieval/                 # pipeline + stages (§15.6, §5.3)
+│   ├── base.py                # Retriever, RetrievalStage Protocol
+│   ├── pipeline.py            # RetrievalPipeline — assemble stages từ DB config
+│   └── stages/
+│       ├── bm25.py            # BM25Retriever (Postgres FTS)
+│       ├── dense.py           # DenseRetriever (Qdrant)
+│       ├── fanout.py          # ParallelFanout combinator
+│       ├── rrf.py             # RRFFuser
+│       ├── mmr.py             # MMRDeduper
+│       └── (cross_encoder.py / colbert.py Phase 1)
+│
+├── llm/                       # LLMGateway abstraction (§15.7, §7)
+│   ├── base.py                # LLMGateway Protocol, LLMRequest, LLMResponse
+│   ├── native.py              # NativeGateway (MVP) — wraps 3 clients + routing
+│   ├── clients/
+│   │   ├── openai_compat.py
+│   │   └── gemini.py
+│   ├── registry.py            # ModelRegistry — DB-backed
+│   ├── routes.py              # llm_routes resolver + fallback ladder
+│   ├── budget.py              # feature_budgets resolver + trim + compression
+│   ├── cache_hint.py          # prompt caching prefix structuring
+│   └── (litellm.py / portkey.py Phase 1+)
+│
+├── media/                     # media adapter registry (§15.9, §5.4)
+│   ├── base.py                # MediaAdapter Protocol, @media_adapter decorator
+│   ├── registry.py
+│   └── adapters/
+│       ├── web.py             # URL + YouTube + TikTok
+│       ├── document.py        # PDF + DOCX + XLSX
+│       └── image.py           # HEIC + vision-LLM extract-once
+│
+├── resolvers/                 # chain-of-responsibility resolvers (§15.10)
+│   ├── group_owner.py
+│   ├── scope.py               # reminder scope
+│   └── chat_type.py
+│
+├── services/                  # business logic layer
+│   ├── note_service.py        # update note (debounce, lock, version, action_item sync)
+│   ├── reminder_service.py
+│   ├── boss_service.py
+│   ├── plugin_service.py
+│   └── ...
+│
+├── repositories/              # DB I/O — return domain entities
+│   ├── base.py                # BossScopedRepo (constructor-injected boss_id, §12.6)
+│   ├── users.py
+│   ├── account_links.py
+│   ├── bot_accounts.py
+│   ├── bot_account_assignments.py
+│   ├── messages.py
+│   ├── group_notes.py
+│   ├── note_templates.py
+│   ├── outbound_messages.py
+│   ├── boss_integrations.py
+│   ├── reminders.py
+│   ├── pins.py
+│   ├── media_cache.py
+│   ├── memory_entries.py
+│   ├── models.py              # ModelRegistry DB
+│   ├── prompts.py
+│   ├── llm_routes.py          # §7.3
+│   ├── feature_budgets.py     # §7.6
+│   ├── retrieval_pipelines.py # §15.6
+│   ├── agent_triggers.py      # §15.8
+│   ├── payments.py
+│   ├── token_usage.py         # OTel-named fields (§14.2)
+│   └── tool_call_log.py
+│
+├── prompts/                   # prompt loader (§7.8)
+│   └── loader.py              # prompts_repo.get_active(key) + Jinja2 render
+│
+├── plugins/                   # workspace cho plugin dirs (3rd-party Phase 2)
 │   └── (rỗng ở Phase 0)
 │
 ├── web/
+│   ├── schemas/               # Pydantic DTO request/response (tách khỏi domain)
+│   │   ├── boss.py
+│   │   ├── reminder.py
+│   │   └── ...
 │   ├── routes/
 │   │   ├── app.py             # user pages
 │   │   ├── admin.py           # superadmin pages
 │   │   ├── api.py             # JSON endpoints cho HTMX
-│   │   └── oauth.py           # callbacks (Google + plugin)
-│   ├── templates/             # Jinja2
-│   ├── static/                # CSS, JS, icons
-│   └── deps.py                # session, role gate
+│   │   └── oauth.py
+│   ├── templates/
+│   ├── static/
+│   └── deps.py                # session, role gate, BossContext factory
 │
 ├── scheduler/                 # APScheduler jobs
 │   ├── note_flush.py
-│   ├── reminder_firer.py      # §13
+│   ├── reminder_firer.py      # publish reminder.due event
 │   ├── subscription_check.py
-│   ├── bot_account_health.py  # ping bot acc, mark logged_out/rate_limit
+│   ├── bot_account_health.py
 │   └── (Phase 1 jobs)
-
-├── security/                  # §12 — hooks layer
-│   ├── rate_limit.py          # RateLimiter interface (in-mem now, Redis later)
+│
+├── security/                  # §12
+│   ├── rate_limit.py
 │   ├── csrf.py
-│   ├── webhook_verify.py      # HMAC per provider
-│   └── log_redact.py          # PII redact filter
+│   ├── webhook_verify.py
+│   └── log_redact.py
 │
 ├── infra/                     # external client wrappers
 │   ├── db.py                  # asyncpg pool factory
@@ -135,21 +218,41 @@ src/
 └── utils/
     ├── dates.py
     ├── crypto.py              # Fernet
-    ├── text.py                # diacritic normalize, ...
-    └── markdown.py            # render group note section-skip-empty
+    ├── text.py
+    └── markdown.py
 
 migrations/                    # Alembic
 config/
-├── models.yaml                # ModelRegistry
-└── prompts/                   # Long prompt templates (Jinja2)
+├── models.yaml                # ModelRegistry seed
+├── llm_routes.yaml            # llm_routes seed (§7.3)
+├── feature_budgets.yaml       # feature_budgets seed (§7.6)
+├── retrieval_pipelines.yaml   # retrieval_pipelines seed (§15.6)
+├── agent_triggers.yaml        # agent_triggers seed (§15.8)
+└── prompts/                   # prompts seed (Jinja2)
 tests/
 ├── unit/
-└── integration/
+├── integration/
+└── fixtures/                  # production-snapshot fixtures (§10.7 step 8)
 docker/
 ├── docker-compose.yml         # dev: postgres + qdrant + app
 └── Dockerfile
 pyproject.toml
 ```
+
+### Pattern rules
+
+1. **Repository layer trả domain entity, không trả dict.** Cấm
+   `r["boss_id"]` access ở caller. Add cột mới = update entity dataclass
+   + repo mapping; caller code không sửa.
+2. **Repository nhận `BossContext` qua constructor**, không nhận
+   `boss_id` lẻ trong method. Compiler-enforced (mypy strict) — không
+   bypass authz boundary (§12.6).
+3. **Cấm `db.py` free-function** (`db.fetch(...)` module-level). Mọi
+   DB access đi qua repository instance. Memory `feedback_db_migration_discipline`.
+4. **Service gọi repository, agent gọi service.** Agent handler không
+   gọi repository trực tiếp — dễ test mock + boundary rõ.
+5. **Web layer dùng DTO Pydantic** ở `web/schemas/`, không expose
+   domain entity ra response trực tiếp (tránh leak field nhạy cảm).
 
 ## 10.3 Deployment (MVP)
 
@@ -183,39 +286,46 @@ QDRANT_URL=http://localhost:6333
 GOOGLE_OAUTH_CLIENT_ID=...
 GOOGLE_OAUTH_CLIENT_SECRET=...
 SESSION_SECRET=<random 64 bytes>
-FERNET_KEY=<base64 32 bytes>      # for token blob encryption
+FERNET_KEY=<base64 32 bytes>           # for token blob encryption
+OAUTH_REDIRECT_WHITELIST=https://app.botname.com/api/oauth/google/callback,https://app.botname.com/api/oauth/plugin/lark_base/callback
 
 # Superadmin
 SUPERADMIN_EMAILS=tranvuongquocdat@gmail.com
 
-# Platform LLM (cho free trial / fallback)
+# Platform LLM (cho free trial / fallback khi sếp chưa BYO key)
+# MVP defaults: smart + vision = OpenAI gpt-4o-mini, fast = Groq llama-3.3-70b
 PLATFORM_OPENAI_API_KEY=<optional>
+PLATFORM_GROQ_API_KEY=<optional>
 
 # Channels
 # Zalo: credentials per-bot-account lưu trong DB (Fernet encrypted),
 # không có env var. Phase 1 Telegram bot token cũng vậy.
-# Env chỉ giữ secret platform-wide.
-LARK_APP_ID=...                   # Phase 1 (Lark Base plugin)
+LARK_APP_ID=...                        # Phase 1 (Lark Base plugin)
 LARK_APP_SECRET=...
 
-# Subscription (cho hiển thị VietQR)
+# Subscription
 BANK_ACCOUNT_NUMBER=...
 BANK_ACCOUNT_NAME=...
 BANK_BIN=...
+
+# Cost cap
+DEFAULT_BOSS_COST_CAP_USD_DAILY=5      # §12 — degrade smart→fast khi cap đụng
 ```
 
 ## 10.5 Observability
 
 - **Logging**: structlog → JSON → stdout → `journalctl` hoặc file.
-  Fields bắt buộc: `boss_id`, `operation`, `provider`, `model`,
-  `tokens_*`, `latency_ms`, `request_id`.
-- **Metrics**: `/metrics` endpoint format Prometheus (in-process). Key:
+  Fields bắt buộc: `boss_id`, `feature`, `operation`, `provider`,
+  `model`, `tokens_*`, `latency_ms`, `trace_id`, `span_id`, `request_id`.
+- **Metrics**: `/metrics` endpoint format Prometheus. Key:
   - `messages_ingested_total{provider,boss_id}`
   - `note_updates_total{boss_id,status}`
   - `llm_calls_total{provider,model,status}`
-  - `llm_call_latency_seconds`
+  - `llm_call_latency_seconds{feature,tier}`
+  - `llm_cache_hit_ratio{feature,model}` (§7.5)
   - `outbound_messages_total{channel,status}`
-- **Tracing**: defer Phase 2 (OpenTelemetry).
+  - `retrieval_stage_latency_seconds{stage}` (§5.3)
+- **Tracing**: OTel-aligned schema MVP (§14.2). Langfuse exporter Phase 1.
 - **Health**: `/healthz` → `{status, db, qdrant}` cho monitor.
 
 ## 10.6 Đã chốt & defer
@@ -229,7 +339,7 @@ BANK_BIN=...
 Đã có cú đau với migration đồng bộ thiếu → schema dịch nhưng data
 chưa đồng bộ → lỗi runtime. Quy tắc cứng:
 
-### 7-step checklist mỗi migration
+### 8-step checklist mỗi migration
 
 1. **Forward + backward**: mỗi migration Alembic phải có `upgrade()` và
    `downgrade()`. Cấm `op.execute` raw mà không nghĩ rollback.
@@ -249,6 +359,9 @@ chưa đồng bộ → lỗi runtime. Quy tắc cứng:
    snapshot mỗi PR. Fail = block merge.
 7. **Drop sau ≥1 release**: cấm drop column / table cùng PR thêm cột
    thay thế. Tách 2 PR cách ≥1 release để rollback an toàn.
+8. **Regression test from snapshot**: trước merge, chạy integration
+   test suite trên **production snapshot sanitized** (`tests/fixtures/`).
+   Fail nếu old behavior break — bắt được data drift, không chỉ schema.
 
 ### Backfill convention
 
@@ -276,6 +389,47 @@ output diff trước khi commit.
 
 ### Tham khảo
 
-- Memory: `feedback_db_migration_discipline` (7-step checklist legacy).
+- Memory: `feedback_db_migration_discipline` (8-step checklist).
 - Memory: `feedback_no_ad_hoc_db_mutations` — không DELETE/DROP ad-hoc
   trên prod; schema change đi qua migration.
+
+## 10.8 Config classification — code vs DB
+
+Quy tắc cứng cho mọi config (xem [§15.11](./15-agent-dispatch-extension.md#1511-config-classification--code-vs-db)):
+
+| Đặc tính | Lưu ở | Vd |
+|---|---|---|
+| Có thể A/B test | **DB** | llm_routes, prompts |
+| Có thể per-boss override | **DB** | smart/fast/vision model_id, feature_budgets per-boss (Phase 1) |
+| Có thể hot-tune không deploy | **DB** | trigger debounce/threshold, retrieval pipeline stages |
+| Cần seed default cho install mới | **DB** + seed file `config/*.yaml` | models, prompts, llm_routes, feature_budgets, retrieval_pipelines, agent_triggers |
+| Code-only constant (struct, interface) | Code | Operation class, Tool decorator, Memory scope enum, Channel capability matrix |
+
+**Bảng config DB bắt buộc seed MVP** (kể cả chưa có admin UI):
+`models`, `prompts`, `llm_routes`, `feature_budgets`,
+`retrieval_pipelines`, `agent_triggers`, `note_templates`.
+
+Cache invalidation: admin sửa DB → publish event `registry.invalidated`
+([§14.1](./14-performance-observability.md#141-eventbus-internal))
+→ in-memory cache TTL 60s + immediate clear cho subscriber agent loop.
+
+## 10.9 Test strategy
+
+| Layer | Test kind | Vd |
+|---|---|---|
+| domain/ | unit (pure) | entity validation, value object equality |
+| repositories/ | integration (real DB) | fixture từ production snapshot sanitized; assertEqual entity |
+| services/ | unit + integration | mock repo + memory + LLM; test happy path + edge case |
+| agents/ | integration | EventBus fake, MemoryProvider fake, LLMGateway stub; test op end-to-end |
+| tools/ | unit | mock ToolContext; verify side effect |
+| retrieval/, memory/, llm/ | unit + contract | Protocol contract test mọi impl |
+| channels/ | e2e (record + replay) | fixture từ legacy probe; verify adapter ↔ InboundMessage shape |
+| web/ | HTTP integration | TestClient FastAPI; verify DTO ↔ status code |
+
+**Coverage target MVP**: 70% line, 80% trên `services/` + `agents/` (logic
+core). `channels/` và `web/` coverage thấp hơn (e2e đắt).
+
+**Fixture conventions**: `tests/fixtures/` chứa snapshot DB sanitized
+(boss name, message text replaced; structure giữ). Reload mỗi suite
+qua `tests/conftest.py:reset_db_to_fixture`. Snapshot bump khi schema
+migration land — bắt được drift sớm.

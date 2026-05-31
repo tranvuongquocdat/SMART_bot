@@ -52,6 +52,8 @@ class InMemoryEventBus:
 | `llm.call.started` | LLM client wrapper | `{trace_id, span_id, feature, model, ...}` | trace store |
 | `llm.call.completed` | LLM client wrapper | `{trace_id, span_id, tokens_in, tokens_out, latency_ms, status}` | trace store, token_usage, metrics |
 | `tool.call.started/completed` | Tool dispatcher | `{trace_id, span_id, tool_name, args_hash, latency_ms, status}` | trace store |
+| `registry.invalidated` | Admin web (CRUD models/prompts/llm_routes/feature_budgets/retrieval_pipelines/agent_triggers/note_templates) | `{registry_name, key, by_user_id}` | in-memory cache layer clear theo registry_name |
+| `op.<name>.fire` | TriggerEngine ([§15.8](./15-agent-dispatch-extension.md#158-trigger-declaration)) | `{event, reason}` (`reason ∈ {debounce, threshold, on_demand}`) | Operation matching `triggered_by=["op.<name>.fire"]` |
 
 Phase 1 add subscriber:
 - **Webhook dispatcher** — POST tới `outbound_webhooks` table theo filter
@@ -162,8 +164,9 @@ p99 budget = p50 × 2.5 cho ops có LLM (LLM tail latency cao).
    chạy đồng thời (không sequential). Giảm 30–50% latency agent loop.
    Cần: tools không có dep chéo, dispatcher support batch.
 
-4. **Fast-tier default** — `feature_routing` default `fast`; chỉ feature
-   đánh dấu rõ `smart` mới dùng smart. Hiện đã apply ở [§7.3](./07-llm-abstraction.md#73-router--feature-routing).
+4. **Fast-tier default** — `llm_routes` seed `fast` cho mọi feature
+   nhẹ; chỉ feature đánh dấu rõ `smart` mới dùng smart. Hiện đã apply
+   ở [§7.3](./07-llm-abstraction.md#73-routing--llm_routes-table).
 
 5. **Pre-warm context cache** — group có activity 7d gần đây:
    - Giữ `group_notes.content` + `boss_profile` trong in-memory LRU cache (200 entries, TTL 30 min)

@@ -49,7 +49,6 @@
 │                                                                 │
 │   Provider clients (1 file/cái):                                │
 │     - OpenAICompatibleClient (OpenAI, Groq, OpenRouter, …)     │
-│     - AnthropicClient                                          │
 │     - GeminiClient                                             │
 │                                                                 │
 │   ModelRegistry: tên model → capabilities, cost, tier          │
@@ -96,6 +95,15 @@ các provider khác ở đây là reference cho Phase 1+:
 | `outbound.typing_indicator` | ✓ (legacy có) | ✓ | ✓ | ❌ |
 | `member.list_api` | partial (legacy code parse) | ✓ | limited | limited |
 | `auth.kind` | personal cookies (dual-mode: platform/boss-owned) | bot token (platform) | page token | system user |
+| `requires_admin_role_for_core` | ❌ (degraded: pin in-chat, force kick member không dùng được) | ❌ | ❌ | ❌ |
+
+**Nguyên tắc**: bot vận hành ở chế độ **member thường** trong group là
+default. Các tool cần admin (vd `pin_in_chat`, `kick_member` Phase 1+)
+phải declare `requires_admin=True`; engine kiểm tra capability + role
+hiện tại của bot acc → degrade gracefully (giải thích sếp "em chưa
+được admin nên không pin được trong chat, nhưng pin nội bộ vào note
+được anh nhé"). KHÔNG block core features (capture, note, Q&A,
+reminder) khi bot không phải admin.
 
 Adapter mới = drop file vào `src/channels/<name>.py` + đăng ký vào `channels/__init__.py`. Core không cần sửa.
 

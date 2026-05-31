@@ -1,8 +1,32 @@
 [← Index](./README.md)
 
-# §11. Open questions (pass 3)
+# §11. Open questions (pass 4)
 
-Sau review pass 1, 2, 2.1, 2.2 các quyết định đã chốt:
+Pass 4 — rewrite dispatch/extension model theo pattern 2026 (Pydantic
+AI capability + OpenAI Agents SDK handoff + AG2 event-driven). Đã close
+toàn bộ:
+
+| § | Thay đổi pass 4 | Driver |
+|---|---|---|
+| **15 (new)** | Section riêng cho dispatch/extension pattern: capability bundle, event dispatcher (no if/elif), registry decorator-based cho tool/memory/retrieval/LLM/trigger/media/resolver, config classification code-vs-DB | Pydantic AI, OpenAI Agents SDK, AG2 v0.4 |
+| **6.1** | Operation Router if/elif → **xoá**; thay bằng EventBus dispatcher với predicate `when=` | §15.3 |
+| **6.2** | Single-agent kết luận giữ, argumentation đổi sang capability bundle | §15.2 |
+| **6.3** | `CORE_TOOLS` constant → tool registry decorator; whitelist per-op qua `@operation.tools` (security boundary) | §15.4 |
+| **6.4** | 4 tier hardcoded → MemoryProvider Protocol + 3 scope chuẩn (semantic/episodic/procedural); `InternalMemoryProvider` MVP, mem0/Letta Phase 1 | §15.5, Mem0/Letta/Zep 2026 |
+| **6.5** | feature_routing flat → llm_routes table (condition_cel + fallback_chain + weight) | §15.7.1 |
+| **5.3** | FTS→vector sequential → retrieval pipeline (parallel_fanout + RRF + MMR; reranker Phase 1) | §15.6, RAG 2026 |
+| **7.1** | LLMClient → LLMGateway Protocol; NativeGateway MVP, LiteLLM/Portkey Phase 1+ | §15.7 |
+| **7.5** | Prompt caching `defer Phase 2` → **bật ngay MVP** qua stable prefix structure + `cache_prefix_hint` | §15.7.2, Anthropic 2026 default |
+| **7.6** | Token budget hardcoded → feature_budgets DB + trim_policy + compression_strategy | §15.7.3 |
+| **4.3** | NoteUpdater triggers hardcoded → `@trigger` decorator + agent_triggers DB | §15.8 |
+| **5.4** | Media adapter mapping → `@media_adapter` registry | §15.9 |
+| **3.4** | resolve_group_owner if-else → resolver chain | §15.10 |
+| **10.2** | src/ tree: thêm domain/, memory/, retrieval/, media/, resolvers/, services/, tools/registry; agent/ → agents/; pattern rule entity-not-dict, BossContext constructor, no db.py free-fn | §15.1, layering review |
+| **10.7** | 7-step → **8-step** migration checklist (thêm step 8 regression test from snapshot) | feedback memory |
+| **10.8 (new)** | Config classification code vs DB rule + cache invalidation pattern | §15.11 |
+| **10.9 (new)** | Test strategy section: layer × test kind, coverage target, fixture conventions | review pass 4 |
+
+## Đã chốt pass 1–3 (snapshot trước rewrite)
 
 ## Đã chốt
 

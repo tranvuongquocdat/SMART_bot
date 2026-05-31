@@ -112,7 +112,8 @@ Click row Boss-owned → Detail (read-only):
 │ Name                  │ Provider │ Tier  │ Default│ Active │ ...│
 │ gpt-4o-mini           │ openai   │ smart │ ✓      │ ✓      │    │
 │ llama-3.3-70b         │ groq     │ fast  │ ✓      │ ✓      │    │
-│ claude-haiku-4-5      │ anthropic│ smart │        │ ✓      │    │
+│ gemini-2.0-flash      │ gemini   │ fast  │        │ ✓      │    │
+│ gpt-4o                │ openai   │ smart │        │ ✓      │    │
 └─────────────────────────────────────────────────────────────────┘
 
 Edit row: name, provider, endpoint_kind, base_url, tier, ctx_max,
@@ -262,21 +263,24 @@ cần 3 slot:
 │                                                                 │
 │ ┌─ Smart  (suy luận, tóm tắt, trả lời câu hỏi dài) ──────────┐ │
 │ │ Provider: [OpenAI       ▾]                                  │ │
-│ │ Model:    [gpt-4o       ▾]                                  │ │
+│ │ Model:    [gpt-4o-mini  ▾] (MVP default)                    │ │
 │ │ Dùng cho: tóm tắt group, Q&A có search lịch sử, viết note  │ │
 │ │ Chi phí ước tính: $X / 1000 cuộc đối thoại                  │ │
 │ └─────────────────────────────────────────────────────────────┘ │
 │                                                                 │
 │ ┌─ Fast  (phản hồi nhanh, việc đơn giản) ─────────────────────┐ │
 │ │ Provider: [Groq         ▾]                                  │ │
-│ │ Model:    [llama-3.3-70b▾]                                  │ │
+│ │ Model:    [llama-3.3-70b▾] (MVP default)                    │ │
 │ │ Dùng cho: xác nhận ngắn, phân loại tin, trích việc cần làm │ │
 │ │ Chi phí ước tính: $X / 1000 cuộc đối thoại                  │ │
 │ └─────────────────────────────────────────────────────────────┘ │
 │                                                                 │
 │ ┌─ Vision  (đọc ảnh) ─────────────────────────────────────────┐ │
-│ │ Provider: [OpenAI       ▾]                                  │ │
-│ │ Model:    [gpt-4o-mini  ▾] (đề xuất: model nhẹ để tiết kiệm)│ │
+│ │ ⓘ Smart anh chọn (gpt-4o-mini) đã có vision —              │ │
+│ │   slot này để trống, ảnh sẽ dùng Smart. Đổi nếu muốn         │ │
+│ │   tách model riêng cho ảnh.                                  │ │
+│ │ Provider: [OpenAI       ▾] (optional)                       │ │
+│ │ Model:    [gpt-4o-mini  ▾] (đề xuất nhẹ — chỉ khi tách)     │ │
 │ │ Dùng cho: nhận diện nội dung ảnh trong group (bill,         │ │
 │ │           screenshot, ảnh sản phẩm), đọc text trên ảnh      │ │
 │ │ Chi phí ước tính: $X / 1000 ảnh                             │ │
@@ -285,7 +289,6 @@ cần 3 slot:
 │ ┌─ API Keys (anh tự cung cấp — BYO) ──────────────────────────┐ │
 │ │ OpenAI:     [••••••••••••] [Test]                           │ │
 │ │ Groq:       [••••••••••••] [Test]                           │ │
-│ │ Anthropic:  [thêm key]                                      │ │
 │ │ Gemini:     [thêm key]                                      │ │
 │ └─────────────────────────────────────────────────────────────┘ │
 │                                                                 │

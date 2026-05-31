@@ -59,7 +59,7 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 | **Web (super)** | Bosses, Payments, Revenue, Bot Accounts, Models. Role-gated qua env var. |
 | **Channel** | **Chỉ Zalo (acc cá nhân, port `zlapi-py` legacy) — single-channel MVP**. Telegram + Messenger + WhatsApp defer Phase 1+. Zalo OA + Lark Messenger không làm. |
 | **Bot account** | **Dual-mode** ([§3.8](./03-identity-channel-linking.md#38-mô-hình-bot-account-dual-mode)): (a) **Platform** — anh sở hữu pool acc Zalo, gán cho sếp, sếp accept; (b) **Self-managed** — sếp tự login acc Zalo cá nhân của họ. Quản lý qua `/admin/bot-accounts` + `/channels`. |
-| **AI** | Provider abstraction (OpenAI / Groq / Anthropic / Gemini / Custom). **3 model slot** (smart / fast / vision) cấu hình per-sếp ở `/settings/ai`. Multi-tier routing per-feature ([§7.3](./07-llm-abstraction.md#73-router--feature-routing)). BYO key. |
+| **AI** | Provider abstraction (OpenAI / Groq / Gemini / Custom). **MVP default**: smart + vision = OpenAI `gpt-4o-mini`, fast = Groq `llama-3.3-70b-versatile`. **3 model slot** (smart / fast / vision) cấu hình per-sếp ở `/settings/ai`. Multi-tier routing per-feature ([§7.3](./07-llm-abstraction.md#73-routing--llm_routes-table)). BYO key. |
 | **Plugin** | Kiến trúc sẵn sàng; **0 plugin ship**. Lark **Base** là plugin (không phải channel). |
 | **DB** | PostgreSQL + Qdrant. |
 | **Auth (user)** | Google OAuth + email/password (fallback). Security hooks (rate-limit, CSRF, HMAC webhook) bật từ ngày 1 ([§12](./12-security.md)). |

@@ -1,7 +1,7 @@
 # Group Note Bot — Thiết kế chi tiết (v1, pass 3)
 
-**Trạng thái:** Pass 3 — dual-mode bot acc + 4 optimizations + 3 meeting-note add-on + §14 latency + drop Telegram MVP.
-**Ngày tạo:** 2026-05-30 · pass 3: 2026-05-31
+**Trạng thái:** Pass 4 — dispatch/extension model rewrite (capability bundle, registry pattern), retrieval pipeline RRF+MMR, MemoryProvider abstraction, LLMGateway abstraction, prompt caching MVP, feature_budgets DB.
+**Ngày tạo:** 2026-05-30 · pass 3: 2026-05-31 · pass 4: 2026-05-31
 **Branch:** `main` (rebuild, đã collapse)
 **Tham chiếu code cũ:** `git show archive/legacy:<path>`
 
@@ -26,7 +26,7 @@ review độc lập, ít loãng token khi sửa.
 | 4 | [04-group-note.md](./04-group-note.md) | Schema 7 section (de-emoji), lifecycle, edit/merge, versioning, kỹ thuật tham khảo |
 | 5 | [05-capture-flow-data-model.md](./05-capture-flow-data-model.md) | Pipeline, messages, FTS+Qdrant, media ingest (legacy port), retention |
 | 6 | [06-agent-layer.md](./06-agent-layer.md) | Operation Router, single-agent, tool calling, feature × tier |
-| 7 | [07-llm-abstraction.md](./07-llm-abstraction.md) | LLMClient, ModelRegistry DB+seed, feature_routing, fallback |
+| 7 | [07-llm-abstraction.md](./07-llm-abstraction.md) | LLMGateway, ModelRegistry DB+seed, llm_routes, fallback, prompt caching MVP, feature_budgets |
 | 8 | [08-plugin-architecture.md](./08-plugin-architecture.md) | Plugin vs channel, folder, manifest, OAuth, settings auto-render |
 | 9 | [09-web-admin.md](./09-web-admin.md) | Design principles, sitemap user + super (bot-accounts, models, reminders, projects) |
 | 10 | [10-tech-stack-infra.md](./10-tech-stack-infra.md) | Stack, project structure, deployment, env, migration discipline (7-step) |
@@ -34,6 +34,7 @@ review độc lập, ít loãng token khi sửa.
 | 12 | [12-security.md](./12-security.md) | Auth/session/CSRF/rate-limit/HMAC/authz/secrets/PII redact + credential isolation boss-owned |
 | 13 | [13-reminders-tasks.md](./13-reminders-tasks.md) | scheduled_reminders, action_items index, projects view, follow-task path |
 | 14 | [14-performance-observability.md](./14-performance-observability.md) | EventBus internal, OTel GenAI trace schema, latency targets per op + mitigation playbook |
+| 15 | [15-agent-dispatch-extension.md](./15-agent-dispatch-extension.md) | Pattern dispatch + extension model: capability bundle, event dispatcher, tool/memory/retrieval/LLM registry, config code-vs-DB |
 
 ## Tiến độ
 
@@ -53,6 +54,7 @@ review độc lập, ít loãng token khi sửa.
 | 12 | reviewed-v3 | drop TelegramVerifier (Phase 1), credential isolation boss-owned vs platform, audit log |
 | 13 | reviewed-v3 | no major change (link to §9.8 only) |
 | 14 | new | EventBus internal, OTel GenAI trace schema, latency budget + mitigation playbook |
+| 15 | new (pass 4) | Dispatch + extension model — capability bundle, registry pattern, declarative > imperative |
 
 Em update status `reviewed-v3 → approved` khi anh duyệt. Hoặc reply
 `Spec OK` để duyệt toàn bộ.

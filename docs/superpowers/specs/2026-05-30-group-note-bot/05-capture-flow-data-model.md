@@ -66,29 +66,64 @@ CREATE INDEX idx_messages_fts ON messages USING GIN(fts);
 - Dedup qua `UNIQUE(provider, chat_id, provider_msg_id)` để channel retry
   idempotent.
 
-## 5.3 Indexing: FTS + Qdrant
+## 5.3 Retrieval pipeline
 
-**Postgres FTS:**
-- Dùng cho keyword lookup ("có ai nói X không").
-- Tiếng Việt: config `simple` + extension `unaccent` + `pg_trgm` để
-  match không phân biệt dấu.
-- Index trên `text` và `media_text`.
+Pattern stages-based khai báo ở [§15.6](./15-agent-dispatch-extension.md#156-retrieval-pipeline-stages).
+§5.3 chốt source + config MVP.
 
-**Qdrant:**
-- **1 collection duy nhất**, filter qua payload `boss_id`. Tránh
-  overhead quản N collection. Boss-filter chạy nhanh.
-- Embedding: `text-embedding-3-small` (1536 dims) cho MVP. Switch được
-  qua LLM-abstraction ở [§7](./07-llm-abstraction.md).
-- Granularity: **per-message** cho MVP. Message Zalo phần lớn ngắn.
-  Paragraph chunking hoãn.
-- Payload: `{boss_id, provider, chat_id, ts, sender_name}` để filterable.
+### Sources
 
-**Hybrid retrieval (Q&A):**
+**Postgres FTS** (`BM25Retriever` stage):
+- Keyword lookup ("có ai nói X không").
+- Tiếng Việt: `simple` + `unaccent` + `pg_trgm` → match không phân biệt
+  dấu.
+- Index trên `messages.text` và `messages.media_text` (tsvector `fts`
+  column, [§5.2](#52-schema-messages)).
+
+**Qdrant** (`DenseRetriever` stage):
+- 1 collection duy nhất, filter payload `boss_id`. Tránh overhead quản
+  N collection.
+- Embedding: `text-embedding-3-small` (1536d) MVP. Switch qua
+  [§7 LLMGateway](./07-llm-abstraction.md#71-llmgateway) (`embed` method).
+- Granularity per-message MVP. Paragraph chunking hoãn.
+- Payload: `{boss_id, provider, chat_id, ts, sender_name}` filterable.
+
+### Pipeline MVP — `qa_with_search`
+
+Naive RAG (FTS → vector sequential) đã chết 2026. MVP đi **parallel
+fanout + RRF + MMR** ngay; reranker Phase 1 thêm stage không sửa code:
+
+```yaml
+# Seed retrieval_pipelines table (§15.6)
+feature: qa_with_search
+stages:
+  - {name: parallel_fanout, args: {sources: [bm25, dense], k_each: 30}}
+  - {name: rrf,             args: {k: 60}}
+  - {name: mmr,             args: {lambda_: 0.5, k_out: 20}}
+  # Phase 1: {name: cross_encoder, args: {model: bge-reranker-v2-m3, k_out: 5}}
 ```
-1. FTS pre-filter (boss_id, chat_id?, optional date range) → ≤500 candidate
-2. Vector rank top-20 trong đó (Qdrant với payload filter)
-3. Pass cho LLM cùng group_note hiện tại
-```
+
+- **parallel_fanout** chạy BM25 + dense song song (`asyncio.gather`),
+  mỗi nguồn top-30 → tận dụng recall đa nguồn.
+- **RRF** (Reciprocal Rank Fusion): score = `Σ 1/(k + rank_i)`, k=60.
+  Combine 2 ranked list robust, không cần normalize điểm.
+- **MMR** (Maximal Marginal Relevance, λ=0.5): dedup near-duplicate
+  (cùng cuộc trò chuyện) — giữ diversity top-20.
+- **Reranker Phase 1**: cross-encoder hoặc ColBERT, k_out=5 → LLM chỉ
+  thấy top-5 chất lượng cao thay vì 20 lẫn lộn. Add row stage, code 0
+  sửa.
+
+### Pipeline khác
+
+| Feature | Stages |
+|---|---|
+| `qa_with_search` | parallel_fanout + rrf + mmr (+ rerank Phase 1) |
+| `note_context` (NoteUpdater retrieve delta) | bm25 only (chỉ cần chronological window) |
+| `find_exact_quote` | fts exact only (không qua pipeline) |
+| `image_qa_context` | dense only + filter `media_kind=image` |
+
+Mỗi feature 1 row trong `retrieval_pipelines`, admin chỉnh runtime
+(`/admin/retrieval-pipelines` Phase 1).
 
 ## 5.4 Media ingest
 

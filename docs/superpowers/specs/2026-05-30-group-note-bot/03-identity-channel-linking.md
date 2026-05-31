@@ -9,7 +9,10 @@
   password_hash` (nullable), `role, subscription_status,
   subscription_plan, subscription_expiry, tz, language,
   smart_model_id, fast_model_id, vision_model_id, api_keys_enc,
-  boss_profile` (JSONB — memory tier core, xem [§6.4](./06-agent-layer.md#64-context-window--memory-tier)).
+  cost_cap_usd_daily` (default 5, [§12](./12-security.md)).
+- Memory semantic (tên gọi, alias, tone, habits) **không** nhúng JSONB
+  vào `users` — lưu riêng ở `memory_entries` ([§6.4](./06-agent-layer.md#64-memory-provider))
+  để swap mem0/Letta sau qua MemoryProvider abstraction ([§15.5](./15-agent-dispatch-extension.md#155-memory-provider-abstraction)).
 - `tz` default `Asia/Ho_Chi_Minh` khi register. Sếp đổi qua
   `/settings/general` ([§9.2](./09-web-admin.md#92-sitemap-user-pages)).
   Mọi parse thời gian ("3h chiều mai") + format output dùng `users.tz`,
