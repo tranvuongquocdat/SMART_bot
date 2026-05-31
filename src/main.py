@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.events.bus import InMemoryEventBus
 from src.infra.db import create_pool
 from src.infra.observability import configure_logging
 from src.infra.qdrant import create_qdrant
@@ -12,6 +13,7 @@ async def lifespan(app: FastAPI):
     configure_logging()
     app.state.db_pool = await create_pool()
     app.state.qdrant = create_qdrant()
+    app.state.bus = InMemoryEventBus()
     yield
     await app.state.db_pool.close()
 
