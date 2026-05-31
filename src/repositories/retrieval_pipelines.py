@@ -42,7 +42,7 @@ class RetrievalPipelinesRepo(BossScopedRepo):
             return [_row_to_pipeline(r) for r in rows]
 
     async def upsert(
-        self, feature: str, stages: list[dict], description: str | None = None
+        self, feature: str, stages: "list[dict]", description: str | None = None
     ) -> None:
         assert self.ctx.user_role == "superadmin"
         async with self.pool.acquire() as c:

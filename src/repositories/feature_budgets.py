@@ -39,7 +39,7 @@ class FeatureBudgetsRepo(BossScopedRepo):
         feature: str,
         max_input_tokens: int,
         max_output_tokens: int,
-        trim_policy: list[str],
+        trim_policy: "list[str]",
         compression_strategy: str = "none",
         cache_prefix_hint: str | None = None,
     ) -> None:

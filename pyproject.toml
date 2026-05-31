@@ -22,6 +22,7 @@ dependencies = [
   "python-multipart>=0.0.12",
   "openai>=1.51",
   "google-generativeai>=0.8",
+  "tiktoken>=0.8",
   "trafilatura>=1.12",
   "yt-dlp>=2024.10",
   "pypdf>=5.0",

@@ -64,7 +64,7 @@ class ModelsRepo(BossScopedRepo):
         base_url: str | None,
         tier: str,
         ctx_max: int,
-        capabilities: list[str],
+        capabilities: "list[str]",
         cost_in: float | None,
         cost_out: float | None,
         is_platform_default: bool = False,

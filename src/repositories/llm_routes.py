@@ -50,7 +50,7 @@ class LLMRoutesRepo(BossScopedRepo):
         self,
         feature: str,
         target_tier: str,
-        fallback_chain: list[dict],
+        fallback_chain: "list[dict]",
         condition_cel: str | None = None,
         weight: int = 100,
         notes: str | None = None,
