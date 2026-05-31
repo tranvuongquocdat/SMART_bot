@@ -1,0 +1,14 @@
+{
+  "name": "zalo-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JSONL bridge between Python and zca-js (single Zalo account).",
+  "scripts": {
+    "login": "node login.js",
+    "start": "node bridge.js"
+  },
+  "dependencies": {
+    "node-fetch": "^3.3.2",
+    "zca-js": "^2.0.0-beta.27"
+  }
+}

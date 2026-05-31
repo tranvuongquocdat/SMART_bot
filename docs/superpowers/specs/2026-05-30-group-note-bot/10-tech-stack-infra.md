@@ -19,7 +19,7 @@
 | **DOCX / XLSX extract** | python-docx (hoặc mammoth) + openpyxl | Port legacy |
 | **Image processing** | Pillow + pillow_heif | HEIC → JPEG cho iPhone-via-Zalo (port legacy) |
 | **Image extract-once** | Vision-LLM call (slot vision) | 1 call/ảnh lúc capture; save `media_text` |
-| **Channel — Zalo** (MVP) | `zlapi-py` (port legacy) — acc cá nhân, dual-mode (platform pool + boss-owned) | OA defer; legacy code đã có session/cookie flow |
+| **Channel — Zalo** (MVP) | `zca-js@^2.1` Node bridge (port từ `archive/legacy:src/channels/zalo_bridge`, adapt v2 API — xem [spike](../../spikes/2026-05-31-zalo-2026-readiness.md)) — acc cá nhân, dual-mode (platform pool + boss-owned) | OA defer; QR login + session reconnect verified; legacy `zlapi-py` REJECTED (phone+password = bot flag) |
 | **Channel — Telegram** (Phase 1) | python-telegram-bot v21+ | Khách hiện tại không dùng → defer; thư viện sẵn sàng khi cần |
 | **Auth — Google OAuth** | Authlib | Maintained, async |
 | **Password hash** | bcrypt (passlib) | Standard |
