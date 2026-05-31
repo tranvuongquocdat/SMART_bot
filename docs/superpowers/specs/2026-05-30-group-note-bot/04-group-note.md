@@ -16,44 +16,47 @@ context tốn, câu trả lời không nhất quán. Có rolling note thì:
 ## 4.2 Schema 7 section
 
 Section không có content thì ẩn khi render. Header do code template;
-LLM fill content.
+LLM fill content. **Không dùng emoji** trong heading — web UI render
+status bằng badge/chip, không bằng ký tự hình.
 
 ```markdown
 # {group_name}
-Cập nhật lần cuối: {iso_timestamp} · {msg_count_7d}/ngày · trạng thái: {emoji}
+Cập nhật: {iso_timestamp} · {msg_count_7d}/ngày · {status_text}
 
-## ⚡ Cần sếp xử lý          (ẩn nếu trống)
+## Cần sếp xử lý                    (ẩn nếu trống)
 - bullet ngắn, việc rõ ràng đang cần sếp action
 
-## 📌 Đang focus              (max 3–5 bullet)
+## Đang focus                        (max 3–5 bullet)
 - group đang đẩy chuyện gì hiện tại
 
-## ✅ Việc đang mở            (task list — chủ + hạn)
+## Việc đang mở                      (task list — chủ + hạn)
 - [ ] {person} — {task} · {hạn_hoặc_open}
-- ⚠ {person} — {task} · QUÁ HẠN {Nd}
+- [ ] {person} — {task} · QUÁ HẠN {Nd}     <!-- web đánh badge "Trễ" -->
 
-## 🚧 Đang tắc / Rủi ro      (ẩn nếu trống)
+## Đang tắc / Rủi ro                 (ẩn nếu trống)
 - blocker, việc tắc, risk
 
-## 📜 Đã quyết                (log quyết định, append-only)
+## Đã quyết                          (log quyết định, append-only)
 - {quyết định} ({attributed_to}, {date})
 
-## 💬 Câu hỏi treo            (ẩn nếu trống)
+## Câu hỏi treo                      (ẩn nếu trống)
 - câu hỏi mở, visible cho team
 
-## 👥 Người active (7d)
+## Người active (7d)
 - {name} ({count}) · ...
 
-## 📦 Lưu trữ
+## Lưu trữ
 - [{period}](archive link)
 ```
 
 **Nguyên tắc design:**
-- Exception đặt trước (⚡, 🚧). Sếp scan top thấy ngay.
-- Giá trị bền vững ở dưới. `📜 Đã quyết` là log append-only.
-- LLM **không bao giờ** xoá entry trong `📜 Đã quyết`. Chỉ manual edit
+- Exception đặt trước (Cần sếp, Đang tắc). Scan top thấy ngay.
+- Giá trị bền vững ở dưới. `Đã quyết` là log append-only.
+- LLM **không bao giờ** xoá entry trong `Đã quyết`. Chỉ manual edit
   xoá được.
-- `👥 Người active` tính từ count message, không phải LLM suy ra.
+- `Người active` tính từ count message, không phải LLM suy ra.
+- Markdown thuần — không emoji, không decorative char. Web UI tô màu
+  qua CSS class (xem [§9.0](./09-web-admin.md#90-design-principles)).
 
 ## 4.3 Vòng đời update
 
@@ -73,7 +76,7 @@ Quy trình update:
 3. Load message mới từ group_note.last_seen_message_id
 4. Build LLM prompt:
    - System: "Update group note. Giữ nguyên section X, Y (đã edit thủ
-              công). Chỉ update D, E, F, G. Section '📜 Đã quyết' chỉ
+              công). Chỉ update D, E, F, G. Section 'Đã quyết' chỉ
               append, không xoá."
    - Input: note hiện tại + delta messages
 5. LLM (smart tier) emit markdown mới
@@ -134,7 +137,42 @@ group_note_versions (
 CREATE INDEX idx_group_note_versions_note ON group_note_versions(group_note_id, emitted_at DESC);
 ```
 
-## 4.7 Mở
+## 4.7 Đã chốt
 
-- **(mở) Schema 7 section cố định vs cấu hình được per-boss.** Em
-  recommend **cố định** cho MVP.
+- Schema 7 section cố định cho MVP (không cấu hình per-boss).
+- Không emoji trong heading note.
+
+## 4.8 Tham khảo & kỹ thuật
+
+Cách tiếp cận group note giống living document — vài kỹ thuật từ các
+bên đang làm tốt hướng này:
+
+### Anthropic — Memory & Projects
+- **Living markdown context**: file markdown dài duy trì cross-session,
+  agent đọc đầu mỗi lần. Ta đang dùng = `group_notes.content`.
+- **Agentic compaction**: khi note dài hơn ngưỡng, dùng LLM smart tier
+  rebuild ngắn lại, giữ section append-only (`Đã quyết`). Ta apply ở
+  versioning compact (§4.5).
+- **Section ownership flag**: phân biệt phần LLM viết vs user edit.
+  Ta đã có `manually_edited_sections`. Mở rộng: thêm `freshness_score`
+  per-section để LLM biết khi nào re-write (Phase 1).
+
+### Bytedance — Coze / Lark structured docs
+- **Structured frontmatter** (YAML head) lưu metadata (`status`,
+  `owners`, `tags`) tách khỏi prose. Ta giữ metadata trong cột DB
+  riêng (`status`, `msg_count_7d`), không nhúng vào markdown — render
+  body sạch hơn.
+- **Block ownership**: Coze cho phép từng block có "manageable by AI"
+  toggle. Ta granularity = section, đủ cho MVP.
+
+### Apply vào MVP
+
+| Kỹ thuật | Trạng thái |
+|---|---|
+| Living markdown context | có |
+| Per-section manual-edit flag | có (`manually_edited_sections`) |
+| Append-only "Đã quyết" | có |
+| Versioning + compact lịch sử | có (§4.5) |
+| Freshness score per-section | Phase 1 |
+| Frontmatter YAML structured | không cần — metadata trong DB |
+| AI-managed toggle per-section | có (toggle "cho bot quản lại") |

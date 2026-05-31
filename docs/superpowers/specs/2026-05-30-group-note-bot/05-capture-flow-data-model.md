@@ -42,9 +42,9 @@ messages (
   sender_name        TEXT,                 -- tên hiển thị (KHÔNG resolve!)
 
   text               TEXT,                 -- body raw
-  media_kind         TEXT,                 -- NULL | 'voice' | 'image' | 'file' | 'sticker' | 'url'
+  media_kind         TEXT,                 -- NULL | 'url' | 'youtube' | 'tiktok' | 'pdf' | 'docx' | 'xlsx' | 'image' | 'voice' | 'sticker' | 'file'
   media_url          TEXT,                 -- nơi fetch
-  media_text         TEXT,                 -- text trích (transcript, OCR, fetched body)
+  media_text         TEXT,                 -- text extract (xem §5.4)
 
   ts                 TIMESTAMPTZ NOT NULL, -- timestamp của platform
   ingested_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -58,9 +58,9 @@ CREATE INDEX idx_messages_fts ON messages USING GIN(fts);
 ```
 
 **Lưu ý:**
-- `media_text` là text equivalent để search. Voice → transcript. URL →
-  body bài báo fetched. Image → OCR (Phase 1). FTS index cả `text` và
-  `media_text`.
+- `media_text` là text equivalent để search. URL → body bài báo fetched.
+  YouTube → transcript. PDF/docx/xlsx → text extract. Voice + image OCR
+  hoãn Phase 1. FTS index cả `text` và `media_text`.
 - `sender_name` là tên hiển thị **tại lúc capture**. Không lookup,
   không normalise. Đây là lựa chọn "không identity resolution" rõ ràng.
 - Dedup qua `UNIQUE(provider, chat_id, provider_msg_id)` để channel retry
@@ -90,16 +90,48 @@ CREATE INDEX idx_messages_fts ON messages USING GIN(fts);
 3. Pass cho LLM cùng group_note hiện tại
 ```
 
-## 5.4 Xử lý media — decision mở
+## 5.4 Media ingest
 
-| Option | MVP có gì | Effort | Risk nếu skip |
-|---|---|---|---|
-| **A. Chỉ text** | Voice / image / file / URL lưu `media_kind` + `media_url`; `media_text` rỗng. Note bỏ qua. | 0 | Note miss ~30–50% content của group Zalo SME điển hình. |
-| **B. URL fetch + voice transcribe** | `media_text` populate cho URL (body fetched) và voice (Whisper-style transcribe). Note cover content của chúng. | +2 tuần | Image OCR + file extract vẫn thiếu — gap nhỏ hơn. |
-| **C. Full media ingest** | A + B + OCR ảnh + extract PDF/docx. | +4 tuần | Ship chậm. |
+**Port từ legacy** — code cũ đã có sẵn các adapter này, MVP tận dụng
+thay vì viết lại. Mỗi loại media wrap thành 1 tool/handler, kết quả lưu
+vào `messages.media_text`:
 
-Recommendation: **B**. Group Zalo voice-heavy → cost xứng đáng. Image /
-file để Phase 1.
+| Loại | Adapter (legacy) | Output → `media_text` |
+|---|---|---|
+| **URL bài báo / blog** | `httpx + trafilatura` | full body sạch, ~5–20k char |
+| **YouTube link** | `yt-dlp` lấy transcript (auto-caption) | transcript đầy đủ |
+| **TikTok / video URL** | legacy fetch → caption + comment top | metadata + text |
+| **PDF / docx / xlsx attached** | legacy `pypdf` + `python-docx` + `openpyxl` | text extract |
+| **Plain image (sticker, photo)** | bỏ qua MVP — `media_text` rỗng | (Phase 1 OCR) |
+| **Voice note** | bỏ qua MVP — `media_text` rỗng | (Phase 1 transcribe) |
+
+Nguyên tắc:
+- Adapter chạy **async sau khi webhook ack**. Không block.
+- Timeout per adapter: 30s URL fetch, 60s YouTube transcript, 30s file
+  parse. Quá → log + giữ `media_text` rỗng, không retry tự động.
+- Cache theo `media_url` (URL ngoài) + content-hash (file attached) —
+  cùng URL gửi nhiều group không fetch lại.
+- Truncate `media_text` ở 50k char trước khi index FTS + Qdrant.
+- Tool agent (`@bot phân tích link này`) gọi cùng adapter nhưng synchronous
+  trong agent loop (timeout giảm còn 20s).
+
+### Bảng cache
+
+```sql
+media_cache (
+  id              BIGSERIAL PRIMARY KEY,
+  source_key      TEXT NOT NULL,        -- URL chuẩn hoá hoặc sha256(file)
+  source_kind     TEXT NOT NULL,        -- 'url' | 'youtube' | 'pdf' | 'docx' | 'xlsx' | 'tiktok'
+  media_text      TEXT NOT NULL,
+  title           TEXT,
+  fetched_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at      TIMESTAMPTZ,          -- NULL = vĩnh viễn cho file; URL = 30d
+  UNIQUE (source_key, source_kind)
+);
+CREATE INDEX idx_media_cache_expires ON media_cache(expires_at);
+```
+
+Voice + OCR đẩy Phase 1 (xem [§1.5](./01-product-vision-scope.md#15-hoãn-phase-1)).
 
 ## 5.5 Lưu trữ & quyền riêng tư
 
@@ -136,9 +168,8 @@ outbound_messages (
 Dùng cho: debug, observability, audit ("bot có thật sự reply không?"),
 và build digest tương lai.
 
-## 5.7 Mở
+## 5.7 Đã chốt & hoãn
 
-- **(mở) Voice transcription** — API (OpenAI/Groq Whisper) vs tự host
-  (whisper.cpp). Em recommend API cho MVP.
-- **(mở) Image OCR** — hoãn Phase 1.
-- **(mở) Quyền "xoá tôi khỏi data" cho cá nhân được mention** — hoãn.
+- Media MVP = URL / YouTube / TikTok / PDF / docx / xlsx (port legacy).
+- Voice + image OCR → Phase 1.
+- "Xoá tôi khỏi data" cho cá nhân được mention → Phase 1+ (chờ user request thực).

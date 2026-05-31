@@ -2,20 +2,33 @@
 
 # §6. Agent layer
 
-## 6.1 Operations & routing
+## 6.1 Operations & Operation Router
 
-3 loại operation:
+3 op chính (entry point từ inbound event) + 1 op nền (scheduler):
 
 | Operation | Trigger | Mục tiêu | Output |
 |---|---|---|---|
 | **GroupNoteUpdater** | Debounce/threshold ([§4.3](./04-group-note.md#43-vòng-đời-update)) | Rebuild markdown của group_note | UPDATE group_notes |
 | **InGroupResponder** | `@bot` mention trong group | Trả lời tại group | Outbound message |
 | **DMResponder** | Sếp DM cho bot | Trả lời sếp riêng | Outbound DM |
+| **ReminderFirer** (nền) | Scheduler tick khi `due_at` đến hạn ([§13](./13-reminders-tasks.md)) | Gửi nhắc đúng nhóm gốc / DM sếp | Outbound message |
 
-Router quyết định op từ inbound event:
-- DM từ linked boss → DMResponder
-- Group msg có `@bot` mention → InGroupResponder
-- Mọi group msg khác → chỉ trigger NoteUpdater (no reply)
+### Operation Router
+
+```python
+def route(event: InboundEvent) -> Operation:
+    if event.chat_type == "dm" and event.sender_is_boss:
+        return Operation.DM_RESPONDER
+    if event.chat_type == "group":
+        if event.mentions_bot:
+            return Operation.IN_GROUP_RESPONDER
+        return Operation.NOTE_UPDATER_SCHEDULE   # no reply, queue update only
+    return Operation.DROP
+```
+
+Operation Router không phải LLM — đây là code rule. LLM intent classify
+chỉ chạy **bên trong** op (vd DMResponder phân biệt "set reminder" vs
+"Q&A" qua tool call).
 
 ## 6.2 Single agent vs multi-agent
 
@@ -36,11 +49,12 @@ Em recommend **single agent per op** vì:
 - Cost & latency là constraint thực tế.
 
 Nhưng giữa các op vẫn "đa agent" theo nghĩa **3 op = 3
-prompt/persona/model tier khác nhau**:
-- **NoteUpdater**: prompt "biên tập markdown", smart model, tool tối
+prompt/persona/tier khác nhau**:
+- **NoteUpdater**: prompt "biên tập markdown", smart tier, tool tối
   thiểu (chỉ `edit_note`)
 - **InGroupResponder**: prompt "thư ký trong group", smart hoặc fast tuỳ
-  message, full core tool + plugin tool
+  feature (xem [§7.3](./07-llm-abstraction.md#73-router--feature-routing)),
+  full core tool + plugin tool
 - **DMResponder**: prompt "thư ký riêng cho sếp", smart, full tool
 
 **Quyết định:** single-agent per op, 3 op tách biệt. Multi-agent giữ
@@ -69,8 +83,12 @@ class ToolSpec:
 | `edit_group_note(group_id, section, new_content)` | Sửa 1 section (bot dùng cho DMResponder) |
 | `list_action_items(group_id?, status?)` | List task từ section "Việc đang mở" |
 | `mark_action_item(item_id, status)` | Đánh dấu done/cancel |
+| `set_reminder(text, due_at, scope, target?)` | Đặt reminder ([§13](./13-reminders-tasks.md)). `scope ∈ {group, dm}`, `target` = chat_id hoặc auto. |
+| `list_reminders(status?, group?)` | List reminder pending/done của sếp |
+| `cancel_reminder(reminder_id)` | Huỷ reminder |
 | `list_groups()` | Liệt kê group sếp đang link |
 | `current_time()` | Thời gian hiện tại theo TZ sếp |
+| `fetch_url(url)` | Fetch + extract URL/YouTube/file (port legacy, [§5.4](./05-capture-flow-data-model.md#54-media-ingest)) |
 
 **Plugin tools** (load động per-boss, xem [§8](./08-plugin-architecture.md)).
 
@@ -109,10 +127,27 @@ Token counter (tiktoken hoặc provider-native) enforce hard limit. Trim
 policy theo thứ tự:
 1. Drop messages cũ nhất trong delta
 2. Drop retrieval kết quả thấp điểm
-3. Truncate group_note giữ section ⚡, 🚧, ✅ (drop 📜 nếu phải)
+3. Truncate group_note giữ section `Cần sếp xử lý`, `Đang tắc`, `Việc đang mở` (drop `Đã quyết` nếu buộc)
 
-## 6.5 Mở
+## 6.5 Feature × tier routing
 
-- **(mở) Multi-agent cho Phase 2** — khi nào kéo lên? Trigger: nếu single
-  agent fail thường xuyên ở task phức tạp.
-- **(mở) Tool call caching** — vd `list_groups()` đổi hiếm, có cache 60s?
+Trong cùng 1 op, từng feature có "tier" khác nhau. Router LLM lookup
+bảng `feature_routing` ở [§7.3](./07-llm-abstraction.md#73-router--feature-routing).
+Bảng ngắn cho agent layer:
+
+| Feature | Tier | Lý do |
+|---|---|---|
+| Quick ack ("vâng", "đã ghi") | fast | latency UX |
+| Intent classify (DM phân loại) | fast | output JSON ngắn, fast model đủ |
+| Q&A với retrieval | smart | reasoning + đa nguồn |
+| Note rebuild | smart | structured generation dài |
+| Reminder parse (text → due_at, target) | fast | task structured ngắn |
+| Action item extract từ message stream | fast | nhiều call, cost-sensitive |
+| Summarize group / cross-group | smart | reasoning + structured |
+| Fetch URL + summarize | smart | sau khi extract content thì cần hiểu |
+| Plugin tool (Phase 1+) | tuỳ plugin | declare trong manifest |
+
+## 6.6 Đã chốt & defer
+
+- Single-agent per op, 3 op tách biệt. Multi-agent (LangGraph-style) defer Phase 2.
+- Tool call caching defer (`list_groups`, `list_reminders` đổi hiếm — cân nhắc cache 60s khi đo thấy hot).

@@ -48,17 +48,21 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 
 | Layer | Khả năng |
 |---|---|
-| **Capture** | Mọi message trong group nào có sếp linked. Lưu text raw + tên hiển thị người gửi. |
+| **Capture** | Mọi message trong group nào có sếp linked. Lưu text raw + tên hiển thị người gửi + media-text (URL/YouTube/file đã extract). |
 | **Group note** | 1 note markdown/group, 7 section ([§4.2](./04-group-note.md#42-schema-7-section)). Auto-update theo debounce + threshold. Sếp edit được trên web. |
-| **Op in-group** | `@bot tóm tắt` / `@bot refresh note` · `@bot Q&A` trên note + history · auto-detect action item nhúng vào note |
-| **DM với sếp** | Q&A cross-group · "tóm tắt group X tuần này" · list việc đang mở · KHÔNG có push tự động |
-| **Web (user)** | Sidebar 8 section (Dashboard, Groups, Action Items, Digests-disabled, Channels, Plugins, Usage, Settings). Xem [§9](./09-web-admin.md). |
-| **Web (super)** | 3 page — Bosses, Payments, Revenue. Role-gated qua env var. |
-| **Channel** | Zalo (ưu tiên) + Telegram. Lark Messenger hoãn. |
-| **AI** | Provider abstraction (OpenAI / Groq / Anthropic / Gemini / Custom). 2-tier fast/smart. BYO key. |
-| **Plugin** | Kiến trúc sẵn sàng; **0 plugin ship**. |
+| **Op in-group** | `@bot tóm tắt` / `@bot refresh note` · `@bot Q&A` trên note + history · auto-detect action item nhúng vào note · `@bot nhắc {ai} {khi nào}` set reminder ngay tại nhóm |
+| **DM với sếp** | Q&A cross-group · "tóm tắt group X tuần này" · list việc đang mở · set/list/cancel reminder · KHÔNG có push tự động ngoài reminder do sếp set |
+| **Reminder & task** | Bảng `scheduled_reminders` + scheduler. Nhắc đúng nhóm gốc (hoặc DM sếp). Lean base cho follow-task / due-date / recurring sau ([§13](./13-reminders-tasks.md)). |
+| **Project tracking** | View cross-group action item + deadline ở `/projects` web (không entity riêng — pull từ group note + reminders). |
+| **Media** | Port từ legacy: URL fetch, YouTube transcript, PDF/docx extract. Voice / image OCR hoãn ([§5.4](./05-capture-flow-data-model.md#54-media-ingest)). |
+| **Web (user)** | Sidebar (Dashboard, Groups, Action Items, Projects, Reminders, Channels, Plugins, Usage, Settings). Xem [§9](./09-web-admin.md). |
+| **Web (super)** | Bosses, Payments, Revenue, Bot Accounts, Models. Role-gated qua env var. |
+| **Channel** | Zalo (acc cá nhân, port từ legacy `zlapi-py`) + Telegram (bot API). Zalo OA + Lark Messenger không làm. |
+| **Bot account pool** | Platform sở hữu N acc Zalo cá nhân. Mỗi sếp × provider → 1 acc; 1 acc serve N sếp. Quản lý qua `/admin/bot-accounts` ([§3.7](./03-identity-channel-linking.md#37-bot-account-pool)). |
+| **AI** | Provider abstraction (OpenAI / Groq / Anthropic / Gemini / Custom). Multi-tier routing per-feature ([§7.3](./07-llm-abstraction.md#73-router--feature-routing)). BYO key. |
+| **Plugin** | Kiến trúc sẵn sàng; **0 plugin ship**. Lark **Base** là plugin (không phải channel). |
 | **DB** | PostgreSQL + Qdrant. |
-| **Auth (user)** | Google OAuth + email/password (fallback). |
+| **Auth (user)** | Google OAuth + email/password (fallback). Security hooks (rate-limit, CSRF, HMAC webhook) bật từ ngày 1 ([§12](./12-security.md)). |
 | **Auth (channel)** | Deep-link qua DM `/start <token>`. |
 | **Subscription** | Manual: hiện VietQR + superadmin click "đã thanh toán". |
 
@@ -66,12 +70,14 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 
 - Daily digest DM (toggle + lịch)
 - Stalled-work alerts
-- **Media ingest ngoài text** — decision ở [§5.4](./05-capture-flow-data-model.md#54-xử-lý-media--decision-mở) (recommend B)
+- Voice transcription, image OCR
 - Plugin ship: Google Calendar, Lark Base
-- Lark Messenger channel
+- Zalo OA channel (acc cá nhân là đủ cho MVP)
+- Lark Messenger channel (không làm)
 - Auto-detect thanh toán (Casso/SePay webhook)
 - People insights, mood analytics
 - Đa tiền tệ, subscription quốc tế
+- Messenger / WhatsApp channel (module sẵn để mở rộng)
 
 ## 1.6 KHÔNG làm
 
@@ -82,7 +88,9 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 - Không DM nhân viên. Bot chỉ DM sếp đã linked.
 - Không offer self-hosted single-tenant. Multi-tenant từ ngày 1.
 
-## 1.7 Mở
+## 1.7 Đã chốt (Phase 0)
 
-- **(mở) Media ingest trong MVP** — xem [§5.4](./05-capture-flow-data-model.md#54-xử-lý-media--decision-mở),
-  so sánh A / B / C. Em recommend **B** (URL fetch + voice transcribe).
+- Media ingest = port từ legacy (URL, YouTube, file). Voice + OCR hoãn.
+- Channel = Zalo personal + Telegram. Bỏ Zalo OA, bỏ Lark Messenger.
+- Reminder/task lifecycle vào MVP (lean base cho follow-task sau).
+- Project tracking = view, không entity riêng.

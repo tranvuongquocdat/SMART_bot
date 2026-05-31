@@ -2,20 +2,34 @@
 
 # §8. Plugin architecture
 
+## 8.0 Plugin vs Channel
+
+| Loại | Định nghĩa | Ví dụ |
+|---|---|---|
+| **Channel** | Adapter cho 1 platform messaging (inbound + outbound). Sở hữu `bot_account`, đăng ký webhook/poll. | Zalo personal, Telegram bot |
+| **Plugin** | Tool/integration cho 1 service ngoài. Per-boss enable + OAuth. Tool gọi từ agent. | Google Calendar, Lark Base, Notion |
+
+**Lark Base = plugin**, không phải channel. Sếp connect Lark Base để bot
+push action item / sync data — không nhận message từ Lark Messenger.
+
 ## 8.1 Plugin folder
 
 Mỗi plugin = 1 thư mục trong `plugins/`:
 
 ```
 plugins/
-└── google_calendar/
-    ├── manifest.toml          # metadata
-    ├── tools.py               # tool definitions + handlers
-    ├── auth.py                # OAuth start + callback
-    ├── settings_schema.json   # config form schema (JSON Schema)
-    ├── README.md              # cho user đọc khi enable
-    └── assets/
-        └── icon.svg
+├── google_calendar/          # Phase 1
+│   ├── manifest.toml
+│   ├── tools.py
+│   ├── auth.py
+│   ├── settings_schema.json
+│   ├── README.md
+│   └── assets/icon.svg
+└── lark_base/                # Phase 1
+    ├── manifest.toml
+    ├── tools.py              # create_record, query_table, update_record
+    ├── auth.py               # Lark OAuth user-access-token
+    └── ...
 ```
 
 ## 8.2 Manifest
@@ -159,10 +173,8 @@ for inst in enabled:
 Boss A không bật Notion → LLM của boss A không thấy Notion tool. Context
 gọn, không hallucinate gọi sai.
 
-## 8.8 Mở
+## 8.8 Đã chốt & defer
 
-- **(mở) Plugin sandboxing** — plugin code in-process, có quyền đọc DB
-  & file system. Phase 0 trust mọi plugin do em viết. Phase 2 nếu mở
-  3rd-party → tách process (kiểu MCP) hoặc Wasm.
-- **(mở) Plugin version & migrate** — manifest.version tăng → khi nào
-  invalidate auth/settings? Hoãn.
+- Plugin = service integration, không phải channel. Lark Base là plugin Phase 1.
+- Phase 0 trust mọi plugin do team viết (in-process). Sandboxing (Wasm/MCP-style subprocess) → Phase 2 nếu mở 3rd-party.
+- Plugin version migrate → defer; tracking qua `manifest.version` nhưng chưa enforce.

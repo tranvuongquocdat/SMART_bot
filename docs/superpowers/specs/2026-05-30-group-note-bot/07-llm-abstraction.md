@@ -28,58 +28,120 @@ class LLMClient(ABC):
 - `AnthropicClient(api_key)` — schema khác (system prompt, tool_use)
 - `GeminiClient(api_key)` — schema khác
 
-## 7.2 ModelRegistry
+## 7.2 ModelRegistry — DB + seed file
 
-File config `config/models.yaml`:
+Nguồn dữ liệu **vừa file vừa DB**:
+- `config/models.yaml` = seed mặc định khi setup mới.
+- Bảng `models` trong DB = source of truth runtime.
+- Startup: nếu bảng rỗng → load seed. Sau đó DB override.
+
+Schema:
+
+```sql
+models (
+  id                       BIGSERIAL PRIMARY KEY,
+  name                     TEXT NOT NULL,
+  provider                 TEXT NOT NULL,                  -- 'openai' | 'groq' | 'anthropic' | 'gemini' | 'custom'
+  endpoint_kind            TEXT NOT NULL,                  -- 'openai_compat' | 'anthropic' | 'gemini'
+  base_url                 TEXT,
+  tier                     TEXT NOT NULL,                  -- 'smart' | 'fast'
+  ctx_max                  INTEGER NOT NULL,
+  capabilities             JSONB NOT NULL DEFAULT '[]',    -- ['tool_use', 'vision', 'json_mode']
+  cost_per_1m_input_usd    NUMERIC(10, 4),
+  cost_per_1m_output_usd   NUMERIC(10, 4),
+  is_platform_default      BOOLEAN NOT NULL DEFAULT FALSE, -- có dùng cho sếp chưa config?
+  is_active                BOOLEAN NOT NULL DEFAULT TRUE,
+  notes                    TEXT,
+  created_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (provider, name)
+);
+```
+
+Seed `config/models.yaml`:
 
 ```yaml
 - name: gpt-4o-mini
   provider: openai
-  endpoint: openai_compat
+  endpoint_kind: openai_compat
   base_url: https://api.openai.com/v1
-  tier: smart                                  # smart | fast
+  tier: smart
   ctx_max: 128000
   capabilities: [tool_use, json_mode, vision]
   cost_per_1m_input_usd: 0.15
   cost_per_1m_output_usd: 0.60
+  is_platform_default: true
 
 - name: llama-3.3-70b-versatile
   provider: groq
-  endpoint: openai_compat
+  endpoint_kind: openai_compat
   base_url: https://api.groq.com/openai/v1
   tier: fast
   ctx_max: 128000
   capabilities: [tool_use]
   cost_per_1m_input_usd: 0.59
   cost_per_1m_output_usd: 0.79
+  is_platform_default: true
 
 - name: claude-haiku-4-5
   provider: anthropic
-  endpoint: anthropic
+  endpoint_kind: anthropic
   tier: smart
   ctx_max: 200000
   capabilities: [tool_use, vision]
   cost_per_1m_input_usd: 1.00
   cost_per_1m_output_usd: 5.00
-
-# Thêm model mới = thêm row, không sửa code
 ```
 
-Reload khi server start. Superadmin có thể thêm row qua web ở Phase 2.
+Superadmin CRUD qua `/admin/models` ([§9.3](./09-web-admin.md#93-sitemap-superadmin-pages)).
+Sếp chọn model qua `/settings/ai` chỉ từ pool `is_active=true`. Nếu sếp
+chưa config → fallback sang `is_platform_default` cùng tier.
 
-## 7.3 Router & 2-tier routing
+## 7.3 Router & feature routing
+
+Router không quyết theo `op` mà theo `feature` — đơn vị nhỏ hơn op (1 op
+có thể gọi nhiều feature). Mapping feature → tier giữ trong DB để
+superadmin chỉnh được mà không deploy code.
+
+### Schema
+
+```sql
+feature_routing (
+  feature      TEXT PRIMARY KEY,            -- 'note_update' | 'qa_with_search' | 'reminder_parse' | ...
+  default_tier TEXT NOT NULL,               -- 'smart' | 'fast'
+  description  TEXT,
+  updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+Seed cho MVP (cũng là bảng [§6.5](./06-agent-layer.md#65-feature--tier-routing)):
+
+| feature | tier |
+|---|---|
+| `note_update` | smart |
+| `quick_ack` | fast |
+| `intent_classify` | fast |
+| `qa_with_search` | smart |
+| `summarize_group` | smart |
+| `summarize_cross_group` | smart |
+| `action_item_extract` | fast |
+| `reminder_parse` | fast |
+| `url_summarize` | smart |
+| `dm_general` | smart |
+
+### Pick logic
 
 ```python
-def pick_model(boss: Boss, op: Operation) -> tuple[str, str]:
-    """Returns (provider, model_name)."""
-    tier = TIER_BY_OP[op]   # NoteUpdater→smart, ack→fast, Responder→smart, ...
-    if tier == "smart":
-        return boss.smart_provider, boss.smart_model
-    return boss.fast_provider, boss.fast_model
+def pick_model(boss: Boss, feature: str, required_caps: list[str] = ()) -> Model:
+    tier = feature_routing_repo.get(feature) or "smart"
+    chosen = boss.smart_model if tier == "smart" else boss.fast_model
+    if chosen is None:
+        chosen = platform_default_repo.get(tier=tier)
+    return resolve_capability(chosen, required_caps, boss)
 ```
 
-Mỗi op trong code khai báo tier mặc định. Sếp config 2 model qua web;
-nếu chỉ 1 model → cả 2 tier dùng cùng.
+Sếp config 2 model (smart + fast) qua `/settings/ai`. Chỉ chọn 1 model →
+cả 2 tier dùng cùng. Không config → dùng platform default.
 
 ## 7.4 Capability gap fallback
 
@@ -129,9 +191,9 @@ CREATE INDEX idx_token_usage_boss_time ON token_usage(boss_id, called_at DESC);
 
 Web `/usage` chart từ bảng này (cost theo ngày, theo op, theo model).
 
-## 7.6 Mở
+## 7.6 Đã chốt & defer
 
-- **(mở) Streaming response** — bot reply có stream chunk được không?
-  Cải UX cảm giác nhanh. Defer (channel SDK support tricky).
-- **(mở) Prompt caching** (Anthropic, OpenAI) — giảm cost khi reuse
-  system prompt. Phase 2.
+- Model registry: DB + seed file. Superadmin CRUD qua `/admin/models`.
+- Feature routing trong DB, edit được runtime.
+- Streaming response → defer (channel SDK support tricky, Zalo personal không hỗ trợ).
+- Prompt caching (Anthropic/OpenAI) → Phase 2 khi đo cost thật.

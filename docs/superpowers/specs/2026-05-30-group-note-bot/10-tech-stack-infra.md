@@ -13,11 +13,12 @@
 | **Migration** | Alembic | Chuẩn Python |
 | **Vector DB** | Qdrant 1.x (Docker) | Đã quen, scale tốt |
 | **Embed model** | text-embedding-3-small (1536d) | Cân bằng cost/chất lượng |
-| **Voice STT** | OpenAI Whisper API (MVP) | Cost & latency |
-| **URL fetch** | httpx + trafilatura | Extract content sạch |
-| **Channel — Zalo** | Zalo OA HTTPS API + webhook | (không có Python SDK chính chủ) |
+| **URL fetch** | httpx + trafilatura | Extract content sạch (port legacy) |
+| **YouTube transcript** | yt-dlp | Auto-caption (port legacy) |
+| **PDF extract** | pypdf | Port legacy |
+| **DOCX / XLSX extract** | python-docx + openpyxl | Port legacy |
+| **Channel — Zalo** | `zlapi-py` (port legacy) — acc cá nhân, không phải OA | OA defer; legacy code đã có session/cookie flow |
 | **Channel — Telegram** | python-telegram-bot v21+ | Async, mature |
-| **Channel — Lark Messenger** | lark-oapi SDK (Phase 1) | Official |
 | **Auth — Google OAuth** | Authlib | Maintained, async |
 | **Password hash** | bcrypt (passlib) | Standard |
 | **Encryption (token blob)** | cryptography (Fernet) | Symmetric, key trong env |
@@ -39,20 +40,32 @@ src/
 ├── container.py               # DI: build clients, register repos
 │
 ├── channels/                  # inbound + outbound per channel
-│   ├── base.py                # InboundMessage, OutboundMessage protocols
-│   ├── zalo.py
+│   ├── base.py                # ChannelAdapter, InboundMessage, OutboundMessage protocols
+│   ├── capabilities.py        # capability flags (§2.1.1)
+│   ├── zalo.py                # zlapi-py adapter, poll loop, multi-account
 │   ├── telegram.py
-│   └── lark_msg.py            # (Phase 1)
+│   └── (messenger/whatsapp Phase 1+)
+│
+├── bot_accounts/              # quản lý pool bot acc
+│   ├── manager.py             # load credentials, assign, status update
+│   ├── zalo_session.py        # cookie / QR login flow
+│   └── telegram_session.py
 │
 ├── router.py                  # event → operation routing
 │
 ├── repositories/              # DB access, all async
 │   ├── users.py
 │   ├── account_links.py
+│   ├── bot_accounts.py
+│   ├── bot_account_assignments.py
 │   ├── messages.py
 │   ├── group_notes.py
 │   ├── outbound_messages.py
 │   ├── boss_integrations.py
+│   ├── reminders.py
+│   ├── media_cache.py
+│   ├── models.py              # ModelRegistry DB
+│   ├── feature_routing.py
 │   ├── payments.py
 │   └── token_usage.py
 │
@@ -90,8 +103,16 @@ src/
 │
 ├── scheduler/                 # APScheduler jobs
 │   ├── note_flush.py
+│   ├── reminder_firer.py      # §13
 │   ├── subscription_check.py
+│   ├── bot_account_health.py  # ping bot acc, mark logged_out/rate_limit
 │   └── (Phase 1 jobs)
+
+├── security/                  # §12 — hooks layer
+│   ├── rate_limit.py          # RateLimiter interface (in-mem now, Redis later)
+│   ├── csrf.py
+│   ├── webhook_verify.py      # HMAC per provider
+│   └── log_redact.py          # PII redact filter
 │
 ├── infra/                     # external client wrappers
 │   ├── db.py                  # asyncpg pool factory
@@ -158,11 +179,10 @@ SUPERADMIN_EMAILS=tranvuongquocdat@gmail.com
 PLATFORM_OPENAI_API_KEY=<optional>
 
 # Channels
-ZALO_OA_ID=...
-ZALO_OA_SECRET=...
-ZALO_WEBHOOK_VERIFY=...
-TELEGRAM_BOT_TOKEN=...
-LARK_APP_ID=...                   # Phase 1
+# Zalo: credentials per-bot-account lưu trong DB (Fernet encrypted),
+# không có env var. Telegram bot token cũng vậy — đẩy vào bot_accounts.
+# Env chỉ giữ secret platform-wide.
+LARK_APP_ID=...                   # Phase 1 (Lark Base plugin)
 LARK_APP_SECRET=...
 
 # Subscription (cho hiển thị VietQR)
@@ -185,8 +205,64 @@ BANK_BIN=...
 - **Tracing**: defer Phase 2 (OpenTelemetry).
 - **Health**: `/healthz` → `{status, db, qdrant}` cho monitor.
 
-## 10.6 Mở
+## 10.6 Đã chốt & defer
 
-- **(mở) Multi-region** — server ở SG/Singapore cho latency Zalo
-  webhook + LLM API. Defer.
-- **(mở) Backup** — pg_dump cron daily lên S3-compatible. Defer chi tiết.
+- 1 VPS MVP, split web/worker khi >50 sếp.
+- Multi-region defer (SG/Singapore khi cần latency thấp).
+- Backup pg_dump cron daily lên S3-compatible → setup ngày 1, chi tiết bucket key + retention defer.
+
+## 10.7 Migration discipline
+
+Đã có cú đau với migration đồng bộ thiếu → schema dịch nhưng data
+chưa đồng bộ → lỗi runtime. Quy tắc cứng:
+
+### 7-step checklist mỗi migration
+
+1. **Forward + backward**: mỗi migration Alembic phải có `upgrade()` và
+   `downgrade()`. Cấm `op.execute` raw mà không nghĩ rollback.
+2. **Additive-first**: thêm cột → DEFAULT + NULLable; backfill ở step
+   data migration; drop cũ ở migration sau (≥1 release gap).
+3. **Data migration tách script**: nếu phải biến đổi data, viết
+   `migrations/data/<id>_<name>.py` riêng (idempotent, có dry-run flag),
+   không nhúng vào Alembic upgrade.
+4. **Auto-gen disabled**: `alembic revision --autogenerate` chỉ dùng
+   tham khảo diff, **không commit thẳng**. Mỗi migration người review.
+5. **Preflight check**: trước khi apply prod —
+   - count rows bảng affected trước
+   - dry-run trên staging snapshot
+   - sample diff (10 rows trước/sau)
+   - rollback test: upgrade → downgrade → upgrade pass
+6. **CI gate**: pipeline chạy `alembic upgrade head` trên DB staging
+   snapshot mỗi PR. Fail = block merge.
+7. **Drop sau ≥1 release**: cấm drop column / table cùng PR thêm cột
+   thay thế. Tách 2 PR cách ≥1 release để rollback an toàn.
+
+### Backfill convention
+
+```python
+# migrations/data/0042_backfill_bot_account_assignments.py
+"""Backfill assignments cho boss đã có account_links trước khi feature ra."""
+
+DRY_RUN_DEFAULT = True
+
+async def run(db, *, dry_run: bool = DRY_RUN_DEFAULT):
+    rows = await db.fetch("SELECT boss_id, provider FROM account_links WHERE ...")
+    n = 0
+    for r in rows:
+        bot_acc_id = await pick_least_loaded(db, r["provider"])
+        if dry_run:
+            print(f"would assign boss={r['boss_id']} provider={r['provider']} → {bot_acc_id}")
+        else:
+            await db.execute("INSERT INTO bot_account_assignments ...", ...)
+        n += 1
+    print(f"{'dry-run: ' if dry_run else ''}processed {n} rows")
+```
+
+Mọi backfill viết style trên: dry-run mặc định, idempotent (re-run OK),
+output diff trước khi commit.
+
+### Tham khảo
+
+- Memory: `feedback_db_migration_discipline` (7-step checklist legacy).
+- Memory: `feedback_no_ad_hoc_db_mutations` — không DELETE/DROP ad-hoc
+  trên prod; schema change đi qua migration.
