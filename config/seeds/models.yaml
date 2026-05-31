@@ -1,0 +1,44 @@
+- name: gpt-4o-mini
+  provider: openai
+  endpoint_kind: openai_compat
+  base_url: https://api.openai.com/v1
+  tier: smart
+  ctx_max: 128000
+  capabilities: [tool_use, json_mode, vision, prompt_cache]
+  cost_per_1m_input_usd: 0.15
+  cost_per_1m_output_usd: 0.60
+  is_platform_default: true
+  notes: MVP default smart + vision (fallback)
+
+- name: llama-3.3-70b-versatile
+  provider: groq
+  endpoint_kind: openai_compat
+  base_url: https://api.groq.com/openai/v1
+  tier: fast
+  ctx_max: 128000
+  capabilities: [tool_use]
+  cost_per_1m_input_usd: 0.59
+  cost_per_1m_output_usd: 0.79
+  is_platform_default: true
+  notes: MVP default fast
+
+- name: gpt-4o
+  provider: openai
+  endpoint_kind: openai_compat
+  base_url: https://api.openai.com/v1
+  tier: smart
+  ctx_max: 128000
+  capabilities: [tool_use, json_mode, vision, prompt_cache]
+  cost_per_1m_input_usd: 2.50
+  cost_per_1m_output_usd: 10.00
+  is_platform_default: false
+
+- name: gemini-2.0-flash
+  provider: gemini
+  endpoint_kind: gemini
+  tier: fast
+  ctx_max: 1000000
+  capabilities: [tool_use, vision]
+  cost_per_1m_input_usd: 0.10
+  cost_per_1m_output_usd: 0.40
+  is_platform_default: false

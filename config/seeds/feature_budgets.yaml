@@ -1,0 +1,41 @@
+- feature: note_update
+  max_input_tokens: 8000
+  max_output_tokens: 4000
+  trim_policy_json: ["drop_oldest_delta"]
+  compression_strategy: none
+  cache_prefix_hint: after_group_note
+
+- feature: qa_with_search
+  max_input_tokens: 6000
+  max_output_tokens: 1500
+  trim_policy_json: ["drop_low_score_retrieval", "drop_oldest_recent"]
+  compression_strategy: none
+  cache_prefix_hint: after_group_note
+
+- feature: dm_general
+  max_input_tokens: 10000
+  max_output_tokens: 2000
+  trim_policy_json: ["drop_low_score_retrieval", "drop_oldest_episodic"]
+  compression_strategy: none
+  cache_prefix_hint: after_group_note
+
+- feature: summarize_group
+  max_input_tokens: 12000
+  max_output_tokens: 2000
+  trim_policy_json: ["truncate_group_note_except_critical"]
+  compression_strategy: none
+  cache_prefix_hint: null
+
+- feature: reminder_parse
+  max_input_tokens: 1500
+  max_output_tokens: 500
+  trim_policy_json: ["drop_oldest_delta"]
+  compression_strategy: none
+  cache_prefix_hint: null
+
+- feature: image_extract
+  max_input_tokens: 2000
+  max_output_tokens: 800
+  trim_policy_json: []
+  compression_strategy: none
+  cache_prefix_hint: null

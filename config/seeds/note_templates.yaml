@@ -1,0 +1,34 @@
+- name: general
+  description: Mặc định, phù hợp đa số group
+  is_system: true
+  sections_json:
+    - {key: needs_boss, title: "Cần sếp xử lý", behavior: rolling, hide_if_empty: true, writable_by: llm}
+    - {key: focus, title: "Đang focus", behavior: rolling, max_items: 5, writable_by: llm}
+    - {key: open_tasks, title: "Việc đang mở", behavior: task_list, writable_by: both}
+    - {key: blocked, title: "Đang tắc / Rủi ro", behavior: rolling, hide_if_empty: true, writable_by: llm}
+    - {key: decisions, title: "Đã quyết", behavior: append_only, writable_by: llm}
+    - {key: pinned, title: "Đã pin", behavior: manual_pin, hide_if_empty: true, writable_by: user}
+    - {key: open_questions, title: "Câu hỏi treo", behavior: rolling, hide_if_empty: true, writable_by: llm}
+    - {key: active_people, title: "Người active (7d)", behavior: computed, writable_by: llm}
+    - {key: archive, title: "Lưu trữ", behavior: computed, writable_by: llm}
+
+- name: sales
+  description: Group sale — pipeline, deal, KH
+  is_system: true
+  sections_json:
+    - {key: hot_leads, title: "Lead nóng", behavior: rolling, max_items: 5, writable_by: llm}
+    - {key: open_deals, title: "Deal đang chạy", behavior: task_list, writable_by: both}
+    - {key: needs_boss, title: "Cần sếp duyệt", behavior: rolling, hide_if_empty: true, writable_by: llm}
+    - {key: lost_deals, title: "Deal mất (7d)", behavior: append_only, hide_if_empty: true, writable_by: llm}
+    - {key: pinned, title: "Đã pin", behavior: manual_pin, hide_if_empty: true, writable_by: user}
+    - {key: active_people, title: "Người active (7d)", behavior: computed, writable_by: llm}
+
+- name: partner
+  description: Group đối tác — milestone, deliverable, commitment
+  is_system: true
+  sections_json:
+    - {key: commitments, title: "Cam kết hai bên", behavior: append_only, writable_by: llm}
+    - {key: open_tasks, title: "Deliverable đang mở", behavior: task_list, writable_by: both}
+    - {key: blocked, title: "Đang vướng", behavior: rolling, hide_if_empty: true, writable_by: llm}
+    - {key: decisions, title: "Đã quyết", behavior: append_only, writable_by: llm}
+    - {key: pinned, title: "Đã pin", behavior: manual_pin, hide_if_empty: true, writable_by: user}

@@ -1,0 +1,59 @@
+- feature: note_update
+  target_tier: smart
+  fallback_chain: [{tier: smart, provider_blacklist: ["<primary>"]}]
+  weight: 100
+
+- feature: quick_ack
+  target_tier: fast
+  fallback_chain: []
+  weight: 100
+
+- feature: intent_classify
+  target_tier: fast
+  fallback_chain: []
+  weight: 100
+
+- feature: qa_with_search
+  target_tier: smart
+  fallback_chain: [{tier: fast, after_failures: 2}]
+  weight: 100
+
+- feature: summarize_group
+  target_tier: smart
+  fallback_chain: []
+  weight: 100
+
+- feature: summarize_cross_group
+  target_tier: smart
+  fallback_chain: []
+  weight: 100
+
+- feature: action_item_extract
+  target_tier: fast
+  fallback_chain: []
+  weight: 100
+
+- feature: reminder_parse
+  target_tier: fast
+  fallback_chain: []
+  weight: 100
+
+- feature: url_summarize
+  target_tier: smart
+  fallback_chain: [{tier: fast, after_failures: 1}]
+  weight: 100
+
+- feature: image_extract
+  target_tier: vision
+  fallback_chain: []
+  weight: 100
+
+- feature: image_qa
+  target_tier: vision
+  fallback_chain: [{tier: smart, after_failures: 1, required_caps: [vision]}]
+  weight: 100
+
+- feature: dm_general
+  target_tier: smart
+  fallback_chain: [{tier: fast, after_failures: 2}]
+  weight: 100

@@ -1,0 +1,21 @@
+key: note_update
+version: 1
+is_active: true
+notes: MVP — group note updater per template descriptor
+body: |
+  Bạn là trợ lý ghi chú nhóm. Cập nhật group note theo template descriptor sau.
+  Mỗi section có {key, title, behavior, llm_hint, writable_by}.
+  - behavior=rolling: ghi đè full
+  - behavior=append_only: chỉ thêm bullet mới, không xoá cũ
+  - behavior=task_list: format checklist `[ ] {person} — {task} · {hạn}`
+  - behavior=manual_pin: BỎ QUA (do user pin tay)
+  - behavior=computed: BỎ QUA (do code tính)
+  Section trong `manually_edited_sections`: giữ nguyên.
+
+  Template: {{ sections_json }}
+  Note hiện tại:
+  {{ current_markdown }}
+  Delta messages:
+  {{ recent_messages }}
+
+  Output: markdown mới đúng thứ tự section, heading theo title.

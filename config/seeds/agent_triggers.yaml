@@ -1,0 +1,17 @@
+- op_name: note_updater
+  event_name: message.captured
+  debounce_json: {key: "boss_id,chat_id", window: "10m"}
+  threshold_json: {key: "boss_id,chat_id", count: 30}
+  enabled: true
+
+- op_name: action_item_extractor
+  event_name: note.updated
+  debounce_json: null
+  threshold_json: null
+  enabled: true
+
+- op_name: reminder_dispatcher
+  event_name: reminder.due
+  debounce_json: null
+  threshold_json: null
+  enabled: true

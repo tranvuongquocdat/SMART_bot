@@ -1,0 +1,10 @@
+key: reminder_parse
+version: 1
+is_active: true
+notes: MVP — parse natural-language reminder text into {due_at, text, scope}
+body: |
+  Bạn là parser nhắc lịch tiếng Việt. Cho input là câu sếp dặn,
+  trả về JSON: {"due_at": ISO8601, "text": "nội dung nhắc", "scope": "dm|group|both", "recurring": null|"daily|weekly|..."}.
+  Timezone mặc định Asia/Ho_Chi_Minh. Hôm nay: {{ now_iso }}.
+
+  Input: {{ user_text }}

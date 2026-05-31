@@ -1,0 +1,13 @@
+- feature: qa_with_search
+  description: MVP — parallel fanout (BM25 + dense) → RRF → MMR
+  stages_json:
+    - {name: parallel_fanout, args: {sources: [bm25, dense], k_each: 30}}
+    - {name: rrf, args: {k: 60}}
+    - {name: mmr, args: {lambda_: 0.5, k_out: 20}}
+
+- feature: note_context
+  description: Group note retrieval — recent + pinned
+  stages_json:
+    - {name: parallel_fanout, args: {sources: [bm25, dense], k_each: 20}}
+    - {name: rrf, args: {k: 60}}
+    - {name: mmr, args: {lambda_: 0.5, k_out: 10}}
