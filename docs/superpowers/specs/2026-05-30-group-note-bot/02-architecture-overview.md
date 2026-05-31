@@ -7,13 +7,15 @@
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │              Channels (inbound + outbound)                      │
-│  ┌──────────────────┐  ┌─────────────┐                          │
-│  │  Zalo (personal) │  │  Telegram   │  Messenger / WhatsApp    │
-│  │  zlapi-py legacy │  │  Bot API    │  (module-ready, defer)   │
-│  │  + bot acc pool  │  │  single bot │                          │
-│  └────┬─────────────┘  └──────┬──────┘                          │
-└───────┼────────────────────────┼────────────────────────────────┘
-        ▼                        ▼
+│  ┌──────────────────────┐                                       │
+│  │  Zalo (personal)     │  Telegram / Messenger / WhatsApp      │
+│  │  zlapi-py legacy     │  (module-ready, defer Phase 1+)       │
+│  │  dual-mode bot acc:  │                                       │
+│  │   • platform pool    │                                       │
+│  │   • boss-owned       │                                       │
+│  └────┬─────────────────┘                                       │
+└───────┼─────────────────────────────────────────────────────────┘
+        ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                       Channel Router                            │
 │   Chuẩn hoá event inbound → InboundMessage                     │
@@ -79,19 +81,21 @@
 ### 2.1.1 Channel capability matrix
 
 Mỗi channel adapter cài interface `ChannelAdapter` trong [§10.2](./10-tech-stack-infra.md#102-project-structure-đề-xuất).
-Capability flag để code core không cần biết platform:
+Capability flag để code core không cần biết platform. MVP **chỉ Zalo**;
+các provider khác ở đây là reference cho Phase 1+:
 
-| Capability | Zalo personal | Telegram bot | (sau) Messenger | (sau) WhatsApp Cloud |
+| Capability | Zalo personal (MVP) | Telegram (P1) | Messenger (P1+) | WhatsApp Cloud (P1+) |
 |---|---|---|---|---|
 | `inbound.has_webhook` | ❌ (poll/long-poll) | ✓ | ✓ | ✓ |
-| `inbound.supports_groups` | ✓ | ✓ | partial | (group cloud beta) |
+| `inbound.supports_groups` | ✓ | ✓ | partial | group cloud beta |
 | `inbound.supports_mentions` | ✓ (manual parse) | ✓ | ✓ | ✓ |
 | `inbound.media_kinds` | text, image, file, voice, sticker, url | text, image, file, voice, sticker | text, image, file | text, image, file |
 | `outbound.send_text` | ✓ | ✓ | ✓ | ✓ |
 | `outbound.reply_to_msg` | ✓ | ✓ | ✓ | ✓ |
 | `outbound.send_file` | ✓ | ✓ | ✓ | ✓ |
+| `outbound.typing_indicator` | ✓ (legacy có) | ✓ | ✓ | ❌ |
 | `member.list_api` | partial (legacy code parse) | ✓ | limited | limited |
-| `auth.kind` | personal cookies | bot token | page token | system user |
+| `auth.kind` | personal cookies (dual-mode: platform/boss-owned) | bot token (platform) | page token | system user |
 
 Adapter mới = drop file vào `src/channels/<name>.py` + đăng ký vào `channels/__init__.py`. Core không cần sửa.
 
@@ -149,9 +153,9 @@ outbound_messages INSERT
 │ 1 FastAPI app (1 Python process)                │
 │                                                 │
 │ Routers:                                        │
-│   /api/channels/telegram/webhook                │
 │   /api/oauth/google/callback                    │
 │   /api/oauth/plugin/<name>/callback             │
+│   /api/public/v1/*  (read-only MVP)             │
 │   /admin/*  (role-gated)                        │
 │   /app/*   (user pages)                         │
 │                                                 │
@@ -159,8 +163,11 @@ outbound_messages INSERT
 │   - Zalo poll workers (1 task / bot_account)    │
 │   - NoteUpdater queue worker                    │
 │   - Reminder scheduler (§13)                    │
+│   - EventBus dispatcher (§14 — internal subs)   │
+│   - Bot account health check                    │
 │   - Subscription expiry checker (hàng ngày)     │
 │   - (Phase 1) digest scheduler                  │
+│   - (Phase 1) Telegram webhook router           │
 └─────────────────────────────────────────────────┘
        │
        ├─ Postgres  (asyncpg)
@@ -174,5 +181,5 @@ worker process riêng dễ dàng (input của nó là message events).
 ## 2.5 Đã chốt
 
 - Single-process MVP. Split web/worker hoãn tới khi LLM call saturate request handling (~50 sếp).
-- Bot account pool — platform sở hữu, mỗi (boss × provider) gắn cứng 1 acc. Chi tiết [§3.8](./03-identity-channel-linking.md#38-mô-hình-phân-bổ-bot-acc).
+- Bot account pool — platform sở hữu, mỗi (boss × provider) gắn cứng 1 acc. Chi tiết [§3.8](./03-identity-channel-linking.md#38-mô-hình-bot-account--dual-mode).
 - Channel adapter có capability matrix (§2.1.1) → core không phụ thuộc provider.

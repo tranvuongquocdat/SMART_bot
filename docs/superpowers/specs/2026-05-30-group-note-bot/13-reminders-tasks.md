@@ -163,7 +163,7 @@ DM:
   match 1 → `cancel_reminder`; nhiều match → bot hỏi clarify (LLM tự xử,
   không hardcode logic).
 
-Web `/reminders` (xem [§9.7](./09-web-admin.md#97-reminders--projects)):
+Web `/reminders` (xem [§9.8](./09-web-admin.md#98-reminders--projects)):
 edit due_at, text, scope, target. Cancel = update status.
 
 ## 13.7 Projects view (cross-group)

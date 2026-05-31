@@ -87,17 +87,20 @@ Mỗi provider verify khác — interface chung:
 class WebhookVerifier(Protocol):
     def verify(self, headers: Mapping, body: bytes) -> bool: ...
 
-# Telegram: secret token trong header
-class TelegramVerifier:
-    def verify(self, headers, body):
-        return headers.get("X-Telegram-Bot-Api-Secret-Token") == self.secret
+# Zalo personal account = poll loop, KHÔNG có webhook → verify ở level
+# session cookies + status check (`bot_account_health` job).
+# Boss-owned acc: thêm verify session ownership = cookies decrypt OK + provider_user_id khớp owner_boss_id
 
-# Zalo (poll-based, không có webhook truyền thống) — skip
 # Plugin OAuth callback: state token verify từ DB
+
+# Phase 1+ (khi add Telegram):
+# class TelegramVerifier:
+#     def verify(self, headers, body):
+#         return headers.get("X-Telegram-Bot-Api-Secret-Token") == self.secret
 ```
 
-Zalo personal account = poll loop, không có webhook → verify ở level
-session cookies + status check (`bot_account_health` job).
+MVP single-channel Zalo → không có webhook signature; security
+boundary là cookie/session integrity.
 
 ## 12.6 Authz checklist
 
@@ -128,6 +131,20 @@ class BossScopedRepo:
   thêm v2, để code re-encrypt khi save next lần.
 - Không log Fernet key. Không log decrypted blob.
 - `.env` không commit; `.env.example` có placeholder.
+
+### Credential isolation — platform vs boss-owned
+
+| Loại | Ai đọc được credentials | Ai sửa được | Ai disable được |
+|---|---|---|---|
+| **bot_accounts.ownership=platform** | superadmin (re-login, rotate) | superadmin | superadmin |
+| **bot_accounts.ownership=boss_owned** | **không ai** (chỉ runtime decrypt cho poll loop của chính sếp đó) | sếp owner | superadmin (disable + audit log; KHÔNG đọc, KHÔNG re-login) |
+
+Code enforcement:
+- `bot_accounts_repo.get_credentials(id)` check caller context:
+  platform → cho phép admin route; boss_owned → CHỈ runtime channel adapter
+  serving chính `owner_boss_id` đó. Admin route raise `Forbidden`.
+- Disable boss-owned không cần decrypt — chỉ set `status='paused'`. Audit
+  log ghi `{actor: admin_uid, action: 'disable', target: bot_account_id, reason: text}`.
 
 ## 12.8 PII log redact
 
@@ -160,5 +177,6 @@ Prod default: log `boss_id`, `chat_id`, `provider`, sizes — không log raw.
 
 - Security hooks bật từ ngày 1, impl in-memory đủ cho MVP.
 - Mọi mutation admin có log (structlog) ngay; audit_log bảng riêng Phase 1.
-- Webhook verify HMAC bắt buộc cho Telegram; Zalo dùng session health check.
+- MVP Zalo-only: không có webhook signature; security = session cookie integrity + bot_account_health. Telegram HMAC verifier wire khi enable Phase 1.
+- Boss-owned credentials: admin disable được, không đọc được — audit log ghi mọi disable.
 - Authz checklist là gate code review, không có middleware magic.

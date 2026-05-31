@@ -39,12 +39,12 @@ UI hướng "công cụ chuyên nghiệp", không "AI demo":
 /projects                — Projects view: action item + reminder cross-group, theo deadline
 /reminders               — List/edit/cancel reminder đã set
 /digests                 — (Phase 1, MVP show "Sắp có")
-/channels                — Connect Zalo / Telegram (xem bot acc nào đang được gán)
+/channels                — Connect Zalo (MVP single-channel). Hiện mode hiện tại + nút switch platform↔self ([§3.10](./03-identity-channel-linking.md#310-switch-mode)).
 /plugins                 — Marketplace + manage installed
 /plugins/:id             — Plugin detail (OAuth + settings form)
 /usage                   — Token + cost dashboard
 /settings/general        — Tên bot, ngôn ngữ, TZ, retention
-/settings/ai             — Provider + model (smart/fast) + custom provider
+/settings/ai             — Provider + 3 slot model (smart/fast/vision) + custom provider
 /settings/account        — Email, đổi mật khẩu, đăng xuất
 /subscription            — Gói + VietQR + lịch sử thanh toán
 ```
@@ -55,10 +55,14 @@ Chỉ visible khi `role=superadmin`:
 
 ```
 /admin/bosses            — List + detail + set expiry + add payment + assign bot acc
-/admin/bot-accounts      — Pool bot acc Zalo/Telegram: list, login/relogin, assign, traffic
-/admin/bot-accounts/:id  — Detail: status, sessions, msgs in/out, assignment list
+/admin/bot-accounts      — Filter: Platform | Boss-owned. Pool Zalo: list, login/relogin, assign, traffic.
+/admin/bot-accounts/:id  — Detail platform: status, login flow, msgs in/out, assignment list, cap edit.
+                           Detail boss-owned: read-only (status, owner, traffic) + [Disable] với audit log.
 /admin/models            — Model registry CRUD (provider, model, tier, ctx, cost, is_default)
 /admin/feature-routing   — Bảng feature → tier (edit live)
+/admin/prompts           — Prompts registry: list key, active version, version history, editor, [Set active] [Rollback] ([§7.6](./07-llm-abstraction.md#76-prompt-registry))
+/admin/templates         — Note templates: list system + custom, edit sections_json ([§4.9](./04-group-note.md#49-note-template-system)). MVP read-only system; Phase 1 add custom editor.
+/admin/audit-log         — Mutations log (disable boss-owned acc, prompt edit, model CRUD)
 /admin/payments          — Log payment + [+ Add payment]
 /admin/revenue           — Chart MRR / ARR / top customer
 ```
@@ -66,23 +70,37 @@ Chỉ visible khi `role=superadmin`:
 ### `/admin/bot-accounts` chi tiết
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│ Bot accounts                                    [+ Thêm acc]   │
-├────────────────────────────────────────────────────────────────┤
-│ Provider │ Số/handle    │ Status        │ Sếp serve │ 7d msg in│
-│ zalo     │ 0903xxx789   │ ● Active      │ 3         │ 1,247    │
-│ zalo     │ 0905xxx101   │ ● Rate-limit  │ 2         │ 982      │
-│ zalo     │ 0908xxx234   │ ● Logged-out  │ 0         │ 0        │
-│ telegram │ @smart_bot   │ ● Active      │ 12        │ 4,109    │
-└────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│ Bot accounts          [Platform] [Boss-owned]      [+ Thêm acc]     │
+├─────────────────────────────────────────────────────────────────────┤
+│ (Tab Platform — anh quản đầy đủ)                                    │
+│ Số/handle    │ Status        │ Sếp serve │ Cap │ 7d msg in │ Action │
+│ 0903xxx789   │ ● Active      │ 3         │ 5   │ 1,247     │ Detail │
+│ 0905xxx101   │ ● Rate-limit  │ 2         │ 5   │ 982       │ Detail │
+│ 0908xxx234   │ ● Logged-out  │ 0         │ 5   │ 0         │ Detail │
+└─────────────────────────────────────────────────────────────────────┘
 
-Click row → Detail:
+┌─────────────────────────────────────────────────────────────────────┐
+│ (Tab Boss-owned — read-only, không đọc credentials)                 │
+│ Số/handle    │ Owner sếp     │ Status       │ 7d msg in │ Action    │
+│ 0907xxx555   │ Anh Đạt (#42) │ ● Active     │ 410       │ [Disable] │
+│ 0902xxx123   │ Chị Mai (#51) │ ● Logged-out │ 0         │ [Disable] │
+└─────────────────────────────────────────────────────────────────────┘
+
+Click row Platform → Detail:
   - QR/cookie login flow (Zalo personal)
   - Force re-login button
   - Pause / Resume
-  - List sếp đang được gán + [Reassign] per row
+  - Cap edit (max_assigned_bosses)
+  - List sếp đang được gán + accept status + [Reassign] per row
   - Counter: msg in/out tổng, msg 7d, latency reply trung bình
   - Log lỗi gần nhất
+
+Click row Boss-owned → Detail (read-only):
+  - Status, owner, traffic counter
+  - Log lỗi gần nhất (cho debug, không expose credentials)
+  - [Disable] với required reason text → audit_log
+  - Anh KHÔNG re-login, KHÔNG đọc credentials, KHÔNG assign sếp khác
 ```
 
 ### `/admin/models` chi tiết
@@ -142,38 +160,157 @@ Mục đích = sếp thấy bot đang làm gì trong group, edit note, scan acti
 └───────────────────────────────────────────────────┘
 ```
 
-- **Note tab**: render note + Edit/Refresh/Export
+- **Note tab**: render note + Edit/Refresh/Export. **Live preview SSE**:
+  khi NoteUpdater chạy (sau debounce/threshold), page subscribe
+  `/api/groups/:id/events` (Server-Sent Events). Event `note.updated`
+  từ EventBus ([§14.1](./14-performance-observability.md#141-eventbus-internal))
+  trigger page re-render diff highlight section thay đổi → cảm giác
+  "đang sống" như meeting note tool.
 - **History tab**: timeline version note + diff view
 - **Action Items tab**: filter view của section "Việc đang mở"
+- **Pinned tab**: list từ `pins` table (§6) — sếp xem mọi tin đã pin
 - **Members tab**: list người gửi (display name), count message 7d
+- **Template tab**: chọn note template ([§4.9](./04-group-note.md#49-note-template-system))
 
-## 9.6 Channel wizard
+## 9.6 Channel wizard — dual-mode
 
-Mỗi channel có flow guide ngắn. Hiển thị bot acc đã được superadmin gán:
+`/channels` step 1 — chọn mode:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Kết nối Zalo                                                  │
+│                                                                │
+│ ○ Dùng acc bot do platform cấp                                │
+│   Anh đợi admin gán 1 acc bot, accept rồi chat qua acc đó.    │
+│   Phù hợp khi: anh muốn nhanh, không cần kiểm soát acc.       │
+│                                                                │
+│ ○ Tự kết nối acc Zalo của tôi                                 │
+│   Anh đăng nhập acc Zalo cá nhân, acc đó trở thành bot riêng. │
+│   Phù hợp khi: anh muốn data đi qua acc của mình, full control│
+│                                                                │
+│                                              [Tiếp]            │
+└──────────────────────────────────────────────────────────────┘
+```
+
+### Flow A — Platform mode
 
 ```
 /channels
   ┌─────────────────────────────────────────────┐
-  │ Zalo                                         │
-  │ Bot acc đã gán: 0903xxx789  [Connect Zalo]  │
-  │                                              │
-  │ (Chưa gán → "Liên hệ admin để được cấp acc") │
+  │ Zalo (Platform)                             │
+  │ Trạng thái: Đang chờ admin gán acc...       │
   └─────────────────────────────────────────────┘
 
-[ Connect Zalo ]
-  ↓
-Modal: "Em sẽ mở Zalo, anh nhắn /start <token> cho bot ở 0903xxx789."
-  ↓ Click "Tiếp"
-Deep-link / copy số bot → Zalo app
-  ↓ (Sếp tap Gửi message /start <token>)
-Bot reply, web detect (poll hoặc Server-Sent Events)
-  ↓
-Channels page hiện "Đã kết nối"
+  (Khi admin click Auto-assign)
+  ▼
+  ┌─────────────────────────────────────────────┐
+  │ Zalo (Platform)                             │
+  │ Admin gán acc 0903xxx789. Accept?           │
+  │             [Accept]  [Decline]              │
+  └─────────────────────────────────────────────┘
+
+  ▼ (Click Accept)
+  ┌─────────────────────────────────────────────┐
+  │ Zalo (Platform — 0903xxx789)                │
+  │ Anh nhắn /start <token> tới 0903xxx789      │
+  │ trên Zalo. (token có hiệu lực 10 phút)      │
+  │              [Copy số]  [Copy token]         │
+  └─────────────────────────────────────────────┘
+
+  ▼ (Sếp gửi /start <token> trên Zalo)
+  ▼ Bot reply ack, web auto-refresh
+  ┌─────────────────────────────────────────────┐
+  │ Zalo (Platform — 0903xxx789)  ● Đã kết nối  │
+  │ [Đổi sang Tự kết nối acc của tôi]            │
+  └─────────────────────────────────────────────┘
 ```
 
-Telegram tương tự với `https://t.me/<bot_acc>?start=<token>`.
+### Flow B — Self-managed mode
 
-## 9.7 Reminders & Projects
+```
+/channels → chọn "Tự kết nối acc Zalo của tôi" → [Tiếp]
+  ▼
+  Wizard step 2 — chọn cách login:
+  ○ Scan QR (mở Zalo trên điện thoại → tap "Quét QR")
+  ○ Paste cookies (advanced — xuất từ browser extension)
+
+  ▼ (Scan QR)
+  Hiện QR code lớn + countdown 60s
+  Sếp scan trên app → server detect login → success
+  ▼
+  ┌─────────────────────────────────────────────┐
+  │ Zalo (Self-managed — 0907xxx555)            │
+  │ ● Đã kết nối                                 │
+  │ [Đổi sang Platform]                          │
+  └─────────────────────────────────────────────┘
+```
+
+Khi mode = self và acc bị logged_out → page hiện nút "Login lại" cho sếp tự xử.
+
+## 9.7 Settings AI — 3 slot model
+
+Sếp pick model cho từng vai trò khác nhau. UI giải thích rõ vì sao
+cần 3 slot:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ Cấu hình AI                                                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│ Em dùng 3 model khác nhau cho 3 mục đích, anh chọn cho từng     │
+│ slot. Có thể chọn cùng 1 model cho cả 3 nếu muốn đơn giản.      │
+│                                                                 │
+│ ┌─ Smart  (suy luận, tóm tắt, trả lời câu hỏi dài) ──────────┐ │
+│ │ Provider: [OpenAI       ▾]                                  │ │
+│ │ Model:    [gpt-4o       ▾]                                  │ │
+│ │ Dùng cho: tóm tắt group, Q&A có search lịch sử, viết note  │ │
+│ │ Chi phí ước tính: $X / 1000 cuộc đối thoại                  │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│ ┌─ Fast  (phản hồi nhanh, việc đơn giản) ─────────────────────┐ │
+│ │ Provider: [Groq         ▾]                                  │ │
+│ │ Model:    [llama-3.3-70b▾]                                  │ │
+│ │ Dùng cho: xác nhận ngắn, phân loại tin, trích việc cần làm │ │
+│ │ Chi phí ước tính: $X / 1000 cuộc đối thoại                  │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│ ┌─ Vision  (đọc ảnh) ─────────────────────────────────────────┐ │
+│ │ Provider: [OpenAI       ▾]                                  │ │
+│ │ Model:    [gpt-4o-mini  ▾] (đề xuất: model nhẹ để tiết kiệm)│ │
+│ │ Dùng cho: nhận diện nội dung ảnh trong group (bill,         │ │
+│ │           screenshot, ảnh sản phẩm), đọc text trên ảnh      │ │
+│ │ Chi phí ước tính: $X / 1000 ảnh                             │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│ ┌─ API Keys (anh tự cung cấp — BYO) ──────────────────────────┐ │
+│ │ OpenAI:     [••••••••••••] [Test]                           │ │
+│ │ Groq:       [••••••••••••] [Test]                           │ │
+│ │ Anthropic:  [thêm key]                                      │ │
+│ │ Gemini:     [thêm key]                                      │ │
+│ └─────────────────────────────────────────────────────────────┘ │
+│                                                                 │
+│                                            [Huỷ]  [Lưu]         │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Vì sao cần 3 slot:**
+- **Smart đắt nhưng giỏi** — dùng cho việc cần suy luận, không nhiều
+  call.
+- **Fast rẻ và nhanh** — dùng cho việc lặp lại nhiều (trích task từ
+  mỗi message) hoặc cần latency thấp (sếp tag bot trong group, đợi 5s
+  là chậm).
+- **Vision riêng** — model có vision thường đắt; tách slot để sếp
+  chọn model VISION RẺ cho việc đọc ảnh tự động (~hàng trăm ảnh/ngày
+  ở group đông), giữ smart đắt cho reasoning thật sự cần.
+
+**Fallback:**
+- Slot trống → dùng model mặc định platform.
+- Smart model có vision capability → có thể đại diện vision slot khi
+  vision slot trống (cảnh báo trên save nếu detect được).
+
+Model dropdown chỉ list model `is_active=true` ở `/admin/models`.
+
+## 9.8 Reminders & Projects
 
 `/reminders` (user page):
 
@@ -210,7 +347,7 @@ Click row → group detail (action items + reminders + note).
 
 Chi tiết entity reminder ở [§13](./13-reminders-tasks.md).
 
-## 9.8 Tech stack web
+## 9.9 Tech stack web
 
 - **Backend**: FastAPI, cùng process với bot
 - **Templating**: Jinja2 server-side render
@@ -223,7 +360,7 @@ Chi tiết entity reminder ở [§13](./13-reminders-tasks.md).
 Lý do: web admin scale nhỏ (1 sếp = 1 user, ít concurrent), không cần
 SPA. HTMX = 1/5 code so với React. Sửa nhanh, dễ ship.
 
-## 9.9 Đã chốt
+## 9.10 Đã chốt
 
 - UI VN-only MVP. Toggle EN khi có user thực yêu cầu.
 - Mobile-responsive qua Tailwind breakpoint. Không PWA.

@@ -101,19 +101,66 @@ vào `messages.media_text`:
 | **URL bài báo / blog** | `httpx + trafilatura` | full body sạch, ~5–20k char |
 | **YouTube link** | `yt-dlp` lấy transcript (auto-caption) | transcript đầy đủ |
 | **TikTok / video URL** | legacy fetch → caption + comment top | metadata + text |
-| **PDF / docx / xlsx attached** | legacy `pypdf` + `python-docx` + `openpyxl` | text extract |
-| **Plain image (sticker, photo)** | bỏ qua MVP — `media_text` rỗng | (Phase 1 OCR) |
+| **PDF attached** | legacy `pypdf` | text extract, ≤20 trang |
+| **DOCX attached** | legacy `mammoth` → markdown | text extract, ≤20KB out |
+| **XLSX attached** | `openpyxl` | text extract |
+| **Plain text file** | UTF-8 decode | inline, ≤20KB out |
+| **Image** (jpeg/png/webp/gif/heic/heif) | legacy HEIC→JPEG + mime sniff + **vision-LLM extract-once** | description + OCR text trong 1 call |
 | **Voice note** | bỏ qua MVP — `media_text` rỗng | (Phase 1 transcribe) |
+| **Sticker** | skip — `media_text` rỗng | không có giá trị note |
 
-Nguyên tắc:
+### Image extract-once
+
+Khác legacy passthrough (ảnh re-base64 mỗi turn LLM):
+
+```
+Inbound image
+  ▼
+HEIC/HEIF → JPEG convert (Pillow + pillow_heif, port legacy)
+  ▼
+Filter skip nếu:
+  - size < 50KB (sticker/emoji)
+  - dimension < 200×200 (icon)
+  - mime sticker-specific
+  ▼
+Cache lookup theo content-hash sha256(bytes)
+  hit → reuse media_text
+  miss:
+    ▼
+    Vision-LLM call (1 lần, fast-tier vision)
+    Prompt: "Mô tả ngắn ảnh này (1–3 câu) và trích xuất text
+             nếu có (OCR). Bỏ qua sticker/meme."
+    ▼
+    Output: {description, ocr_text}
+    media_text = "[image] {description}\n{ocr_text}"
+    ▼
+    INSERT media_cache (source_key=hash, source_kind='image', ...)
+```
+
+Lý do extract-once:
+- Group note rebuild không tốn LLM call cho ảnh (chỉ đọc text đã trích).
+- Search (FTS + Qdrant) tìm được ảnh qua mô tả + OCR.
+- Ảnh forward giữa group / lặp → cache hit, 1 image = 1 call duy nhất.
+
+Cost guard:
+- Dùng **vision-tier model** (fast vision: gpt-4o-mini, gemini-flash), không smart-tier.
+- Sếp config vision model riêng ở `/settings/ai`
+  ([§9.2](./09-web-admin.md#92-sitemap-user-pages)).
+- Rate-limit `image_extract` ở [§12.4](./12-security.md#124-rate-limit-interface):
+  default 100 ảnh/giờ/sếp.
+
+### Nguyên tắc chung
+
 - Adapter chạy **async sau khi webhook ack**. Không block.
 - Timeout per adapter: 30s URL fetch, 60s YouTube transcript, 30s file
-  parse. Quá → log + giữ `media_text` rỗng, không retry tự động.
-- Cache theo `media_url` (URL ngoài) + content-hash (file attached) —
-  cùng URL gửi nhiều group không fetch lại.
+  parse, 20s image vision-LLM. Quá → log + giữ `media_text` rỗng, không
+  retry tự động.
+- Cache theo `media_url` (URL ngoài) + content-hash (file/image attached) —
+  cùng URL/ảnh gửi nhiều group không fetch/extract lại.
 - Truncate `media_text` ở 50k char trước khi index FTS + Qdrant.
-- Tool agent (`@bot phân tích link này`) gọi cùng adapter nhưng synchronous
-  trong agent loop (timeout giảm còn 20s).
+- Tool agent (`@bot phân tích link này` / `@bot ảnh này nói gì`) gọi
+  cùng adapter nhưng synchronous trong agent loop (timeout giảm còn 20s,
+  vision có thể bump lên smart-tier khi agent gọi tay).
 
 ### Bảng cache
 
@@ -170,6 +217,6 @@ và build digest tương lai.
 
 ## 5.7 Đã chốt & hoãn
 
-- Media MVP = URL / YouTube / TikTok / PDF / docx / xlsx (port legacy).
-- Voice + image OCR → Phase 1.
+- Media MVP = URL / YouTube / TikTok / PDF / docx / xlsx / **image (vision-LLM extract-once)** (port legacy + thêm vision call).
+- Voice → Phase 1.
 - "Xoá tôi khỏi data" cho cá nhân được mention → Phase 1+ (chờ user request thực).

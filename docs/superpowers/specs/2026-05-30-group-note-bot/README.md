@@ -1,7 +1,7 @@
-# Group Note Bot — Thiết kế chi tiết (v1, pass 2)
+# Group Note Bot — Thiết kế chi tiết (v1, pass 3)
 
-**Trạng thái:** Đã review pass 2 — 15 thay đổi + 4 Q close. Sẵn sàng cho implementation plan.
-**Ngày tạo:** 2026-05-30 · pass 2 cập nhật: 2026-05-31
+**Trạng thái:** Pass 3 — dual-mode bot acc + 4 optimizations + 3 meeting-note add-on + §14 latency + drop Telegram MVP.
+**Ngày tạo:** 2026-05-30 · pass 3: 2026-05-31
 **Branch:** `main` (rebuild, đã collapse)
 **Tham chiếu code cũ:** `git show archive/legacy:<path>`
 
@@ -31,26 +31,28 @@ review độc lập, ít loãng token khi sửa.
 | 9 | [09-web-admin.md](./09-web-admin.md) | Design principles, sitemap user + super (bot-accounts, models, reminders, projects) |
 | 10 | [10-tech-stack-infra.md](./10-tech-stack-infra.md) | Stack, project structure, deployment, env, migration discipline (7-step) |
 | 11 | [11-open-questions.md](./11-open-questions.md) | Pass 2 — đã chốt + 4 question còn lại |
-| 12 | [12-security.md](./12-security.md) | Auth/session/CSRF/rate-limit/HMAC/authz/secrets/PII redact — hooks bật từ ngày 1 |
+| 12 | [12-security.md](./12-security.md) | Auth/session/CSRF/rate-limit/HMAC/authz/secrets/PII redact + credential isolation boss-owned |
 | 13 | [13-reminders-tasks.md](./13-reminders-tasks.md) | scheduled_reminders, action_items index, projects view, follow-task path |
+| 14 | [14-performance-observability.md](./14-performance-observability.md) | EventBus internal, OTel GenAI trace schema, latency targets per op + mitigation playbook |
 
 ## Tiến độ
 
-| File | Status | Pass 1 changes |
+| File | Status | Latest pass changes |
 |---|---|---|
-| 01 | reviewed-v2 | drop Lark Msg, drop voice, add reminder/projects MVP |
-| 02 | reviewed-v2 | capability matrix, drop Lark Msg, bot_account in router |
-| 03 | reviewed-v2 | bot_accounts schema + assignment pool, §3.7 multi-platform |
-| 04 | reviewed-v2 | de-emoji heading, §4.8 techniques (Anthropic/Bytedance) |
-| 05 | reviewed-v2 | §5.4 legacy media port, drop voice/OCR |
-| 06 | reviewed-v2 | Operation Router, feature × tier, reminder tools |
-| 07 | reviewed-v2 | DB-backed registry, feature_routing table |
-| 08 | reviewed-v2 | plugin vs channel split, Lark Base = plugin |
-| 09 | reviewed-v2 | design principles, new admin pages, projects/reminders |
-| 10 | reviewed-v2 | Zalo personal stack, §10.7 migration discipline |
-| 11 | reviewed-v2 | close resolved + 4 Q còn lại |
-| 12 | new | security & hardening hooks |
-| 13 | new | reminders + tasks + projects view |
+| 01 | reviewed-v3 | drop Telegram, dual-mode bot acc, 4 optimizations + 3 add-on |
+| 02 | reviewed-v3 | drop Telegram block, capability matrix mark Phase 1, EventBus + Telegram task background |
+| 03 | reviewed-v3 | dual-mode (platform/boss_owned + accept flow), §3.7 multi-platform Phase 1, §3.10 switch mode, drop Telegram from enum |
+| 04 | reviewed-v3 | §4.9 note template system (sections_json, behaviors, system templates) |
+| 05 | reviewed-v2 | §5.4 legacy media port + image vision-LLM extract-once |
+| 06 | reviewed-v3 | memory tier (boss_profile + session scratchpad), tools pin_message/find_exact_quote/update_boss_profile, pins schema |
+| 07 | reviewed-v3 | §7.6 prompt registry DB (key/version/active, /admin/prompts CRUD) |
+| 08 | reviewed-v3 | drop Telegram example, channel = Zalo only MVP |
+| 09 | reviewed-v3 | dual-mode wizard, admin filter Platform/Boss-owned, /admin/prompts /admin/templates /admin/audit-log, SSE live preview, Pinned tab |
+| 10 | reviewed-v3 | drop Telegram stack row, project structure thêm events/ + prompts/ + bot_accounts ownership, repositories thêm pins/note_templates/prompts |
+| 11 | reviewed-v3 | close pass 2.2 (dual-mode + 4 opt + 3 add-on + drop Tele + §14) |
+| 12 | reviewed-v3 | drop TelegramVerifier (Phase 1), credential isolation boss-owned vs platform, audit log |
+| 13 | reviewed-v3 | no major change (link to §9.8 only) |
+| 14 | new | EventBus internal, OTel GenAI trace schema, latency budget + mitigation playbook |
 
-Em update status `reviewed-v2 → approved` khi anh duyệt từng file. Hoặc
-reply `Spec OK` để duyệt toàn bộ.
+Em update status `reviewed-v3 → approved` khi anh duyệt. Hoặc reply
+`Spec OK` để duyệt toàn bộ.

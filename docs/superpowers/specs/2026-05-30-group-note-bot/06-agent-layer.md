@@ -86,11 +86,57 @@ class ToolSpec:
 | `set_reminder(text, due_at, scope, target?)` | Đặt reminder ([§13](./13-reminders-tasks.md)). `scope ∈ {group, dm}`, `target` = chat_id hoặc auto. |
 | `list_reminders(status?, group?)` | List reminder pending/done của sếp |
 | `cancel_reminder(reminder_id)` | Huỷ reminder |
+| `pin_message(message_id, note?)` | Pin 1 tin nhắn vào section "Đã pin" của group note. Sếp `@bot pin tin này` (reply tin cần pin). |
+| `unpin_message(pin_id)` | Bỏ pin |
+| `find_exact_quote(fragment, group?)` | Tìm chính xác quote từ history; trả về `{author, ts, full_text, context_before, context_after}` |
+| `update_boss_profile(key, value)` | Ghi vào `users.boss_profile` (memory tier core, [§6.4](#64-context-window--memory-tier)). Vd: "cứ gọi tôi là Đạt nhé" → key="preferred_name" |
 | `list_groups()` | Liệt kê group sếp đang link |
 | `current_time()` | Thời gian hiện tại theo TZ sếp |
 | `fetch_url(url)` | Fetch + extract URL/YouTube/file (port legacy, [§5.4](./05-capture-flow-data-model.md#54-media-ingest)) |
 
 **Plugin tools** (load động per-boss, xem [§8](./08-plugin-architecture.md)).
+
+### `pins` schema
+
+```sql
+pins (
+  id              BIGSERIAL PRIMARY KEY,
+  boss_id         INTEGER NOT NULL REFERENCES users(id),
+  group_note_id   BIGINT NOT NULL REFERENCES group_notes(id) ON DELETE CASCADE,
+  message_id      BIGINT NOT NULL REFERENCES messages(id),
+  note            TEXT,                           -- ghi chú lý do pin (optional)
+  pinned_by       INTEGER NOT NULL REFERENCES users(id),
+  pinned_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (group_note_id, message_id)
+);
+CREATE INDEX idx_pins_group ON pins(group_note_id);
+```
+
+NoteUpdater render section `Đã pin` (template `behavior='manual_pin'`):
+list bullets từ `pins` join `messages`, format `{sender_name}: "{text}" ({ts}) — note: {note}`.
+LLM không sửa section này.
+
+### `find_exact_quote` impl
+
+Wrap FTS chính xác (không qua vector):
+
+```python
+async def find_exact_quote(fragment: str, boss_id: int, group_id: int | None = None):
+    # 1. FTS exact phrase
+    matches = await messages_repo.fts_search(fragment, boss_id, group_id, exact=True, limit=5)
+    # 2. Cho mỗi match, load ±3 message context
+    return [
+        {
+            "author": m.sender_name, "ts": m.ts,
+            "full_text": m.text,
+            "context_before": before, "context_after": after,
+        }
+        for m in matches
+    ]
+```
+
+Tool này khác `search_history` (hybrid retrieval) ở chỗ: trả nguyên văn,
+có context xung quanh — phù hợp khi sếp hỏi "ai nói câu A đó?".
 
 **Tool calling loop:**
 
@@ -113,15 +159,47 @@ async def agent_loop(op_ctx, max_depth=5):
 - Mỗi tool call có timeout (default 30s)
 - Log mọi tool call vào `tool_call_log` để debug
 
-## 6.4 Context window management
+## 6.4 Context window & memory tier
 
-Mỗi op có "context budget" theo tier model:
+### 4 tier memory (Letta-inspired, lean MVP)
+
+| Tier | Chứa | Sống ở | Inject vào context khi |
+|---|---|---|---|
+| **Boss profile** (core, ALWAYS) | tone preference, aliases ("anh Tân" = "Nguyễn Văn Tân"), TZ, frequent contacts | `users.boss_profile` JSONB | Mọi op |
+| **Group note** (core per-group) | rolling document, decisions, open tasks | `group_notes.content` (đã có §4) | NoteUpdater, InGroupResponder, DMResponder (khi hỏi group đó) |
+| **Session scratchpad** (working, ephemeral) | last N turn của DM hiện tại (text + tool result tóm tắt) | in-memory LRU cache, key=(boss_id, "dm"), TTL 30 min | DMResponder (multi-turn DM coherence) |
+| **Archival** (out-of-context, search-only) | full message history | `messages` + Qdrant (đã có §5) | Khi LLM gọi `search_history` tool |
+
+### Boss profile shape (MVP)
+
+```json
+{
+  "tone":              "lịch sự",                    // 'lịch sự' | 'thẳng thắn' | 'thân mật'
+  "preferred_name":    "anh Đạt",                    // bot gọi sếp thế nào
+  "aliases": {
+    "anh Tân":         "Nguyễn Văn Tân",
+    "chị Mai":         "Lê Thị Mai (sale lead)"
+  },
+  "common_groups":     ["sale_q2", "doi_tac_a"],     // top groups (cache)
+  "habits": {
+    "morning_review":  "8:30",                       // khi sếp hay hỏi tóm tắt
+    "weekly_digest":   "T6"
+  }
+}
+```
+
+Tool `update_boss_profile(key, value)` cho agent tự ghi khi sếp nói
+"cứ gọi tôi là Đạt nhé" hay "chị Mai đó là Lê Thị Mai team sale".
+Phase 1 add `reflective_pass` job nightly đọc message gần đây + tự
+update profile.
+
+### Context budget per op
 
 | Op | Smart model budget | Cấu trúc context |
 |---|---|---|
-| NoteUpdater | ~8k tokens | system prompt (~1k) + note hiện tại (~2k) + delta messages (~5k, trim đầu nếu quá) |
-| InGroupResponder | ~6k tokens | system prompt (~1k) + group_note (~2k) + retrieval top-20 (~2k) + recent 10 msg (~1k) |
-| DMResponder | ~10k tokens | system prompt (~1k) + (group_note nếu hỏi 1 nhóm) (~2k) + retrieval (~3k) + recent DM history (~2k) + tools list (~2k) |
+| NoteUpdater | ~8k tokens | system prompt + **boss_profile (~300t)** + note hiện tại (~2k) + template descriptor (~500t) + delta messages (~5k, trim đầu nếu quá) |
+| InGroupResponder | ~6k tokens | system prompt + **boss_profile** + group_note (~2k) + retrieval top-20 (~2k) + recent 10 msg (~1k) |
+| DMResponder | ~10k tokens | system prompt + **boss_profile** + **session_scratchpad (~1k)** + (group_note nếu hỏi 1 nhóm) (~2k) + retrieval (~3k) + recent DM history (~2k) + tools list (~2k) |
 
 Token counter (tiktoken hoặc provider-native) enforce hard limit. Trim
 policy theo thứ tự:
@@ -133,7 +211,7 @@ policy theo thứ tự:
 
 Trong cùng 1 op, từng feature có "tier" khác nhau. Router LLM lookup
 bảng `feature_routing` ở [§7.3](./07-llm-abstraction.md#73-router--feature-routing).
-Bảng ngắn cho agent layer:
+3 tier: **smart / fast / vision**. Bảng ngắn cho agent layer:
 
 | Feature | Tier | Lý do |
 |---|---|---|
@@ -145,6 +223,8 @@ Bảng ngắn cho agent layer:
 | Action item extract từ message stream | fast | nhiều call, cost-sensitive |
 | Summarize group / cross-group | smart | reasoning + structured |
 | Fetch URL + summarize | smart | sau khi extract content thì cần hiểu |
+| **Image extract** (capture: describe + OCR) | **vision** | cần vision capability, dùng fast vision (gpt-4o-mini, gemini-flash) để rẻ |
+| **Image Q&A** (`@bot ảnh này nói gì`) | **vision** | sếp hỏi ảnh trực tiếp |
 | Plugin tool (Phase 1+) | tuỳ plugin | declare trong manifest |
 
 ## 6.6 Đã chốt & defer

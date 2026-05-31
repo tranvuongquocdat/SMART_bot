@@ -6,7 +6,7 @@
 
 | Loại | Định nghĩa | Ví dụ |
 |---|---|---|
-| **Channel** | Adapter cho 1 platform messaging (inbound + outbound). Sở hữu `bot_account`, đăng ký webhook/poll. | Zalo personal, Telegram bot |
+| **Channel** | Adapter cho 1 platform messaging (inbound + outbound). Sở hữu `bot_account`, đăng ký webhook/poll. | Zalo personal (MVP); Telegram + Messenger + WhatsApp (Phase 1+) |
 | **Plugin** | Tool/integration cho 1 service ngoài. Per-boss enable + OAuth. Tool gọi từ agent. | Google Calendar, Lark Base, Notion |
 
 **Lark Base = plugin**, không phải channel. Sếp connect Lark Base để bot

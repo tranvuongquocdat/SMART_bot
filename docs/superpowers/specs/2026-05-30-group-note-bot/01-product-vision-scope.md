@@ -54,12 +54,12 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 | **DM với sếp** | Q&A cross-group · "tóm tắt group X tuần này" · list việc đang mở · set/list/cancel reminder · KHÔNG có push tự động ngoài reminder do sếp set |
 | **Reminder & task** | Bảng `scheduled_reminders` + scheduler. Nhắc đúng nhóm gốc (hoặc DM sếp). Lean base cho follow-task / due-date / recurring sau ([§13](./13-reminders-tasks.md)). |
 | **Project tracking** | View cross-group action item + deadline ở `/projects` web (không entity riêng — pull từ group note + reminders). |
-| **Media** | Port từ legacy: URL fetch, YouTube transcript, PDF/docx extract. Voice / image OCR hoãn ([§5.4](./05-capture-flow-data-model.md#54-media-ingest)). |
+| **Media** | Port từ legacy: URL fetch, YouTube transcript, PDF/docx/xlsx extract, **image vision-LLM extract-once** (fast-tier vision). Voice hoãn ([§5.4](./05-capture-flow-data-model.md#54-media-ingest)). |
 | **Web (user)** | Sidebar (Dashboard, Groups, Action Items, Projects, Reminders, Channels, Plugins, Usage, Settings). Xem [§9](./09-web-admin.md). |
 | **Web (super)** | Bosses, Payments, Revenue, Bot Accounts, Models. Role-gated qua env var. |
-| **Channel** | Zalo (acc cá nhân, port từ legacy `zlapi-py`) + Telegram (bot API). Zalo OA + Lark Messenger không làm. |
-| **Bot account pool** | Platform sở hữu N acc Zalo cá nhân. Mỗi sếp × provider → 1 acc; 1 acc serve N sếp. Quản lý qua `/admin/bot-accounts` ([§3.7](./03-identity-channel-linking.md#37-bot-account-pool)). |
-| **AI** | Provider abstraction (OpenAI / Groq / Anthropic / Gemini / Custom). Multi-tier routing per-feature ([§7.3](./07-llm-abstraction.md#73-router--feature-routing)). BYO key. |
+| **Channel** | **Chỉ Zalo (acc cá nhân, port `zlapi-py` legacy) — single-channel MVP**. Telegram + Messenger + WhatsApp defer Phase 1+. Zalo OA + Lark Messenger không làm. |
+| **Bot account** | **Dual-mode** ([§3.8](./03-identity-channel-linking.md#38-mô-hình-bot-account-dual-mode)): (a) **Platform** — anh sở hữu pool acc Zalo, gán cho sếp, sếp accept; (b) **Self-managed** — sếp tự login acc Zalo cá nhân của họ. Quản lý qua `/admin/bot-accounts` + `/channels`. |
+| **AI** | Provider abstraction (OpenAI / Groq / Anthropic / Gemini / Custom). **3 model slot** (smart / fast / vision) cấu hình per-sếp ở `/settings/ai`. Multi-tier routing per-feature ([§7.3](./07-llm-abstraction.md#73-router--feature-routing)). BYO key. |
 | **Plugin** | Kiến trúc sẵn sàng; **0 plugin ship**. Lark **Base** là plugin (không phải channel). |
 | **DB** | PostgreSQL + Qdrant. |
 | **Auth (user)** | Google OAuth + email/password (fallback). Security hooks (rate-limit, CSRF, HMAC webhook) bật từ ngày 1 ([§12](./12-security.md)). |
@@ -68,9 +68,10 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 
 ## 1.5 Hoãn (Phase 1+)
 
+- **Telegram channel** (khách hiện tại không ai dùng — module sẵn, defer triển khai)
 - Daily digest DM (toggle + lịch)
 - Stalled-work alerts
-- Voice transcription, image OCR
+- Voice transcription
 - Plugin ship: Google Calendar, Lark Base
 - Zalo OA channel (acc cá nhân là đủ cho MVP)
 - Lark Messenger channel (không làm)
@@ -90,7 +91,10 @@ Cách design này gom nhiều feature về 1 hiện vật bền vững, UX rõ r
 
 ## 1.7 Đã chốt (Phase 0)
 
-- Media ingest = port từ legacy (URL, YouTube, file). Voice + OCR hoãn.
-- Channel = Zalo personal + Telegram. Bỏ Zalo OA, bỏ Lark Messenger.
+- Media ingest = port từ legacy (URL, YouTube, file) + **image qua vision-LLM extract-once** (legacy có HEIC convert sẵn). Voice hoãn.
+- **Channel = Zalo personal duy nhất**. Telegram + Messenger + WhatsApp defer Phase 1+ (module sẵn để mở rộng).
+- **Bot account dual-mode**: platform pool (accept handshake) hoặc self-managed (sếp tự login). Default platform.
 - Reminder/task lifecycle vào MVP (lean base cho follow-task sau).
 - Project tracking = view, không entity riêng.
+- AI cấu hình per-sếp = 3 slot model (smart / fast / vision).
+- **4 architectural foundations** (template / EventBus / prompt registry / memory tier) + **3 meeting-note add-on** (pin / quote / SSE) vào MVP để tránh refactor lớn sau.

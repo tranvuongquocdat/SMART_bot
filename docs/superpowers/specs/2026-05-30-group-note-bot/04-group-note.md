@@ -139,8 +139,9 @@ CREATE INDEX idx_group_note_versions_note ON group_note_versions(group_note_id, 
 
 ## 4.7 Đã chốt
 
-- Schema 7 section cố định cho MVP (không cấu hình per-boss).
+- Schema section **template-driven** (không hardcode 7 section nữa). Mỗi group chọn 1 template; sếp custom được Phase 1.
 - Không emoji trong heading note.
+- Section `Đã pin` (manual pin từ chat, [§6.3](./06-agent-layer.md#63-tool-calling)) và `Đã quyết` luôn append-only.
 
 ## 4.8 Tham khảo & kỹ thuật
 
@@ -176,3 +177,116 @@ bên đang làm tốt hướng này:
 | Freshness score per-section | Phase 1 |
 | Frontmatter YAML structured | không cần — metadata trong DB |
 | AI-managed toggle per-section | có (toggle "cho bot quản lại") |
+
+## 4.9 Note template system
+
+Section schema không hardcode trong code mà khai báo qua **template** — vì
+mỗi loại group (sale, dev, đối tác, family) có nhu cầu section khác nhau.
+Hardcode 7 section = sau phải refactor khi thêm vertical.
+
+### Schema
+
+```sql
+note_templates (
+  id              BIGSERIAL PRIMARY KEY,
+  name            TEXT NOT NULL,                     -- 'general' | 'sales' | 'partner' | 'dev' | custom
+  description     TEXT,
+  is_system       BOOLEAN NOT NULL DEFAULT FALSE,    -- seed system template, không cho sửa
+  owner_boss_id   INTEGER REFERENCES users(id),      -- NULL cho system; SET cho custom của boss
+  sections_json   JSONB NOT NULL,                    -- ordered list of section descriptors
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_note_templates_owner ON note_templates(owner_boss_id);
+
+ALTER TABLE group_notes ADD COLUMN template_id BIGINT REFERENCES note_templates(id);
+```
+
+### Section descriptor format
+
+`sections_json` = array, mỗi item:
+
+```json
+{
+  "key":           "open_tasks",                  // ID nội bộ, dùng trong manually_edited_sections
+  "title":         "Việc đang mở",                 // render heading
+  "behavior":      "task_list",                    // 'rolling' | 'append_only' | 'task_list' | 'manual_pin' | 'computed'
+  "hide_if_empty": true,
+  "max_items":     null,
+  "llm_hint":      "Task chưa done. Format: [ ] {person} — {task} · {hạn}",
+  "writable_by":   "llm"                           // 'llm' | 'user' | 'both'
+}
+```
+
+`behavior`:
+- `rolling`: LLM ghi đè full mỗi update
+- `append_only`: chỉ thêm, không xoá (vd `Đã quyết`)
+- `task_list`: structured tasks → sync với bảng `action_items` (§13)
+- `manual_pin`: chỉ user pin qua tool `pin_message`; LLM không sửa
+- `computed`: code tính (vd `Người active (7d)`)
+
+### Seed system templates
+
+```yaml
+- name: general
+  description: Mặc định, phù hợp đa số group
+  sections:
+    - {key: needs_boss,    title: "Cần sếp xử lý",   behavior: rolling,     hide_if_empty: true,  writable_by: llm}
+    - {key: focus,         title: "Đang focus",       behavior: rolling,     max_items: 5,         writable_by: llm}
+    - {key: open_tasks,    title: "Việc đang mở",     behavior: task_list,                          writable_by: both}
+    - {key: blocked,       title: "Đang tắc / Rủi ro", behavior: rolling,    hide_if_empty: true,  writable_by: llm}
+    - {key: decisions,     title: "Đã quyết",         behavior: append_only,                        writable_by: llm}
+    - {key: pinned,        title: "Đã pin",           behavior: manual_pin,  hide_if_empty: true,  writable_by: user}
+    - {key: open_questions,title: "Câu hỏi treo",     behavior: rolling,     hide_if_empty: true,  writable_by: llm}
+    - {key: active_people, title: "Người active (7d)", behavior: computed,                          writable_by: llm}
+    - {key: archive,       title: "Lưu trữ",          behavior: computed,                           writable_by: llm}
+
+- name: sales
+  description: Group sale — pipeline, deal, KH
+  sections:
+    - {key: hot_leads,     title: "Lead nóng",        behavior: rolling,     max_items: 5,         writable_by: llm}
+    - {key: open_deals,    title: "Deal đang chạy",   behavior: task_list,                          writable_by: both}
+    - {key: needs_boss,    title: "Cần sếp duyệt",    behavior: rolling,     hide_if_empty: true,  writable_by: llm}
+    - {key: lost_deals,    title: "Deal mất (7d)",    behavior: append_only, hide_if_empty: true,  writable_by: llm}
+    - {key: pinned,        title: "Đã pin",           behavior: manual_pin,  hide_if_empty: true,  writable_by: user}
+    - {key: active_people, title: "Người active (7d)", behavior: computed,                          writable_by: llm}
+
+- name: partner
+  description: Group đối tác — milestone, deliverable, commitment
+  sections:
+    - {key: commitments,   title: "Cam kết hai bên",  behavior: append_only,                        writable_by: llm}
+    - {key: open_tasks,    title: "Deliverable đang mở", behavior: task_list,                       writable_by: both}
+    - {key: blocked,       title: "Đang vướng",       behavior: rolling,     hide_if_empty: true,  writable_by: llm}
+    - {key: decisions,     title: "Đã quyết",         behavior: append_only,                        writable_by: llm}
+    - {key: pinned,        title: "Đã pin",           behavior: manual_pin,  hide_if_empty: true,  writable_by: user}
+```
+
+### Pick template per-group
+
+- Default `general` khi group lần đầu được capture.
+- Sếp đổi ở `/groups/:id/settings` — dropdown chọn từ system + custom templates.
+- Đổi template = giữ content cũ, re-map section keys mới (best-effort). Section không match → giữ trong "Lưu trữ" tạm.
+
+### LLM prompt cho NoteUpdater nhận template
+
+```
+System: Update group note theo template descriptor sau.
+        Mỗi section có {key, title, behavior, llm_hint, writable_by}.
+        - behavior=rolling: ghi đè full
+        - behavior=append_only: chỉ thêm bullet mới, không xoá cũ
+        - behavior=task_list: format checklist
+        - behavior=manual_pin: BỎ QUA (do user pin tay)
+        - behavior=computed: BỎ QUA (do code tính)
+        Section trong manually_edited_sections: giữ nguyên.
+
+Template: {sections_json}
+Note hiện tại: {markdown}
+Delta messages: {recent N messages}
+
+Output: markdown mới đúng thứ tự section, heading theo title.
+```
+
+### Custom template (Phase 1)
+
+Phase 1 mở `/settings/templates` cho sếp tự define template. MVP chỉ
+system seed + chọn template; không có template editor.

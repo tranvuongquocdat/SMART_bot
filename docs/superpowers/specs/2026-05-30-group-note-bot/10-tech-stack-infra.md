@@ -16,9 +16,11 @@
 | **URL fetch** | httpx + trafilatura | Extract content sạch (port legacy) |
 | **YouTube transcript** | yt-dlp | Auto-caption (port legacy) |
 | **PDF extract** | pypdf | Port legacy |
-| **DOCX / XLSX extract** | python-docx + openpyxl | Port legacy |
-| **Channel — Zalo** | `zlapi-py` (port legacy) — acc cá nhân, không phải OA | OA defer; legacy code đã có session/cookie flow |
-| **Channel — Telegram** | python-telegram-bot v21+ | Async, mature |
+| **DOCX / XLSX extract** | python-docx (hoặc mammoth) + openpyxl | Port legacy |
+| **Image processing** | Pillow + pillow_heif | HEIC → JPEG cho iPhone-via-Zalo (port legacy) |
+| **Image extract-once** | Vision-LLM call (slot vision) | 1 call/ảnh lúc capture; save `media_text` |
+| **Channel — Zalo** (MVP) | `zlapi-py` (port legacy) — acc cá nhân, dual-mode (platform pool + boss-owned) | OA defer; legacy code đã có session/cookie flow |
+| **Channel — Telegram** (Phase 1) | python-telegram-bot v21+ | Khách hiện tại không dùng → defer; thư viện sẵn sàng khi cần |
 | **Auth — Google OAuth** | Authlib | Maintained, async |
 | **Password hash** | bcrypt (passlib) | Standard |
 | **Encryption (token blob)** | cryptography (Fernet) | Symmetric, key trong env |
@@ -42,32 +44,43 @@ src/
 ├── channels/                  # inbound + outbound per channel
 │   ├── base.py                # ChannelAdapter, InboundMessage, OutboundMessage protocols
 │   ├── capabilities.py        # capability flags (§2.1.1)
-│   ├── zalo.py                # zlapi-py adapter, poll loop, multi-account
-│   ├── telegram.py
-│   └── (messenger/whatsapp Phase 1+)
+│   ├── zalo.py                # zlapi-py adapter, poll loop, dual-mode bot acc
+│   └── (telegram / messenger / whatsapp Phase 1+)
 │
-├── bot_accounts/              # quản lý pool bot acc
+├── bot_accounts/              # quản lý bot acc (platform pool + boss-owned)
 │   ├── manager.py             # load credentials, assign, status update
+│   ├── ownership.py           # platform vs boss_owned logic + accept flow
 │   ├── zalo_session.py        # cookie / QR login flow
-│   └── telegram_session.py
+│   └── (telegram_session.py Phase 1+)
+│
+├── events/                    # in-process EventBus (§14)
+│   ├── bus.py                 # publish/subscribe, OTel-compatible trace
+│   └── subscribers/           # built-in subs (note_updater, metrics, ...)
+│
+├── prompts/                   # prompt registry (§7)
+│   ├── loader.py              # prompts.get(key, version)
+│   └── (templates seed file)
 │
 ├── router.py                  # event → operation routing
 │
 ├── repositories/              # DB access, all async
-│   ├── users.py
+│   ├── users.py               # +boss_profile JSONB (§6.4 memory tier)
 │   ├── account_links.py
-│   ├── bot_accounts.py
+│   ├── bot_accounts.py        # +ownership + accept status
 │   ├── bot_account_assignments.py
 │   ├── messages.py
 │   ├── group_notes.py
+│   ├── note_templates.py      # §4.8 template system
 │   ├── outbound_messages.py
 │   ├── boss_integrations.py
 │   ├── reminders.py
+│   ├── pins.py                # §6 pin_message tool
 │   ├── media_cache.py
 │   ├── models.py              # ModelRegistry DB
+│   ├── prompts.py             # §7 prompt registry
 │   ├── feature_routing.py
 │   ├── payments.py
-│   └── token_usage.py
+│   └── token_usage.py         # OTel-named fields (§14)
 │
 ├── agent/                     # operation handlers
 │   ├── note_updater.py
@@ -180,7 +193,7 @@ PLATFORM_OPENAI_API_KEY=<optional>
 
 # Channels
 # Zalo: credentials per-bot-account lưu trong DB (Fernet encrypted),
-# không có env var. Telegram bot token cũng vậy — đẩy vào bot_accounts.
+# không có env var. Phase 1 Telegram bot token cũng vậy.
 # Env chỉ giữ secret platform-wide.
 LARK_APP_ID=...                   # Phase 1 (Lark Base plugin)
 LARK_APP_SECRET=...
