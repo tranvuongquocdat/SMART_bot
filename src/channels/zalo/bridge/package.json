@@ -1,0 +1,13 @@
+{
+  "name": "smart-bot-zalo-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "JSONL bridge between Python adapter and zca-js (v2.1.x).",
+  "scripts": {
+    "login": "node login.js",
+    "start": "node bridge.js"
+  },
+  "dependencies": {
+    "zca-js": "^2.1.2"
+  }
+}
