@@ -1,6 +1,10 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.middleware.sessions import SessionMiddleware
 
 import src.agents  # force import all op modules at startup
 from src.agents.dispatcher import OperationDispatcher
@@ -8,6 +12,7 @@ from src.agents.triggers import TriggerEngine
 from src.channels.zalo import normalizer as zalo_normalizer
 from src.channels.zalo import outbound as zalo_outbound
 from src.channels.zalo.adapter import ZaloAdapter
+from src.config import settings
 from src.events.bus import InMemoryEventBus
 from src.infra.db import create_pool
 from src.infra.observability import configure_logging
@@ -20,7 +25,15 @@ from src.repositories.base import BossContext
 from src.repositories.bot_accounts import BotAccountsRepo, _row_to_bot_account
 from src.repositories.feature_budgets import FeatureBudgetsRepo
 from src.repositories.llm_routes import LLMRoutesRepo
+from src.plugins_loader import load_all as load_plugins
 from src.scheduler import make_scheduler
+from src.web.routes import admin as web_admin
+from src.web.routes import api as web_api
+from src.web.routes import api_ai as web_api_ai
+from src.web.routes import app as web_app
+from src.web.routes import auth as web_auth
+from src.web.routes import oauth as web_oauth
+from src.web.security import csrf_middleware
 
 
 @asynccontextmanager
@@ -71,6 +84,12 @@ async def lifespan(app: FastAPI):
                 "zalo start_inbound failed bot_acc=%s", r["id"]
             )
 
+    # Plugins — scan plugins/ and import each plugin's tools module so
+    # any @tool decorators register before the dispatcher is hit.
+    loaded = load_plugins()
+    import logging as _log
+    _log.getLogger(__name__).info("plugins loaded: %s", loaded)
+
     # APScheduler — reminder firer + bot-account health + subscription check.
     app.state.scheduler = make_scheduler(app.state)
     app.state.scheduler.start()
@@ -90,6 +109,29 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="SMART_bot", lifespan=lifespan)
+
+# Web: session (used by authlib OAuth state) + CSRF persistence middleware.
+app.add_middleware(SessionMiddleware, secret_key=settings.SESSION_SECRET, same_site="lax")
+app.middleware("http")(csrf_middleware)
+
+# Static files for /static/* (Tailwind CDN handles most styling; /static/style.css
+# holds small overrides).
+_STATIC_DIR = Path(__file__).parent / "web" / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+
+# Web routers.
+app.include_router(web_auth.router)
+app.include_router(web_oauth.router)
+app.include_router(web_app.router, prefix="/app")
+app.include_router(web_api.router)
+app.include_router(web_api_ai.router)
+app.include_router(web_admin.router)
+
+
+@app.get("/")
+async def root_index():
+    return RedirectResponse("/app", status_code=303)
 
 
 @app.get("/healthz")

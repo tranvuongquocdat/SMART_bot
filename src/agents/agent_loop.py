@@ -18,6 +18,7 @@ from src.repositories.prompts import PromptsRepo
 from src.tools import registry
 from src.tools.base import ToolContext
 from src.tools.dispatcher import ToolDispatcher
+from src.tools.registry import _REGISTRY as _TOOL_REGISTRY
 
 log = logging.getLogger(__name__)
 
@@ -50,6 +51,41 @@ def _format_memory(semantic, episodic) -> str:
 
 def _to_toolspec(td) -> ToolSpec:
     return ToolSpec(name=td.name, description=td.description, parameters=td.parameters)
+
+
+async def _allowed_tools(cfg, ctx) -> set[str]:
+    """Compose the per-op tool allowlist with enabled plugin tools.
+
+    Convention: plugin tools are namespaced ``<plugin_id>_<tool_name>``
+    (e.g. ``gcal_create_event``). If ``boss_integrations.enabled`` for the
+    plugin is true, *all* of that plugin's registered tools are added to
+    the allowlist for this boss.
+    """
+    base: set[str] = set(cfg.tools or set())
+    db = getattr(ctx, "db", None)
+    boss = getattr(ctx, "boss", None)
+    if db is None or boss is None:
+        return base
+    try:
+        async with db.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT plugin_id FROM boss_integrations
+                WHERE boss_id=$1 AND enabled=TRUE
+                """,
+                boss.id,
+            )
+    except Exception:
+        log.exception("boss_integrations query failed")
+        return base
+    enabled = {r["plugin_id"] for r in rows}
+    if not enabled:
+        return base
+    for tname in _TOOL_REGISTRY:
+        prefix = tname.split("_", 1)[0]
+        if prefix in enabled:
+            base.add(tname)
+    return base
 
 
 def _build_tool_ctx(ctx, op_name: str) -> ToolContext:
@@ -103,8 +139,9 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
         ChatMessage(role="user", content=event.get("text", "")),
     ]
 
-    # 3. Tool surface
-    tools = [_to_toolspec(t) for t in registry.filter_for_op(op_name, allowed=cfg.tools)]
+    # 3. Tool surface (base allowlist + enabled plugin tools for this boss)
+    allowed = await _allowed_tools(cfg, ctx)
+    tools = [_to_toolspec(t) for t in registry.filter_for_op(op_name, allowed=allowed)]
     dispatcher = ToolDispatcher(ctx.db)
     tool_ctx = _build_tool_ctx(ctx, op_name=op_name)
 
