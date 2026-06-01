@@ -7,6 +7,7 @@ import logging
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
 
+from src.security.middleware import rate_check
 from src.web.deps import get_current_boss
 from src.web.security import verify_csrf
 
@@ -28,6 +29,9 @@ async def test_key(
     """
     request.state.form_csrf_token = csrf_field
     verify_csrf(request)
+
+    # H1: 60 BYO-key tests / minute per boss.
+    await rate_check(request, f"test_key:{ctx.boss_id}", limit=60, window_sec=60)
 
     provider = provider.lower().strip()
     if provider not in ("openai", "groq", "gemini"):

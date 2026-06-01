@@ -27,6 +27,7 @@ from src.repositories.feature_budgets import FeatureBudgetsRepo
 from src.repositories.llm_routes import LLMRoutesRepo
 from src.plugins_loader import load_all as load_plugins
 from src.scheduler import make_scheduler
+from src.security.rate_limit import InMemoryRateLimiter
 from src.web.routes import admin as web_admin
 from src.web.routes import api as web_api
 from src.web.routes import api_ai as web_api_ai
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI):
     app.state.db_pool = await create_pool()
     app.state.qdrant = create_qdrant()
     app.state.bus = InMemoryEventBus()
+    app.state.rate_limiter = InMemoryRateLimiter()
     app.state.model_registry = ModelRegistry(app.state.db_pool, app.state.bus)
     _admin_ctx = BossContext(boss_id=0, user_role="superadmin")
     app.state.llm_gateway = NativeGateway(

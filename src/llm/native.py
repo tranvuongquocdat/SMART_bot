@@ -1,3 +1,4 @@
+import logging
 from decimal import Decimal
 
 from src.domain.model import Model
@@ -10,6 +11,9 @@ from src.llm.routes import pick_model
 from src.repositories.base import BossContext
 from src.repositories.token_usage import TokenUsageRepo
 from src.repositories.users import UsersRepo
+from src.security.cost_cap import check_cost_cap
+
+log = logging.getLogger(__name__)
 
 
 def _compute_cost(model: Model, usage: LLMUsage) -> Decimal:
@@ -50,6 +54,16 @@ class NativeGateway:
             raise LookupError(f"boss={req.boss_id} not found")
         await apply_budget(req, self.pool)
         mark_cache_breakpoint(req.messages, req.cache_prefix_hint)
+
+        # H1: per-boss daily cost cap. On exhaustion, force the "fast" tier so
+        # user-facing features stay alive while the operator sees the warning.
+        allowed, used, cap = await check_cost_cap(self.pool, req.boss_id)
+        if not allowed:
+            log.warning(
+                "cost cap hit boss=%s used=%.4f cap=%.4f → degrade to fast",
+                req.boss_id, used, cap,
+            )
+            req.routing_hints["force_tier"] = "fast"
 
         model, route_id = await pick_model(req, boss, self.pool, self.registry)
         client = await self._client_for(model, boss)

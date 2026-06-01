@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 import bcrypt as _bcrypt
 
 from src.config import settings
+from src.security.middleware import rate_check
 from src.web.deps import get_optional_boss
 from src.web.security import (
     SESSION_COOKIE,
@@ -59,6 +60,10 @@ async def login_submit(
     # Form-field CSRF for non-HTMX form posts.
     request.state.form_csrf_token = csrf_field
     verify_csrf(request)
+
+    # H1: 5 login attempts / 5 minutes per source IP.
+    ip = request.client.host if request.client else "unknown"
+    await rate_check(request, f"login:{ip}", limit=5, window_sec=300)
 
     pool = request.app.state.db_pool
     async with pool.acquire() as c:

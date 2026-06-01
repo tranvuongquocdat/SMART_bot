@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import RedirectResponse
 
 from src.config import settings
+from src.security.middleware import rate_check
 from src.web.security import SESSION_COOKIE, SESSION_TTL, make_session
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,9 @@ async def google_login(request: Request):
 async def google_callback(request: Request):
     if "google" not in oauth._clients:  # type: ignore[attr-defined]
         raise HTTPException(503, "Google OAuth not configured")
+    # H1: 30 callbacks / minute per source IP — protects against OAuth replay.
+    ip = request.client.host if request.client else "unknown"
+    await rate_check(request, f"oauth_cb:{ip}", limit=30, window_sec=60)
     try:
         token = await oauth.google.authorize_access_token(request)  # type: ignore[attr-defined]
     except OAuthError as e:
