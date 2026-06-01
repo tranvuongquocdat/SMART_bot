@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -15,6 +15,8 @@ from src.channels.zalo.adapter import ZaloAdapter
 from src.config import settings
 from src.events.bus import InMemoryEventBus
 from src.infra.db import create_pool
+from src.infra.metrics import CONTENT_TYPE_LATEST, generate_latest
+from src.infra.metrics_subscriber import register as register_metrics
 from src.infra.observability import configure_logging
 from src.infra.qdrant import create_qdrant
 from src.llm.api_keys import make_api_key_provider
@@ -63,6 +65,10 @@ async def lifespan(app: FastAPI):
     app.state.op_dispatcher.attach_all()
     app.state.trigger_engine = TriggerEngine(app.state.bus)
     app.state.trigger_engine.attach_all()
+
+    # H2: Prometheus subscribers — must register AFTER op registry is loaded so
+    # we can attach per-op `op.<name>.fire` counters.
+    register_metrics(app.state.bus)
 
     # Channel adapters (Zalo first).
     _admin_repo = BotAccountsRepo(app.state.db_pool, _admin_ctx)
@@ -134,6 +140,12 @@ app.include_router(web_admin.router)
 @app.get("/")
 async def root_index():
     return RedirectResponse("/app", status_code=303)
+
+
+@app.get("/metrics")
+async def metrics() -> Response:
+    """Prometheus scrape endpoint. Returns OpenMetrics/text exposition."""
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 @app.get("/healthz")

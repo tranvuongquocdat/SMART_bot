@@ -8,6 +8,8 @@ Job inventory (MVP):
                                ``bot_account.status_changed``.
   - ``subscription_check``   — daily 02:00 Asia/Ho_Chi_Minh, flip
                                ``users.subscription_status`` past expiry.
+  - ``cache_hit_ratio``      — every 60s, refresh Prometheus gauge from
+                               trailing-1h token_usage aggregates.
 
 Jobstore is in-memory (MVP). For multi-replica deploys swap to PG-backed.
 """
@@ -27,6 +29,7 @@ DEFAULT_TZ = "Asia/Ho_Chi_Minh"
 def make_scheduler(app_state: Any) -> AsyncIOScheduler:
     """Build (but do not start) the AsyncIOScheduler bound to ``app_state``."""
     from src.scheduler.jobs.bot_account_health import job as health_job
+    from src.scheduler.jobs.cache_hit_ratio import job as cache_job
     from src.scheduler.jobs.reminder_firer import job as remind_job
     from src.scheduler.jobs.subscription_check import job as sub_job
 
@@ -50,7 +53,14 @@ def make_scheduler(app_state: Any) -> AsyncIOScheduler:
         except Exception:
             log.exception("subscription_check job crashed")
 
+    async def _cache() -> None:
+        try:
+            await cache_job(app_state)
+        except Exception:
+            log.exception("cache_hit_ratio job crashed")
+
     sched.add_job(_remind, "interval", seconds=30, id="reminder_firer")
     sched.add_job(_health, "interval", seconds=60, id="bot_account_health")
     sched.add_job(_sub, "cron", hour=2, id="subscription_check")
+    sched.add_job(_cache, "interval", seconds=60, id="cache_hit_ratio")
     return sched

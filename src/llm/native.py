@@ -1,7 +1,10 @@
 import logging
+import time
 from decimal import Decimal
 
+from src.agents.context import current as current_trace
 from src.domain.model import Model
+from src.infra.metrics import llm_calls, llm_cost_usd, llm_latency
 from src.llm.base import LLMRequest, LLMResponse, LLMUsage
 from src.llm.budget import apply_budget
 from src.llm.cache_hint import mark_cache_breakpoint
@@ -55,6 +58,14 @@ class NativeGateway:
         await apply_budget(req, self.pool)
         mark_cache_breakpoint(req.messages, req.cache_prefix_hint)
 
+        # H2: propagate trace_id/span_id from the active op scope so the
+        # downstream token_usage row + structlog logs share a trace.
+        tc = current_trace()
+        if tc is not None:
+            req.routing_hints.setdefault("trace_id", tc.trace_id)
+            req.routing_hints.setdefault("span_id", tc.span_id)
+            req.routing_hints.setdefault("op", tc.op_name)
+
         # H1: per-boss daily cost cap. On exhaustion, force the "fast" tier so
         # user-facing features stay alive while the operator sees the warning.
         allowed, used, cap = await check_cost_cap(self.pool, req.boss_id)
@@ -68,11 +79,32 @@ class NativeGateway:
         model, route_id = await pick_model(req, boss, self.pool, self.registry)
         client = await self._client_for(model, boss)
 
+        t0 = time.time()
         resp = await client.chat(model.name, req)
         if resp.status != "ok":
             fb_resp = await self._try_fallback(req, route_id, boss, model)
             if fb_resp is not None:
                 resp = fb_resp
+        elapsed = time.time() - t0
+
+        # H2: Prometheus — count + latency. Cardinality is bounded by
+        # (provider × model × status × feature) — safe.
+        cost = _compute_cost(model, resp.usage)
+        try:
+            llm_calls.labels(
+                provider=model.provider,
+                model=model.name,
+                status=resp.status,
+                feature=req.feature,
+            ).inc()
+            llm_latency.labels(feature=req.feature, tier=model.tier).observe(elapsed)
+            llm_cost_usd.labels(
+                provider=model.provider,
+                model=model.name,
+                feature=req.feature,
+            ).inc(float(cost))
+        except Exception:
+            log.exception("metrics: llm_calls/llm_latency record failed")
 
         await TokenUsageRepo(
             self.pool, BossContext(boss_id=boss.id, user_role=boss.role)
@@ -85,7 +117,7 @@ class NativeGateway:
             tokens_out=resp.usage.tokens_out,
             tokens_cached=resp.usage.tokens_cached,
             latency_ms=resp.usage.latency_ms,
-            cost_usd=_compute_cost(model, resp.usage),
+            cost_usd=cost,
             cost_saved_cache_usd=_compute_cache_savings(model, resp.usage),
             status=resp.status,
             trace_id=req.routing_hints.get("trace_id"),

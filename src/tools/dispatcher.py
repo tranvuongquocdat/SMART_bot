@@ -1,12 +1,16 @@
 import asyncio
 import hashlib
 import json
+import logging
 import time
 
+from src.infra.metrics import tool_latency
 from src.repositories.base import BossContext
 from src.repositories.tool_call_log import ToolCallLogRepo
 from src.tools import registry
 from src.tools.base import ToolContext, ToolDef, ToolResult
+
+log = logging.getLogger(__name__)
 
 
 class ToolDispatcher:
@@ -56,7 +60,13 @@ class ToolDispatcher:
             result = ToolResult(content=None, error=str(e))
             status = "error"
             error = str(e)
-        latency_ms = int((time.time() - t0) * 1000)
+        elapsed = time.time() - t0
+        latency_ms = int(elapsed * 1000)
+        # H2: Prometheus — tool latency histogram.
+        try:
+            tool_latency.labels(tool=tool_def.name).observe(elapsed)
+        except Exception:
+            log.exception("metrics: tool_latency record failed")
         await ToolCallLogRepo(
             self.pool, BossContext(ctx.boss_id, ctx.boss_role)
         ).insert(

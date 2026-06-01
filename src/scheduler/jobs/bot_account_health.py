@@ -11,6 +11,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from src.infra.metrics import active_sessions
+
 log = logging.getLogger(__name__)
 
 
@@ -19,8 +21,10 @@ async def job(app_state: Any) -> None:
     if zalo is None:
         return
     procs: dict[int, Any] = getattr(zalo, "_procs", {})
+    alive = 0
     for bot_acc_id, proc in list(procs.items()):
         if proc.returncode is None:
+            alive += 1
             continue  # still alive
         async with app_state.db_pool.acquire() as c:
             await c.execute(
@@ -36,3 +40,7 @@ async def job(app_state: Any) -> None:
             },
         )
         procs.pop(bot_acc_id, None)
+    try:
+        active_sessions.labels(channel="zalo").set(alive)
+    except Exception:
+        log.exception("metrics: active_sessions set failed")

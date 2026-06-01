@@ -1,6 +1,12 @@
+import logging
+import time
+
+from src.infra.metrics import retrieval_latency
 from src.repositories.base import BossContext
 from src.repositories.retrieval_pipelines import RetrievalPipelinesRepo
 from src.retrieval.base import Hit, RetrievalContext, get_stage_class
+
+log = logging.getLogger(__name__)
 
 
 class RetrievalPipeline:
@@ -10,7 +16,15 @@ class RetrievalPipeline:
     async def run(self, query: str, ctx: RetrievalContext) -> "list[Hit]":
         hits: list[Hit] = []
         for s in self.stages:
+            t0 = time.time()
             hits = await s.run(query, hits, ctx)
+            # H2: per-stage latency. Stage name is the registry key (bm25,
+            # dense, rrf, mmr, parallel_fanout, …) — bounded cardinality.
+            try:
+                stage_name = getattr(s, "name", s.__class__.__name__)
+                retrieval_latency.labels(stage=stage_name).observe(time.time() - t0)
+            except Exception:
+                log.exception("metrics: retrieval_latency record failed")
         return hits
 
 
