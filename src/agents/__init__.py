@@ -4,4 +4,5 @@ from src.agents import (  # noqa: F401
     dm_responder,
     in_group_responder,
     note_updater,
+    reminder_firer,
 )
