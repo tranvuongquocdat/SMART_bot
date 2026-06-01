@@ -36,6 +36,10 @@ class TriggerSpec:
     debounce: Debounce | None = None
     threshold: Threshold | None = None
     key_fn: Callable[[dict], str] = lambda e: ""
+    # Predicate evaluated on the raw incoming event — when False, the event
+    # is ignored (no counter / no debounce timer). Lets a trigger declare
+    # "only group messages" without touching the dispatcher.
+    when: Callable[[dict], bool] | None = None
 
 
 _TRIGGER_REGISTRY: list[TriggerSpec] = []
@@ -47,6 +51,7 @@ def trigger(
     event: str,
     debounce: Debounce | None = None,
     threshold: Threshold | None = None,
+    when: Callable[[dict], bool] | None = None,
     on_demand_tools=(),
 ):
     def deco(cls_or_fn):
@@ -63,6 +68,7 @@ def trigger(
                 debounce=debounce,
                 threshold=threshold,
                 key_fn=kfn,
+                when=when,
             )
         )
         return cls_or_fn
@@ -83,6 +89,8 @@ class TriggerEngine:
 
     def _attach_one(self, spec: TriggerSpec):
         async def handler(event: dict):
+            if spec.when is not None and not spec.when(event):
+                return
             key = f"{spec.op_name}:{spec.event}:{spec.key_fn(event)}"
             async with self._lock:
                 if spec.threshold:
