@@ -77,7 +77,10 @@ class ActionItemsRepo(BossScopedRepo):
                 source,
             )
 
-    async def update_status(self, action_id: int, status: ActionItemStatus) -> None:
+    async def update_status(
+        self, action_id: int, status: ActionItemStatus | str
+    ) -> None:
+        value = status.value if isinstance(status, ActionItemStatus) else status
         async with self.pool.acquire() as c:
             await c.execute(
                 """
@@ -85,6 +88,41 @@ class ActionItemsRepo(BossScopedRepo):
                 WHERE id=$1 AND boss_id=$3
                 """,
                 action_id,
-                status.value,
+                value,
                 self.ctx.boss_id,
             )
+
+    async def list(
+        self,
+        group_id: str | None = None,
+        status: str = "open",
+    ) -> list[ActionItem]:
+        """List action items filtered by status and optional chat_id.
+
+        When ``group_id`` is a provider chat_id (as exposed to tools), we join
+        through group_notes to resolve group_note_id.
+        """
+        async with self.pool.acquire() as c:
+            if group_id is None:
+                rows = await c.fetch(
+                    """
+                    SELECT * FROM action_items
+                    WHERE boss_id=$1 AND status=$2
+                    ORDER BY due_at NULLS LAST, id
+                    """,
+                    self.ctx.boss_id,
+                    status,
+                )
+            else:
+                rows = await c.fetch(
+                    """
+                    SELECT ai.* FROM action_items ai
+                    JOIN group_notes gn ON gn.id = ai.group_note_id
+                    WHERE ai.boss_id=$1 AND ai.status=$2 AND gn.chat_id=$3
+                    ORDER BY ai.due_at NULLS LAST, ai.id
+                    """,
+                    self.ctx.boss_id,
+                    status,
+                    group_id,
+                )
+            return [_row_to_action_item(r) for r in rows]

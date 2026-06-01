@@ -49,6 +49,19 @@ class NoteTemplatesRepo(BossScopedRepo):
             )
             return _row_to_template(row) if row else None
 
+    async def system_default_id(self) -> int | None:
+        """Return id of system 'default' template (or first system template)."""
+        async with self.pool.acquire() as c:
+            row = await c.fetchrow(
+                """
+                SELECT id FROM note_templates
+                WHERE is_system=TRUE
+                ORDER BY (name='default') DESC, id
+                LIMIT 1
+                """
+            )
+            return row["id"] if row else None
+
     async def list_visible(self) -> list[NoteTemplate]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(

@@ -37,18 +37,106 @@ class GroupNotesRepo(BossScopedRepo):
             )
             return _row_to_group_note(row) if row else None
 
-    async def get_by_chat(self, provider: str, chat_id: str) -> GroupNote | None:
+    async def get_by_chat(
+        self, provider: str | None, chat_id: str | None = None
+    ) -> GroupNote | None:
+        """Lookup note by (provider, chat_id) when both given, or by chat_id only.
+
+        Tools surface chat_id (provider-agnostic in the agent surface), so when
+        ``chat_id`` is None and ``provider`` is provided, treat the first arg
+        as chat_id (single-arg call from tools).
+        """
+        # Allow single-arg invocation: get_by_chat("g1") → chat_id="g1"
+        if chat_id is None:
+            chat_id = provider
+            provider = None
         async with self.pool.acquire() as c:
-            row = await c.fetchrow(
+            if provider is None:
+                row = await c.fetchrow(
+                    """
+                    SELECT * FROM group_notes
+                    WHERE boss_id=$1 AND chat_id=$2
+                    ORDER BY updated_at DESC LIMIT 1
+                    """,
+                    self.ctx.boss_id,
+                    chat_id,
+                )
+            else:
+                row = await c.fetchrow(
+                    """
+                    SELECT * FROM group_notes
+                    WHERE boss_id=$1 AND provider=$2 AND chat_id=$3
+                    """,
+                    self.ctx.boss_id,
+                    provider,
+                    chat_id,
+                )
+            return _row_to_group_note(row) if row else None
+
+    async def list_all(self) -> list[GroupNote]:
+        """List all notes for this boss across all statuses (for list_groups tool)."""
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
                 """
                 SELECT * FROM group_notes
-                WHERE boss_id=$1 AND provider=$2 AND chat_id=$3
+                WHERE boss_id=$1
+                ORDER BY updated_at DESC
                 """,
                 self.ctx.boss_id,
-                provider,
-                chat_id,
             )
-            return _row_to_group_note(row) if row else None
+            return [_row_to_group_note(r) for r in rows]
+
+    async def get_or_create(
+        self,
+        provider: str,
+        chat_id: str,
+        group_name: str | None = None,
+        template_id: int | None = None,
+    ) -> GroupNote:
+        existing = await self.get_by_chat(provider, chat_id)
+        if existing is not None:
+            return existing
+        await self.insert(
+            provider=provider,
+            chat_id=chat_id,
+            group_name=group_name,
+            template_id=template_id,
+        )
+        got = await self.get_by_chat(provider, chat_id)
+        assert got is not None
+        return got
+
+    async def update_after_note_rebuild(
+        self,
+        group_note_id: int,
+        content: str,
+        last_seen_message_id: int,
+        emitted_by: str,
+    ) -> int:
+        """Update content + last_seen_message_id atomically, write version. Returns new version number."""
+        async with self.pool.acquire() as c:
+            async with c.transaction():
+                await c.execute(
+                    """
+                    UPDATE group_notes
+                    SET content=$2, last_seen_message_id=$3, updated_at=NOW()
+                    WHERE id=$1 AND boss_id=$4
+                    """,
+                    group_note_id,
+                    content,
+                    last_seen_message_id,
+                    self.ctx.boss_id,
+                )
+                version_id = await c.fetchval(
+                    """
+                    INSERT INTO group_note_versions (group_note_id, content, emitted_by)
+                    VALUES ($1,$2,$3) RETURNING id
+                    """,
+                    group_note_id,
+                    content,
+                    emitted_by,
+                )
+                return version_id
 
     async def list(self, status: str = "active") -> list[GroupNote]:
         async with self.pool.acquire() as c:

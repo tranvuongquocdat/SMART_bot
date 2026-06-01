@@ -108,6 +108,36 @@ class RemindersRepo(BossScopedRepo):
                 now,
             )
 
+    async def list(
+        self,
+        status: str = "pending",
+        chat_id: str | None = None,
+    ) -> list[Reminder]:
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT * FROM scheduled_reminders
+                WHERE boss_id=$1 AND status=$2
+                  AND ($3::TEXT IS NULL OR chat_id=$3)
+                ORDER BY due_at
+                """,
+                self.ctx.boss_id,
+                status,
+                chat_id,
+            )
+            return [_row_to_reminder(r) for r in rows]
+
+    async def cancel(self, reminder_id: int) -> None:
+        async with self.pool.acquire() as c:
+            await c.execute(
+                """
+                UPDATE scheduled_reminders SET status='canceled'
+                WHERE id=$1 AND boss_id=$2 AND status='pending'
+                """,
+                reminder_id,
+                self.ctx.boss_id,
+            )
+
     async def mark_error(self, reminder_id: int, error: str) -> None:
         async with self.pool.acquire() as c:
             await c.execute(

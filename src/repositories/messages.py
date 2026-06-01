@@ -95,6 +95,85 @@ class MessagesRepo(BossScopedRepo):
             )
             return [_row_to_message(r) for r in rows]
 
+    async def fts_exact(
+        self,
+        fragment: str,
+        chat_id: str | None = None,
+        limit: int = 5,
+    ) -> list[Message]:
+        """Phrase-like FTS lookup using phraseto_tsquery for exact-quote matching."""
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT * FROM messages
+                WHERE boss_id=$1
+                  AND ($2::TEXT IS NULL OR chat_id=$2)
+                  AND fts @@ phraseto_tsquery('simple', unaccent($3))
+                ORDER BY ts DESC LIMIT $4
+                """,
+                self.ctx.boss_id,
+                chat_id,
+                fragment,
+                limit,
+            )
+            return [_row_to_message(r) for r in rows]
+
+    async def context_around(
+        self, message_id: int, n: int = 3
+    ) -> tuple[list[Message], list[Message]]:
+        """Return n messages before and n after a given message in same chat."""
+        async with self.pool.acquire() as c:
+            anchor = await c.fetchrow(
+                "SELECT chat_id, ts FROM messages WHERE id=$1 AND boss_id=$2",
+                message_id,
+                self.ctx.boss_id,
+            )
+            if not anchor:
+                return [], []
+            before_rows = await c.fetch(
+                """
+                SELECT * FROM messages
+                WHERE boss_id=$1 AND chat_id=$2 AND ts < $3
+                ORDER BY ts DESC LIMIT $4
+                """,
+                self.ctx.boss_id,
+                anchor["chat_id"],
+                anchor["ts"],
+                n,
+            )
+            after_rows = await c.fetch(
+                """
+                SELECT * FROM messages
+                WHERE boss_id=$1 AND chat_id=$2 AND ts > $3
+                ORDER BY ts ASC LIMIT $4
+                """,
+                self.ctx.boss_id,
+                anchor["chat_id"],
+                anchor["ts"],
+                n,
+            )
+        before = [_row_to_message(r) for r in reversed(before_rows)]
+        after = [_row_to_message(r) for r in after_rows]
+        return before, after
+
+    async def fetch_after_id(
+        self, chat_id: str, after_id: int, limit: int = 200
+    ) -> list[Message]:
+        """Fetch messages with id > after_id in a single chat (for note delta)."""
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT * FROM messages
+                WHERE boss_id=$1 AND chat_id=$2 AND id > $3
+                ORDER BY id ASC LIMIT $4
+                """,
+                self.ctx.boss_id,
+                chat_id,
+                after_id,
+                limit,
+            )
+            return [_row_to_message(r) for r in rows]
+
     async def distinct_senders(self, chat_id: str, days: int = 30) -> list[str]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(
