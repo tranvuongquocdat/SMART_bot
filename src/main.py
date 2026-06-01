@@ -20,6 +20,7 @@ from src.repositories.base import BossContext
 from src.repositories.bot_accounts import BotAccountsRepo, _row_to_bot_account
 from src.repositories.feature_budgets import FeatureBudgetsRepo
 from src.repositories.llm_routes import LLMRoutesRepo
+from src.scheduler import make_scheduler
 
 
 @asynccontextmanager
@@ -70,8 +71,16 @@ async def lifespan(app: FastAPI):
                 "zalo start_inbound failed bot_acc=%s", r["id"]
             )
 
+    # APScheduler — reminder firer + bot-account health + subscription check.
+    app.state.scheduler = make_scheduler(app.state)
+    app.state.scheduler.start()
+
     yield
-    # Best-effort shutdown: stop all bridges before closing the pool.
+    # Best-effort shutdown: stop scheduler, stop bridges, close pool.
+    try:
+        app.state.scheduler.shutdown(wait=False)
+    except Exception:
+        pass
     for r in rows:
         try:
             await app.state.zalo.stop_inbound(_row_to_bot_account(r))
