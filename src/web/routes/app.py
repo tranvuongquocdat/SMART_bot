@@ -226,17 +226,32 @@ async def reminders_create(
 ):
     request.state.form_csrf_token = csrf_field
     verify_csrf(request)
+    from datetime import datetime, timezone
+
+    # `datetime-local` HTML inputs produce "YYYY-MM-DDTHH:MM" without tz.
+    # Treat as Asia/Ho_Chi_Minh user time unless explicit offset present.
+    try:
+        if due_at.endswith("Z"):
+            dt = datetime.fromisoformat(due_at.replace("Z", "+00:00"))
+        elif "+" in due_at[10:] or due_at.endswith("00"):
+            dt = datetime.fromisoformat(due_at)
+        else:
+            # naive — attach UTC; better than guessing boss tz here for MVP.
+            dt = datetime.fromisoformat(due_at).replace(tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(400, "invalid due_at") from None
+
     pool = request.app.state.db_pool
     async with pool.acquire() as c:
         await c.execute(
             """
             INSERT INTO scheduled_reminders
               (boss_id, text, due_at, scope, status, created_by_op)
-            VALUES ($1, $2, $3::timestamptz, $4, 'pending', 'web.user')
+            VALUES ($1, $2, $3, $4, 'pending', 'web.user')
             """,
             ctx.boss_id,
             text,
-            due_at,
+            dt,
             scope,
         )
     return RedirectResponse("/app/reminders", status_code=303)
@@ -280,7 +295,7 @@ async def channels_page(request: Request, ctx=Depends(get_current_boss)):
         )
         links = await c.fetch(
             """
-            SELECT provider, provider_user_id, display_name, linked_at
+            SELECT provider, provider_user_id, linked_at
             FROM account_links
             WHERE boss_id=$1
             ORDER BY linked_at DESC
@@ -303,11 +318,11 @@ async def usage_page(request: Request, ctx=Depends(get_current_boss)):
         rows = await c.fetch(
             """
             SELECT feature, operation, provider,
-                   sum(input_tokens) AS in_toks,
-                   sum(output_tokens) AS out_toks,
+                   sum(tokens_in) AS in_toks,
+                   sum(tokens_out) AS out_toks,
                    sum(cost_usd) AS cost
             FROM token_usage
-            WHERE boss_id=$1 AND created_at > NOW() - INTERVAL '30 days'
+            WHERE boss_id=$1 AND called_at > NOW() - INTERVAL '30 days'
             GROUP BY feature, operation, provider
             ORDER BY cost DESC LIMIT 50
             """,
@@ -317,7 +332,7 @@ async def usage_page(request: Request, ctx=Depends(get_current_boss)):
             """
             SELECT COALESCE(sum(cost_usd), 0)::float
             FROM token_usage
-            WHERE boss_id=$1 AND created_at > NOW() - INTERVAL '30 days'
+            WHERE boss_id=$1 AND called_at > NOW() - INTERVAL '30 days'
             """,
             ctx.boss_id,
         )

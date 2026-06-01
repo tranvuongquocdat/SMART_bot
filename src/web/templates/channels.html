@@ -29,18 +29,17 @@
   <div class="bg-white border rounded">
     <table class="w-full text-sm">
       <thead class="bg-gray-50 text-left">
-        <tr><th class="p-2">Provider</th><th class="p-2">Tên hiển thị</th><th class="p-2">User ID</th><th class="p-2">Liên kết lúc</th></tr>
+        <tr><th class="p-2">Provider</th><th class="p-2">User ID</th><th class="p-2">Liên kết lúc</th></tr>
       </thead>
       <tbody>
       {% for l in links %}
       <tr class="border-t">
         <td class="p-2">{{ l.provider }}</td>
-        <td class="p-2">{{ l.display_name or '-' }}</td>
         <td class="p-2 font-mono text-xs">{{ l.provider_user_id }}</td>
         <td class="p-2">{{ l.linked_at.strftime('%d/%m %H:%M') if l.linked_at }}</td>
       </tr>
       {% else %}
-      <tr><td colspan="4" class="p-3 text-center text-gray-400">Chưa liên kết.</td></tr>
+      <tr><td colspan="3" class="p-3 text-center text-gray-400">Chưa liên kết.</td></tr>
       {% endfor %}
       </tbody>
     </table>
