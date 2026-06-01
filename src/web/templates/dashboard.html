@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — SMART_bot{% endblock %}
+{% block body %}
+<div class="max-w-6xl mx-auto p-6">
+  <h1 class="text-2xl font-semibold mb-4">Dashboard</h1>
+
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="bg-white p-4 rounded shadow-sm border">
+      <div class="text-xs uppercase text-gray-500">Nhóm đã capture</div>
+      <div class="text-2xl font-semibold">{{ groups_count }}</div>
+    </div>
+    <div class="bg-white p-4 rounded shadow-sm border">
+      <div class="text-xs uppercase text-gray-500">Việc đang mở</div>
+      <div class="text-2xl font-semibold">{{ open_items }}</div>
+    </div>
+    <div class="bg-white p-4 rounded shadow-sm border">
+      <div class="text-xs uppercase text-gray-500">Nhắc lịch sắp tới</div>
+      <div class="text-2xl font-semibold">{{ pending_rems }}</div>
+    </div>
+  </div>
+
+  <h2 class="text-lg font-semibold mb-2">Nhắc sắp tới</h2>
+  <div class="bg-white rounded border">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-left">
+        <tr><th class="p-2">Khi</th><th class="p-2">Nội dung</th><th class="p-2">Phạm vi</th></tr>
+      </thead>
+      <tbody>
+        {% for r in recent_rems %}
+        <tr class="border-t">
+          <td class="p-2 whitespace-nowrap">{{ r.due_at.strftime('%d/%m %H:%M') if r.due_at }}</td>
+          <td class="p-2">{{ r.text }}</td>
+          <td class="p-2 text-gray-500">{{ r.scope }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="3" class="p-3 text-gray-400 text-center">Không có nhắc nào.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

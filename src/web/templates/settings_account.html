@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Tài khoản — SMART_bot{% endblock %}
+{% block body %}
+<div class="max-w-2xl mx-auto p-6">
+  <h1 class="text-2xl font-semibold mb-4">Tài khoản</h1>
+  <div class="bg-white border rounded p-4 space-y-2 text-sm">
+    <div><b>Email:</b> {{ boss.email }}</div>
+    <div><b>Tên:</b> {{ boss.name or '-' }}</div>
+    <div><b>Vai trò:</b> {{ boss.role }}</div>
+    <div><b>Google đã liên kết:</b> {{ 'Có' if boss.google_linked else 'Chưa' }}</div>
+    <div><b>Gói:</b> {{ boss.subscription_status }}{% if boss.subscription_expiry %} (hết hạn {{ boss.subscription_expiry.strftime('%d/%m/%Y') }}){% endif %}</div>
+    <div><b>Cost cap (USD/ngày):</b> ${{ '%.2f'|format(boss.cost_cap_usd_daily|float) }}</div>
+  </div>
+</div>
+{% endblock %}

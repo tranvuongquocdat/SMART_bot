@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Cài đặt AI — SMART_bot{% endblock %}
+{% block body %}
+<div class="max-w-3xl mx-auto p-6 space-y-6">
+  <h1 class="text-2xl font-semibold">Cài đặt AI</h1>
+
+  {# 3-slot model picker + cost cap #}
+  <form method="post" action="/app/settings/ai" class="bg-white border rounded p-4 space-y-3">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <label class="block">
+        <span class="text-sm font-medium">Smart (suy luận sâu)</span>
+        <select name="smart_model_id" class="w-full border rounded px-2 py-1 text-sm">
+          <option value="">— mặc định nền tảng —</option>
+          {% for m in models if m.tier == 'smart' %}
+            <option value="{{ m.id }}" {% if boss.smart_model_id == m.id %}selected{% endif %}>
+              {{ m.provider }} / {{ m.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-medium">Fast (phản hồi nhanh)</span>
+        <select name="fast_model_id" class="w-full border rounded px-2 py-1 text-sm">
+          <option value="">— mặc định nền tảng —</option>
+          {% for m in models if m.tier == 'fast' %}
+            <option value="{{ m.id }}" {% if boss.fast_model_id == m.id %}selected{% endif %}>
+              {{ m.provider }} / {{ m.name }}
+            </option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <label class="block">
+        <span class="text-sm font-medium">Vision (đọc ảnh)</span>
+        <select name="vision_model_id" class="w-full border rounded px-2 py-1 text-sm">
+          <option value="">— để trống —</option>
+          {% for m in models if 'vision' in (m.capabilities or []) %}
+            <option value="{{ m.id }}" {% if boss.vision_model_id == m.id %}selected{% endif %}>
+              {{ m.provider }} / {{ m.name }}
+            </option>
+          {% endfor %}
+        </select>
+        {% if smart_has_vision %}
+        <p class="text-xs text-gray-500 mt-1">
+          Smart anh chọn ({{ smart_name }}) đã có vision — slot này có thể để trống.
+        </p>
+        {% endif %}
+      </label>
+    </div>
+
+    <label class="block">
+      <span class="text-sm font-medium">Cost cap (USD / ngày)</span>
+      <input name="cost_cap_usd_daily" type="number" step="0.01" min="0"
+             value="{{ '%.2f'|format(boss.cost_cap_usd_daily|float) }}"
+             class="w-full border rounded px-2 py-1 text-sm">
+    </label>
+
+    <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm">
+      Lưu cài đặt
+    </button>
+  </form>
+
+  {# BYO API key form #}
+  <form method="post" action="/app/settings/ai/keys" class="bg-white border rounded p-4 space-y-3">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <h2 class="font-semibold">API key của anh (BYO)</h2>
+    <p class="text-xs text-gray-500">Nhập key để dùng quota của anh thay vì quota nền tảng. Key được mã hoá (Fernet) trước khi lưu DB.</p>
+
+    {% for prov in ['openai','groq','gemini'] %}
+    <div class="grid grid-cols-12 gap-2 items-center">
+      <div class="col-span-2 text-sm font-medium uppercase">{{ prov }}</div>
+      <input name="key_{{ prov }}" type="password" placeholder="{% if prov in saved_providers %}(đã có key — nhập để thay){% else %}sk-…{% endif %}"
+             class="col-span-7 border rounded px-2 py-1 text-sm">
+      <label class="col-span-2 text-xs flex items-center gap-1">
+        <input type="checkbox" name="clear_{{ prov }}"> xoá
+      </label>
+      <button type="button"
+              class="col-span-1 text-xs text-blue-600 hover:underline"
+              onclick="testKey('{{ prov }}', this)">test</button>
+    </div>
+    {% endfor %}
+
+    <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-1.5 rounded text-sm">
+      Lưu key
+    </button>
+    <div id="test-key-result" class="text-sm"></div>
+  </form>
+</div>
+
+<script>
+async function testKey(provider, btn) {
+  const input = document.querySelector(`input[name=key_${provider}]`);
+  const out = document.getElementById('test-key-result');
+  if (!input || !input.value) { out.textContent = "Nhập key trước khi test."; out.className="text-sm text-yellow-700"; return; }
+  btn.disabled = true; out.textContent = "Đang kiểm tra…"; out.className="text-sm text-gray-500";
+  const csrf = document.querySelector('meta[name=csrf-token]').content;
+  const fd = new FormData();
+  fd.append("provider", provider);
+  fd.append("api_key", input.value);
+  fd.append("_csrf", csrf);
+  try {
+    const r = await fetch("/api/ai/test-key", {method:"POST", body: fd, headers:{"X-CSRF-Token": csrf}});
+    const j = await r.json();
+    out.textContent = j.message;
+    out.className = "text-sm " + (j.ok ? "text-green-700" : "text-red-700");
+  } catch (e) {
+    out.textContent = "Lỗi mạng";
+    out.className = "text-sm text-red-700";
+  } finally { btn.disabled = false; }
+}
+</script>
+{% endblock %}

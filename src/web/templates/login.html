@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Đăng nhập — SMART_bot{% endblock %}
+{% block body %}
+<div class="min-h-screen flex items-center justify-center">
+  <div class="bg-white p-8 rounded-xl shadow max-w-sm w-full">
+    <h1 class="text-2xl font-semibold mb-1">SMART_bot</h1>
+    <p class="text-sm text-gray-500 mb-6">Đăng nhập để vào dashboard</p>
+
+    {% if error %}
+    <div class="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+      {{ error }}
+    </div>
+    {% endif %}
+
+    <a href="/api/oauth/google/login"
+       class="block text-center bg-blue-600 hover:bg-blue-700 text-white py-2 rounded font-medium">
+      Đăng nhập với Google
+    </a>
+
+    <div class="my-5 flex items-center text-xs text-gray-400">
+      <span class="flex-1 border-t"></span>
+      <span class="px-2">hoặc dùng email</span>
+      <span class="flex-1 border-t"></span>
+    </div>
+
+    <form method="post" action="/login" class="space-y-3">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <input name="email" type="email" required placeholder="email"
+             class="w-full border rounded px-3 py-2 text-sm">
+      <input name="password" type="password" required placeholder="mật khẩu"
+             class="w-full border rounded px-3 py-2 text-sm">
+      <button class="w-full bg-gray-800 hover:bg-black text-white py-2 rounded text-sm">
+        Đăng nhập
+      </button>
+    </form>
+  </div>
+</div>
+{% endblock %}

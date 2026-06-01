@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Sử dụng — SMART_bot{% endblock %}
+{% block body %}
+<div class="max-w-6xl mx-auto p-6">
+  <h1 class="text-2xl font-semibold mb-2">Sử dụng (30 ngày)</h1>
+  <p class="text-sm text-gray-500 mb-4">Tổng chi phí: <b>${{ '%.4f'|format(total_cost) }}</b></p>
+
+  <div class="bg-white border rounded">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-left">
+        <tr>
+          <th class="p-2">Feature</th><th class="p-2">Operation</th><th class="p-2">Provider</th>
+          <th class="p-2 text-right">In</th><th class="p-2 text-right">Out</th><th class="p-2 text-right">Cost</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+      <tr class="border-t">
+        <td class="p-2">{{ r.feature }}</td>
+        <td class="p-2">{{ r.operation }}</td>
+        <td class="p-2">{{ r.provider }}</td>
+        <td class="p-2 text-right">{{ r.in_toks }}</td>
+        <td class="p-2 text-right">{{ r.out_toks }}</td>
+        <td class="p-2 text-right">${{ '%.4f'|format(r.cost|float) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="p-3 text-center text-gray-400">Chưa có hoạt động.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

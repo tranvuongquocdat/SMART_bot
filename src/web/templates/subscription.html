@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Gói cước — SMART_bot{% endblock %}
+{% block body %}
+<div class="max-w-2xl mx-auto p-6">
+  <h1 class="text-2xl font-semibold mb-4">Gói cước</h1>
+  <div class="bg-white border rounded p-4 text-sm space-y-2">
+    <div><b>Trạng thái:</b> {{ boss.subscription_status }}</div>
+    <div><b>Plan:</b> {{ boss.subscription_plan or '-' }}</div>
+    <div><b>Hết hạn:</b> {% if boss.subscription_expiry %}{{ boss.subscription_expiry.strftime('%d/%m/%Y') }}{% else %}-{% endif %}</div>
+    <div><b>Cost cap (USD/ngày):</b> ${{ '%.2f'|format(boss.cost_cap_usd_daily|float) }}</div>
+    <div class="text-xs text-gray-400 mt-3">(thanh toán + nâng cấp gói: sẽ làm trong batch sau)</div>
+  </div>
+</div>
+{% endblock %}

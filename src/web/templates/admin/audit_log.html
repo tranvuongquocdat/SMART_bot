@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Admin · Audit log{% endblock %}
+{% block body %}
+<div class="max-w-6xl mx-auto p-6">
+  <h1 class="text-2xl font-semibold mb-4">Admin · Audit log</h1>
+  <div class="bg-white border rounded">
+    <table class="w-full text-sm">
+      <thead class="bg-gray-50 text-left">
+        <tr><th class="p-2">Khi</th><th class="p-2">Actor</th><th class="p-2">Action</th><th class="p-2">Target</th><th class="p-2">Payload</th></tr>
+      </thead>
+      <tbody>
+      {% for r in rows %}
+      <tr class="border-t">
+        <td class="p-2 whitespace-nowrap">{{ r.created_at.strftime('%d/%m %H:%M:%S') }}</td>
+        <td class="p-2">{{ r.actor_email or r.actor_user_id }}</td>
+        <td class="p-2 font-mono text-xs">{{ r.action }}</td>
+        <td class="p-2 text-xs text-gray-500">{{ r.target_kind }}/{{ r.target_id }}</td>
+        <td class="p-2 text-xs font-mono">{{ r.payload_json|tojson if r.payload_json else '' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="5" class="p-3 text-center text-gray-400">—</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

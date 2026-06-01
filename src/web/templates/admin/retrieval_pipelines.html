@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Admin · Retrieval pipelines{% endblock %}
+{% block body %}
+<div class="max-w-6xl mx-auto p-6">
+  <h1 class="text-2xl font-semibold mb-4">Admin · Retrieval pipelines</h1>
+  <div class="space-y-2">
+    {% for r in rows %}
+    <form method="post" action="/admin/retrieval-pipelines/{{ r.feature }}"
+          class="bg-white border rounded p-3 grid grid-cols-12 gap-2 items-start text-sm">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+      <div class="col-span-2 font-medium">{{ r.feature }}</div>
+      <textarea name="stages_json" rows="4"
+        class="col-span-6 border rounded px-2 py-1 font-mono text-xs"
+        placeholder='[{"name":"bm25","k":50},{"name":"rrf"}]'>{{ r.stages_json|tojson }}</textarea>
+      <input name="description" value="{{ r.description or '' }}"
+             class="col-span-3 border rounded px-2 py-1" placeholder="mô tả">
+      <button class="col-span-1 bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded">Lưu</button>
+    </form>
+    {% else %}
+    <p class="text-gray-400 text-center">Chưa có pipeline.</p>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

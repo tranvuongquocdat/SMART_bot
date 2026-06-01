@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>{% block title %}SMART_bot{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <script src="https://unpkg.com/alpinejs@3.14" defer></script>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      if (window.htmx) {
+        htmx.on("htmx:configRequest", (e) => {
+          const meta = document.querySelector('meta[name=csrf-token]');
+          if (meta) e.detail.headers["X-CSRF-Token"] = meta.content;
+        });
+      }
+    });
+  </script>
+</head>
+<body class="bg-gray-50 text-gray-900 font-sans">
+{% if boss_ctx %}
+<div class="min-h-screen flex">
+  <aside class="w-56 bg-white border-r p-4 flex-none">
+    <div class="font-semibold text-lg mb-4">SMART_bot</div>
+    <nav class="space-y-1 text-sm">
+      <a href="/app" class="block px-2 py-1 rounded hover:bg-gray-100">Dashboard</a>
+      <a href="/app/groups" class="block px-2 py-1 rounded hover:bg-gray-100">Nhóm</a>
+      <a href="/app/action-items" class="block px-2 py-1 rounded hover:bg-gray-100">Việc cần làm</a>
+      <a href="/app/reminders" class="block px-2 py-1 rounded hover:bg-gray-100">Nhắc lịch</a>
+      <a href="/app/channels" class="block px-2 py-1 rounded hover:bg-gray-100">Kênh</a>
+      <a href="/app/usage" class="block px-2 py-1 rounded hover:bg-gray-100">Sử dụng</a>
+      <div class="text-xs uppercase tracking-wide text-gray-400 mt-4 mb-1 px-2">Cài đặt</div>
+      <a href="/app/settings/general" class="block px-2 py-1 rounded hover:bg-gray-100">Chung</a>
+      <a href="/app/settings/account" class="block px-2 py-1 rounded hover:bg-gray-100">Tài khoản</a>
+      <a href="/app/settings/ai" class="block px-2 py-1 rounded hover:bg-gray-100">AI</a>
+      <a href="/app/subscription" class="block px-2 py-1 rounded hover:bg-gray-100">Gói cước</a>
+      {% if boss_ctx.user_role == "superadmin" %}
+      <div class="text-xs uppercase tracking-wide text-gray-400 mt-4 mb-1 px-2">Admin</div>
+      <a href="/admin/bosses" class="block px-2 py-1 rounded hover:bg-gray-100">Bosses</a>
+      <a href="/admin/bot-accounts" class="block px-2 py-1 rounded hover:bg-gray-100">Bot accounts</a>
+      <a href="/admin/models" class="block px-2 py-1 rounded hover:bg-gray-100">Models</a>
+      <a href="/admin/prompts" class="block px-2 py-1 rounded hover:bg-gray-100">Prompts</a>
+      <a href="/admin/note-templates" class="block px-2 py-1 rounded hover:bg-gray-100">Templates</a>
+      <a href="/admin/llm-routes" class="block px-2 py-1 rounded hover:bg-gray-100">LLM routes</a>
+      <a href="/admin/feature-budgets" class="block px-2 py-1 rounded hover:bg-gray-100">Budgets</a>
+      <a href="/admin/agent-triggers" class="block px-2 py-1 rounded hover:bg-gray-100">Triggers</a>
+      <a href="/admin/retrieval-pipelines" class="block px-2 py-1 rounded hover:bg-gray-100">Pipelines</a>
+      <a href="/admin/audit-log" class="block px-2 py-1 rounded hover:bg-gray-100">Audit log</a>
+      {% endif %}
+      <form method="post" action="/logout" class="pt-4">
+        <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+        <button class="text-sm text-gray-500 hover:text-gray-800">Đăng xuất</button>
+      </form>
+    </nav>
+  </aside>
+  <main class="flex-1">
+    {% block body %}{% endblock %}
+  </main>
+</div>
+{% else %}
+{{ self.body() }}
+{% endif %}
+</body>
+</html>
