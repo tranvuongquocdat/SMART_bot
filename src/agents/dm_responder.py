@@ -5,7 +5,6 @@ from typing import Any
 
 from src.agents.agent_loop import run_agent
 from src.agents.registry import operation
-from src.services.outbound_service import OutboundService
 
 
 @dataclass
@@ -17,6 +16,7 @@ class DMContext:
     bus: Any
     db: Any
     qdrant: Any
+    outbound_service: Any
 
 
 @operation(
@@ -54,8 +54,7 @@ class DMResponder:
         answer = await run_agent(DMResponder, event, ctx)
         if not answer:
             return
-        outbound = OutboundService(ctx.db, ctx.bus)
-        await outbound.send(
+        await ctx.outbound_service.send(
             boss_id=ctx.boss.id,
             provider=event["provider"],
             chat_id=event["chat_id"],

@@ -5,7 +5,6 @@ from typing import Any
 
 from src.agents.agent_loop import run_agent
 from src.agents.registry import operation
-from src.services.outbound_service import OutboundService
 
 
 @dataclass
@@ -17,6 +16,7 @@ class InGroupCtx:
     bus: Any
     db: Any
     qdrant: Any
+    outbound_service: Any
 
 
 _QUICK_ACK_TEXT = "Để em xem..."
@@ -52,12 +52,11 @@ _QUICK_ACK_THRESHOLD = 60  # chars
 class InGroupResponder:
     async def handle(self, event: dict, ctx: InGroupCtx):
         text = event.get("text", "") or ""
-        outbound = OutboundService(ctx.db, ctx.bus)
 
         # Predict-long heuristic: any tagged message > 60 chars is likely Q&A
         # that needs search → ack first so the group sees responsiveness.
         if len(text) > _QUICK_ACK_THRESHOLD:
-            await outbound.send(
+            await ctx.outbound_service.send(
                 boss_id=ctx.boss.id,
                 provider=event["provider"],
                 chat_id=event["chat_id"],
@@ -68,7 +67,7 @@ class InGroupResponder:
         answer = await run_agent(InGroupResponder, event, ctx)
         if not answer:
             return
-        await outbound.send(
+        await ctx.outbound_service.send(
             boss_id=ctx.boss.id,
             provider=event["provider"],
             chat_id=event["chat_id"],

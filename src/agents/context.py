@@ -8,6 +8,7 @@ import structlog
 
 from src.repositories.base import BossContext
 from src.repositories.users import UsersRepo
+from src.services.outbound_service import OutboundService
 
 
 @dataclass
@@ -65,6 +66,16 @@ async def build_context(deps_type, event, app_state):
     boss = await UsersRepo(
         app_state.db_pool, BossContext(boss_id, "boss")
     ).get_me()
+    outbound_service = getattr(app_state, "outbound_service", None)
+    if outbound_service is None:
+        # Test/standalone fallback: build a service in legacy stub mode
+        # (no registry / no admin_repo → persists row + publishes event only).
+        outbound_service = OutboundService(
+            app_state.db_pool,
+            app_state.bus,
+            getattr(app_state, "channel_registry", None),
+            getattr(app_state, "admin_bot_accounts_repo", None),
+        )
     available = {
         "boss": boss,
         "memory": app_state.memory_provider,
@@ -73,6 +84,9 @@ async def build_context(deps_type, event, app_state):
         "bus": app_state.bus,
         "db": app_state.db_pool,
         "qdrant": app_state.qdrant,
+        "channel_registry": getattr(app_state, "channel_registry", None),
+        "admin_repo": getattr(app_state, "admin_bot_accounts_repo", None),
+        "outbound_service": outbound_service,
     }
     kwargs = {}
     for f in dataclasses.fields(deps_type):

@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from src.channels.zalo.markdown_strip import strip_markdown
 from src.events.bus import EventBus
 from src.services.bot_account_session import decrypt_credentials
 
@@ -116,6 +117,25 @@ class ZaloAdapter:
         # MVP: fire-and-forget on send. The reply (with msg_id) flows through
         # _read_stdout and is logged; we don't block agent loop on it.
         return "<async>"
+
+    def classify_thread_kind(self, chat_id: str) -> str:
+        # Zalo group ids are typically much longer than user ids; user ids are
+        # ~18 digits, group ids are 19+ digits. Heuristic kept conservative.
+        if not chat_id:
+            return "user"
+        if "@g" in chat_id:
+            return "group"
+        return "group" if len(chat_id) >= 19 else "user"
+
+    def normalize_text(self, text: str) -> str:
+        # Zalo renders plain text only — strip markdown before sending.
+        return strip_markdown(text)
+
+    async def health_check(self) -> dict[int, bool]:
+        return {
+            bot_acc_id: (proc.returncode is None)
+            for bot_acc_id, proc in self._procs.items()
+        }
 
     async def list_members(
         self,

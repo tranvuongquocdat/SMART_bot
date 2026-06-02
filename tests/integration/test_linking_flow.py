@@ -18,6 +18,7 @@ import pytest
 from src.channels.zalo import normalizer as zalo_normalizer
 from src.events.bus import InMemoryEventBus
 from src.services.linking_service import LinkingService
+from src.services.outbound_service import OutboundService
 
 
 async def _seed_zalo_bot_account(pool, label: str = "linktest-bot"):
@@ -135,7 +136,7 @@ async def test_gc_expired_clears_old_tokens(db_pool, boss_user):
 @pytest.mark.asyncio
 async def test_normalizer_consumes_start_token_and_acks(db_pool, boss_user):
     bus = InMemoryEventBus()
-    zalo_normalizer.register(bus, db_pool)
+    zalo_normalizer.register(bus, db_pool, OutboundService(db_pool, bus))
 
     bot_acc_id = await _seed_zalo_bot_account(db_pool, "lt-handshake")
     # NOTE: NO active assignment yet — handshake should still complete,
@@ -191,7 +192,7 @@ async def test_normalizer_consumes_start_token_and_acks(db_pool, boss_user):
 @pytest.mark.asyncio
 async def test_normalizer_start_invalid_token_no_link(db_pool, boss_user):
     bus = InMemoryEventBus()
-    zalo_normalizer.register(bus, db_pool)
+    zalo_normalizer.register(bus, db_pool, OutboundService(db_pool, bus))
     bot_acc_id = await _seed_zalo_bot_account(db_pool, "lt-handshake-bad")
 
     sent: list[dict] = []

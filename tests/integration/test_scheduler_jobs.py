@@ -19,10 +19,17 @@ from src.scheduler.jobs.subscription_check import job as sub_job
 
 
 class _State:
-    def __init__(self, db_pool, bus, zalo=None):
+    def __init__(self, db_pool, bus, channel_registry=None):
         self.db_pool = db_pool
         self.bus = bus
-        self.zalo = zalo
+        self.channel_registry = channel_registry
+
+
+def _make_registry(adapter):
+    from src.channels.registry import ChannelRegistry
+    r = ChannelRegistry()
+    r.register(adapter)
+    return r
 
 
 @pytest.mark.asyncio
@@ -86,9 +93,15 @@ async def test_bot_account_health_marks_dead_process(db_pool, boss_user):
         )
 
     bus = InMemoryEventBus()
-    dead_proc: Any = SimpleNamespace(returncode=1)
-    zalo = SimpleNamespace(_procs={bot_id: dead_proc})
-    state = _State(db_pool, bus, zalo=zalo)
+    procs: dict[int, Any] = {bot_id: SimpleNamespace(returncode=1)}
+
+    async def _health():
+        return {b: (p.returncode is None) for b, p in procs.items()}
+
+    fake_adapter = SimpleNamespace(
+        provider="zalo", health_check=_health, _procs=procs
+    )
+    state = _State(db_pool, bus, channel_registry=_make_registry(fake_adapter))
 
     events: list[dict] = []
 
@@ -107,7 +120,7 @@ async def test_bot_account_health_marks_dead_process(db_pool, boss_user):
             "SELECT status FROM bot_accounts WHERE id=$1", bot_id
         )
     assert st == "logged_out"
-    assert bot_id not in zalo._procs
+    assert bot_id not in procs
 
 
 @pytest.mark.asyncio
@@ -124,9 +137,15 @@ async def test_bot_account_health_skips_alive(db_pool, boss_user):
         )
 
     bus = InMemoryEventBus()
-    alive_proc: Any = SimpleNamespace(returncode=None)
-    zalo = SimpleNamespace(_procs={bot_id: alive_proc})
-    state = _State(db_pool, bus, zalo=zalo)
+    procs: dict[int, Any] = {bot_id: SimpleNamespace(returncode=None)}
+
+    async def _health():
+        return {b: (p.returncode is None) for b, p in procs.items()}
+
+    fake_adapter = SimpleNamespace(
+        provider="zalo", health_check=_health, _procs=procs
+    )
+    state = _State(db_pool, bus, channel_registry=_make_registry(fake_adapter))
     await health_job(state)
 
     async with db_pool.acquire() as c:
@@ -134,7 +153,7 @@ async def test_bot_account_health_skips_alive(db_pool, boss_user):
             "SELECT status FROM bot_accounts WHERE id=$1", bot_id
         )
     assert st == "active"
-    assert bot_id in zalo._procs
+    assert bot_id in procs
 
 
 @pytest.mark.asyncio

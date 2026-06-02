@@ -17,6 +17,7 @@ class FirerCtx:
     boss: Any
     db: Any
     bus: Any
+    outbound_service: Any
 
 
 @operation(
@@ -34,7 +35,6 @@ class FirerCtx:
 )
 class ReminderFirer:
     async def handle(self, event: dict, ctx: FirerCtx):
-        from src.services.outbound_service import OutboundService
         from src.services.reminder_service import ReminderService
 
         rid = event["reminder_id"]
@@ -62,9 +62,8 @@ class ReminderFirer:
                     rid,
                 )
 
-        out = OutboundService(ctx.db, ctx.bus)
         try:
-            await out.send(
+            await ctx.outbound_service.send(
                 boss_id=ctx.boss.id,
                 provider=row["provider"] or "zalo",
                 chat_id=row["chat_id"],

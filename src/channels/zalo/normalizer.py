@@ -47,7 +47,7 @@ def _ts(data: dict) -> datetime:
         return datetime.now(tz=timezone.utc)
 
 
-def register(bus: EventBus, pool) -> None:
+def register(bus: EventBus, pool, outbound_service=None) -> None:
     async def handle(payload: dict) -> None:
         data = payload.get("data") or {}
         bot_acc_id = payload.get("bot_account_id")
@@ -79,18 +79,13 @@ def register(bus: EventBus, pool) -> None:
                 sender_provider_uid=sender_uid,
                 bot_account_id=bot_acc_id,
             )
-            if linked_boss_id is not None:
-                await bus.publish(
-                    "outbound.send",
-                    {
-                        "outbound_id": None,
-                        "boss_id": linked_boss_id,
-                        "provider": "zalo",
-                        "chat_id": sender_uid,
-                        "content": "Đã kết nối. Em là bot của anh ở đây.",
-                        "trigger": "system",
-                        "reply_to_message_id": None,
-                    },
+            if linked_boss_id is not None and outbound_service is not None:
+                await outbound_service.send(
+                    boss_id=linked_boss_id,
+                    provider="zalo",
+                    chat_id=sender_uid,
+                    content="Đã kết nối. Em là bot của anh ở đây.",
+                    trigger="system",
                 )
             else:
                 log.info(

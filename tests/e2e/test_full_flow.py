@@ -27,8 +27,8 @@ import src.agents  # noqa: F401
 import src.tools  # noqa: F401
 from src.agents.dispatcher import OperationDispatcher
 from src.agents.triggers import TriggerEngine
+from src.channels.registry import ChannelRegistry
 from src.channels.zalo import normalizer as zalo_normalizer
-from src.channels.zalo import outbound as zalo_outbound
 from src.channels.zalo.adapter import ZaloAdapter
 from src.events.bus import InMemoryEventBus
 from src.llm.base import LLMResponse, LLMUsage
@@ -36,6 +36,7 @@ from src.repositories.base import BossContext
 from src.repositories.bot_accounts import BotAccountsRepo
 from src.services.bot_account_service import BotAccountService
 from src.services.linking_service import LinkingService
+from src.services.outbound_service import OutboundService
 
 
 # --------------------------------------------------------------------------
@@ -115,8 +116,9 @@ class _AppState:
         self.memory_provider = mem
         self.qdrant = None
         self.retriever_factory = None
-        self.channels = {}
-        self.zalo = None
+        self.channel_registry: ChannelRegistry | None = None
+        self.admin_bot_accounts_repo = None
+        self.outbound_service = None
 
 
 # --------------------------------------------------------------------------
@@ -146,16 +148,20 @@ async def e2e(clean_db):
         )
         return "<ok>"
     zalo.send_text = _fake_send
-    state.zalo = zalo
-    state.channels = {"zalo": zalo}
+
+    # Registry + outbound service mimic the real wiring.
+    registry = ChannelRegistry()
+    registry.register(zalo)
+    state.channel_registry = registry
+    state.admin_bot_accounts_repo = admin_repo
+    state.outbound_service = OutboundService(db_pool, bus, registry, admin_repo)
 
     # Real dispatcher + trigger engine wired to the bus.
     OperationDispatcher(bus, state).attach_all()
     TriggerEngine(bus).attach_all()
 
-    # Channel subscribers (real normalizer + outbound wiring).
-    zalo_normalizer.register(bus, db_pool)
-    zalo_outbound.register(bus, zalo, db_pool, admin_repo)
+    # Real Zalo normalizer wired to bus (handshake uses outbound_service).
+    zalo_normalizer.register(bus, db_pool, state.outbound_service)
 
     yield {
         "db_pool": db_pool,
@@ -248,7 +254,7 @@ async def test_full_flow_register_link_capture_reply_reminder(e2e):
         )
     assert row["status"] == "active"
     # accept() calls adapter.start_inbound — must have fired exactly once.
-    assert state.zalo.start_inbound.await_count == 1
+    assert state.channel_registry.get("zalo").start_inbound.await_count == 1
 
     # --- Flow 3: Boss links via DM /start <token> -----------------------
     linking = LinkingService(db_pool)

@@ -18,12 +18,15 @@ import json
 
 import pytest
 
+from src.channels.registry import ChannelRegistry
 from src.channels.zalo import normalizer as zalo_normalizer
-from src.channels.zalo import outbound as zalo_outbound
 from src.channels.zalo.adapter import ZaloAdapter
 from src.channels.zalo.inbound_filter import should_drop
 from src.channels.zalo.markdown_strip import strip_markdown
 from src.events.bus import InMemoryEventBus
+from src.repositories.base import BossContext
+from src.repositories.bot_accounts import BotAccountsRepo
+from src.services.outbound_service import OutboundService
 
 
 class _FakeStdin:
@@ -337,14 +340,6 @@ async def test_outbound_subscriber_calls_adapter(db_pool, boss_user):
             boss_id,
             bot_acc_id,
         )
-        outbound_id = await c.fetchval(
-            """
-            INSERT INTO outbound_messages (boss_id, provider, chat_id, content, trigger, status)
-            VALUES ($1, 'zalo', 'chat-x', 'msg', 'agent', 'queued') RETURNING id
-            """,
-            boss_id,
-        )
-
     adapter = ZaloAdapter(bus)
     sent: list[dict] = []
 
@@ -353,19 +348,18 @@ async def test_outbound_subscriber_calls_adapter(db_pool, boss_user):
         return "<async>"
 
     adapter.send_text = fake_send_text  # type: ignore[assignment]
-    zalo_outbound.register(bus, adapter, db_pool)
 
-    await bus.publish(
-        "outbound.send",
-        {
-            "outbound_id": outbound_id,
-            "boss_id": boss_id,
-            "provider": "zalo",
-            "chat_id": "chat-x",
-            "content": "**hi** boss",
-            "trigger": "agent",
-            "reply_to_message_id": None,
-        },
+    registry = ChannelRegistry()
+    registry.register(adapter)
+    admin_repo = BotAccountsRepo(db_pool, BossContext(0, "superadmin"))
+    service = OutboundService(db_pool, bus, registry, admin_repo)
+
+    outbound_id = await service.send(
+        boss_id=boss_id,
+        provider="zalo",
+        chat_id="chat-x",
+        content="**hi** boss",
+        trigger="agent",
     )
 
     assert len(sent) == 1

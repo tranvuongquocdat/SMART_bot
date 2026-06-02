@@ -49,6 +49,42 @@ class BotAccountsRepo(BossScopedRepo):
             rows = await c.fetch("SELECT * FROM bot_accounts ORDER BY id")
             return [_row_to_bot_account(r) for r in rows]
 
+    async def list_active_by_provider(self, provider: str) -> list[BotAccount]:
+        """All active bot_accounts for a given provider. Superadmin-only path
+        — used at startup to boot inbound bridges."""
+        assert self.ctx.user_role == "superadmin", "list_active_by_provider requires superadmin"
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                "SELECT * FROM bot_accounts WHERE provider=$1 AND status='active'",
+                provider,
+            )
+            return [_row_to_bot_account(r) for r in rows]
+
+    async def find_active_for_boss(
+        self, boss_id: int, provider: str
+    ) -> BotAccount | None:
+        """Resolve the active bot_account assigned to ``boss_id`` on ``provider``.
+
+        Used by OutboundService to pick the sender account for a reply.
+        Cross-boss lookup → superadmin context.
+        """
+        assert self.ctx.user_role == "superadmin", "find_active_for_boss requires superadmin"
+        async with self.pool.acquire() as c:
+            row = await c.fetchrow(
+                """
+                SELECT ba.* FROM bot_accounts ba
+                JOIN bot_account_assignments baa ON baa.bot_account_id = ba.id
+                WHERE baa.boss_id=$1
+                  AND baa.provider=$2
+                  AND baa.status='active'
+                  AND ba.status='active'
+                LIMIT 1
+                """,
+                boss_id,
+                provider,
+            )
+            return _row_to_bot_account(row) if row else None
+
     async def insert(
         self,
         provider: str,
