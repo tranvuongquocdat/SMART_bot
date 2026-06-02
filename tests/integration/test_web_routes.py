@@ -46,3 +46,34 @@ def test_delete_user_cascade(client, clean_db):
     # Group still exists but membership cleared
     members = client.get(f"/test/api/chats?as={u1}").json()
     assert members == []
+
+
+def test_send_publishes_inbound_event_and_replay_returns_messages(
+    client, clean_db
+):
+    # Setup: boss + DM
+    uid = client.post(
+        "/test/api/users", json={"name": "Boss", "is_boss": True}
+    ).json()["id"]
+
+    # Send a message as the boss in their DM
+    r = client.post(
+        "/test/api/send",
+        json={
+            "as": uid,
+            "chat_id": f"dm:{uid}",
+            "text": "hello bot",
+            "mention_bot": False,
+        },
+    )
+    assert r.status_code == 200
+
+    # Wait a tick for normalizer
+    import time
+    time.sleep(0.3)
+
+    # Replay
+    msgs = client.get(
+        f"/test/api/chats/dm:{uid}/messages?limit=50"
+    ).json()
+    assert any(m["text"] == "hello bot" for m in msgs)

@@ -145,3 +145,83 @@ async def list_chats(request: Request, as_: str = "", as_alt: str = ""):
         for g in groups
     )
     return chats
+
+
+@router.post("/api/send")
+async def send_inbound(request: Request):
+    a = _adapter(request)
+    body = await request.json()
+    as_uid = body.get("as")
+    chat_id = body.get("chat_id")
+    text = body.get("text") or ""
+    mention_bot = bool(body.get("mention_bot"))
+    if not as_uid or not chat_id:
+        raise HTTPException(400, "as and chat_id required")
+
+    sender = await a.users_repo.get(as_uid)
+    if sender is None:
+        raise HTTPException(404, "sender not found")
+
+    import uuid as _uuid
+    await a.bus.publish(
+        "inbound.raw.web",
+        {
+            "web_user_id": as_uid,
+            "chat_id": chat_id,
+            "chat_type": "dm" if chat_id.startswith("dm:") else "group",
+            "text": text,
+            "mention_bot": mention_bot,
+            "provider_msg_id": f"w-{_uuid.uuid4().hex[:10]}",
+            "sender_name": sender["name"],
+        },
+    )
+    return {"ok": True}
+
+
+@router.get("/api/chats/{chat_id:path}/messages")
+async def replay_messages(request: Request, chat_id: str, limit: int = 50):
+    a = _adapter(request)
+    async with a.pool.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT * FROM (
+              SELECT
+                'in'::text  AS kind,
+                m.id        AS id,
+                m.chat_id   AS chat_id,
+                m.sender_provider_id AS sender_id,
+                m.sender_name        AS sender_name,
+                m.text      AS text,
+                m.ts        AS ts
+              FROM messages m
+              WHERE m.provider='web' AND m.chat_id=$1
+              UNION ALL
+              SELECT
+                'out'::text AS kind,
+                o.id        AS id,
+                o.chat_id   AS chat_id,
+                NULL        AS sender_id,
+                'Bot'       AS sender_name,
+                o.content   AS text,
+                o.sent_at   AS ts
+              FROM outbound_messages o
+              WHERE o.provider='web' AND o.chat_id=$1
+            ) merged
+            ORDER BY ts DESC
+            LIMIT $2
+            """,
+            chat_id, limit,
+        )
+    rows = list(reversed(rows))  # chronological
+    return [
+        {
+            "kind": r["kind"],
+            "id": r["id"],
+            "chat_id": r["chat_id"],
+            "sender_id": r["sender_id"],
+            "sender_name": r["sender_name"],
+            "text": r["text"],
+            "ts": r["ts"].isoformat(),
+        }
+        for r in rows
+    ]
