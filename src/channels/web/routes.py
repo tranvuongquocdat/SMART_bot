@@ -52,9 +52,7 @@ class MembershipBody(BaseModel):
 async def index(request: Request):
     if _templates is None:
         return HTMLResponse("<h1>Web Test Channel</h1>")
-    return _templates.TemplateResponse(
-        "index.html", {"request": request}
-    )
+    return _templates.TemplateResponse(request, "index.html")
 
 
 @router.get("/api/users")
