@@ -178,6 +178,47 @@ async def send_inbound(request: Request):
     return {"ok": True}
 
 
+@router.get("/stream")
+async def sse_stream(request: Request):
+    a = _adapter(request)
+    uid = request.query_params.get("as")
+    if not uid:
+        raise HTTPException(400, "as= required")
+    user = await a.users_repo.get(uid)
+    if user is None:
+        raise HTTPException(404, "user not found")
+
+    client = a.sse_hub.attach(uid)
+
+    async def gen():
+        try:
+            # Initial comment to flush headers
+            yield b": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await asyncio.wait_for(
+                        client.queue.get(), timeout=15.0
+                    )
+                    payload = json.dumps(event)
+                    yield f"data: {payload}\n\n".encode()
+                except asyncio.TimeoutError:
+                    yield b": heartbeat\n\n"
+        finally:
+            a.sse_hub.detach(client)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.get("/api/chats/{chat_id:path}/messages")
 async def replay_messages(request: Request, chat_id: str, limit: int = 50):
     a = _adapter(request)
