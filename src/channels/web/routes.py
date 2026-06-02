@@ -20,6 +20,7 @@ from src.channels.web.promotion import BossPromotionService
 router = APIRouter(prefix="/test")
 _templates_dir = Path(__file__).parent / "templates"
 _templates = Jinja2Templates(directory=str(_templates_dir)) if _templates_dir.is_dir() else None
+_STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _adapter(request: Request):

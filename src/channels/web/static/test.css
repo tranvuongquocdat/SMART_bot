@@ -1,0 +1,4 @@
+.bubble-self { background: #dbeafe; align-self: flex-end; }
+.bubble-other { background: #f1f5f9; }
+.bubble-bot { background: #fef3c7; }
+.chat-item.active { background: #eff6ff; font-weight: 600; }

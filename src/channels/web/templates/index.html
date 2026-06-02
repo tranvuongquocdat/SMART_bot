@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SMART_bot — Web Test Channel</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/test/static/test.css" />
+</head>
+<body class="bg-gray-50 text-gray-900 antialiased">
+  <div id="app" class="flex h-screen">
+    <!-- Sidebar -->
+    <aside class="w-72 bg-white border-r flex flex-col">
+      <div class="p-3 border-b">
+        <label class="text-xs uppercase text-gray-500">Sending as</label>
+        <select id="as-select" class="w-full mt-1 px-2 py-1 border rounded">
+          <option value="">-- chọn user --</option>
+        </select>
+        <button id="btn-add-user" class="mt-2 w-full text-sm bg-blue-50 text-blue-700 py-1 rounded hover:bg-blue-100">+ Thêm user</button>
+      </div>
+      <div class="p-3 border-b text-xs uppercase text-gray-500">DMs / Groups</div>
+      <ul id="chat-list" class="flex-1 overflow-y-auto"></ul>
+      <div class="p-3 border-t">
+        <button id="btn-add-group" class="w-full text-sm bg-green-50 text-green-700 py-1 rounded hover:bg-green-100">+ Tạo group</button>
+        <button id="btn-admin" class="mt-2 w-full text-sm bg-gray-100 text-gray-700 py-1 rounded">⚙ Admin</button>
+      </div>
+    </aside>
+
+    <!-- Chat panel -->
+    <main class="flex-1 flex flex-col">
+      <header id="chat-header" class="px-4 py-3 border-b bg-white">
+        <h2 class="font-semibold text-gray-700">— chọn chat —</h2>
+      </header>
+      <ol id="messages" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></ol>
+      <footer class="p-3 border-t bg-white">
+        <div class="flex gap-2 items-center">
+          <input id="msg-input" type="text" placeholder="Nhập tin nhắn..."
+                 class="flex-1 px-3 py-2 border rounded focus:outline-blue-500" />
+          <label class="text-sm text-gray-600">
+            <input id="mention-bot" type="checkbox" class="mr-1" />@bot
+          </label>
+          <button id="btn-send" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Send</button>
+        </div>
+      </footer>
+    </main>
+
+    <!-- Admin pane (collapsed) -->
+    <aside id="admin-pane" class="w-80 bg-white border-l p-3 hidden overflow-y-auto">
+      <h3 class="font-semibold">Users</h3>
+      <ul id="admin-users" class="text-sm mt-2"></ul>
+      <h3 class="font-semibold mt-4">Groups</h3>
+      <ul id="admin-groups" class="text-sm mt-2"></ul>
+    </aside>
+  </div>
+
+  <script src="/test/static/test.js" type="module"></script>
+</body>
+</html>
