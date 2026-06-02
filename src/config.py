@@ -21,6 +21,7 @@ class Settings(BaseSettings):
 
     DEFAULT_BOSS_COST_CAP_USD_DAILY: float = 5.0
     LOG_RAW_CONTENT: bool = False
+    ENABLE_WEB_TEST_CHANNEL: bool = True
 
     @property
     def superadmin_emails_set(self) -> set[str]:
