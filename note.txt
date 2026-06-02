@@ -45,4 +45,19 @@ Note spec v2:
 Note spec v2.1:
 - Đúng vậy, không dùng code để map event, rất là không linh động, phần agent thiết kế thế cũng cứng quá, tham khảo các pattern để thiết kế agent linh động ở opensource tốt 2026
 - phần agent đúng là set up tù túng quá, cần module hoá để dễ develop sau này chứ thiết kế như giờ làm cho việc mở rộng hoặc tinh chỉnh rất khó khăn
-- 
+
+note cần update:
+- phần tạo user, rồi chọn boss hay nhân viên bị khó quá nên hiện theo kiểu như hiện tại
+- khi gõ, nhất là gõ tiếng việt, thì lại gửi thành 2 tin nhắn
+- phần thêm nhóm thì cho tôi droplist để pick user pick cho nhanh
+- giờ chạy thì admin kia vào check trang admin ntn
+- tôi vào check trang superadmin ntn?
+
+note:
+- @bot mà lại cần tích, ko hợp lý, cần phải làm nó tự nhiên hơn
+- ko xoá được acc tạo nhầm
+- thêm nút tắt trong trang test để mở qua trang admin tương ứng với bot đang chọn
+
+Note:
+- bấm trang admin bị lỗi:
+ {"detail":"not logged in"}

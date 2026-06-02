@@ -19,19 +19,34 @@ class DenseRetriever:
         ]
         if ctx.chat_id:
             must.append({"key": "chat_id", "match": {"value": ctx.chat_id}})
-        results = await self.qdrant.search(
+        resp = await self.qdrant.query_points(
             collection_name="smart_bot",
-            query_vector=vec,
+            query=vec,
             query_filter={"must": must},
             limit=self.k,
         )
+        results = resp.points
         msg_ids = [r.payload["message_id"] for r in results]
         if not msg_ids:
             return []
+        patterns = (
+            [f"%{u}%" for u in ctx.with_users] if ctx.with_users else None
+        )
+        # Apply structured filters (time + sender) at SQL fetch — Qdrant payload
+        # doesn't index these, so filter the message rows post-vector-search.
         async with self.pool.acquire() as c:
             rows = await c.fetch(
-                "SELECT id, text, sender_name, ts FROM messages WHERE id = ANY($1::BIGINT[])",
+                """
+                SELECT id, text, sender_name, ts FROM messages
+                WHERE id = ANY($1::BIGINT[])
+                  AND ($2::TIMESTAMPTZ IS NULL OR ts >= $2)
+                  AND ($3::TIMESTAMPTZ IS NULL OR ts < $3)
+                  AND ($4::TEXT[] IS NULL OR sender_name ILIKE ANY($4))
+                """,
                 msg_ids,
+                ctx.after,
+                ctx.before,
+                patterns,
             )
         by_id = {r["id"]: r for r in rows}
         out: list[Hit] = []

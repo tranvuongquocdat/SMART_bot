@@ -30,9 +30,10 @@ _QUICK_ACK_THRESHOLD = 60  # chars
     deps_type=InGroupCtx,
     prompt_key="in_group",
     feature="qa_with_search",
-    memory_scopes=["semantic", "episodic"],
+    memory_scopes=["semantic", "episodic", "prospective"],
     tools={
         "search_history",
+        "count_messages",
         "read_group_note",
         "refresh_group_note",
         "find_exact_quote",

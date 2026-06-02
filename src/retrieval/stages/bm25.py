@@ -10,6 +10,9 @@ class BM25Retriever:
     async def run(
         self, query: str, hits: "list[Hit]", ctx: RetrievalContext
     ) -> "list[Hit]":
+        patterns = (
+            [f"%{u}%" for u in ctx.with_users] if ctx.with_users else None
+        )
         async with self.pool.acquire() as c:
             rows = await c.fetch(
                 """
@@ -19,6 +22,9 @@ class BM25Retriever:
                 WHERE boss_id=$1
                   AND ($3::TEXT IS NULL OR chat_id=$3)
                   AND fts @@ plainto_tsquery('simple', unaccent($2))
+                  AND ($5::TIMESTAMPTZ IS NULL OR ts >= $5)
+                  AND ($6::TIMESTAMPTZ IS NULL OR ts < $6)
+                  AND ($7::TEXT[] IS NULL OR sender_name ILIKE ANY($7))
                 ORDER BY rank DESC
                 LIMIT $4
                 """,
@@ -26,6 +32,9 @@ class BM25Retriever:
                 query,
                 ctx.chat_id,
                 self.k,
+                ctx.after,
+                ctx.before,
+                patterns,
             )
         return [
             Hit(

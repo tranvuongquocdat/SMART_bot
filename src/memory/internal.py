@@ -87,9 +87,9 @@ class InternalMemoryProvider:
         if query is None or len(query) < 3:
             return await repo.list_by_scope(scope, limit=k)
         [vec] = await self.llm.embed([query], model=EMBED_MODEL)
-        hits = await self.qdrant.search(
+        resp = await self.qdrant.query_points(
             collection_name=COLLECTION,
-            query_vector=vec,
+            query=vec,
             query_filter={
                 "must": [
                     {"key": "boss_id", "match": {"value": boss_id}},
@@ -98,7 +98,7 @@ class InternalMemoryProvider:
             },
             limit=k,
         )
-        mem_ids = [h.payload["memory_id"] for h in hits]
+        mem_ids = [h.payload["memory_id"] for h in resp.points]
         return await repo.list_by_ids(mem_ids)
 
     async def forget(self, memory_id: int, boss_id: int) -> None:

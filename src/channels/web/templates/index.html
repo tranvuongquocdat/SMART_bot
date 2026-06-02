@@ -34,11 +34,8 @@
       <ol id="messages" class="flex-1 overflow-y-auto px-4 py-3 space-y-2"></ol>
       <footer class="p-3 border-t bg-white">
         <div class="flex gap-2 items-center">
-          <input id="msg-input" type="text" placeholder="Nhập tin nhắn..."
+          <input id="msg-input" type="text" placeholder='Nhập tin nhắn... (gõ "@bot" để tag bot trong nhóm)'
                  class="flex-1 px-3 py-2 border rounded focus:outline-blue-500" />
-          <label class="text-sm text-gray-600">
-            <input id="mention-bot" type="checkbox" class="mr-1" />@bot
-          </label>
           <button id="btn-send" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Send</button>
         </div>
       </footer>
@@ -46,11 +43,52 @@
 
     <!-- Admin pane (collapsed) -->
     <aside id="admin-pane" class="w-80 bg-white border-l p-3 hidden overflow-y-auto">
-      <h3 class="font-semibold">Users</h3>
-      <ul id="admin-users" class="text-sm mt-2"></ul>
-      <h3 class="font-semibold mt-4">Groups</h3>
-      <ul id="admin-groups" class="text-sm mt-2"></ul>
+      <div class="flex items-center justify-between">
+        <h3 class="font-semibold">Quản lý</h3>
+        <div class="flex gap-2 text-xs">
+          <a href="/admin/bosses" target="_blank"
+             class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded">→ /admin</a>
+          <a href="/app" target="_blank"
+             class="px-2 py-1 bg-gray-100 hover:bg-gray-200 rounded">→ /app</a>
+        </div>
+      </div>
+      <h4 class="font-medium mt-3 text-sm text-gray-600">Users</h4>
+      <ul id="admin-users" class="text-sm mt-1 divide-y"></ul>
+      <h4 class="font-medium mt-4 text-sm text-gray-600">Groups</h4>
+      <ul id="admin-groups" class="text-sm mt-1 divide-y"></ul>
     </aside>
+  </div>
+
+  <!-- User create modal -->
+  <div id="user-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg p-5 w-96 shadow-xl">
+      <h3 class="font-semibold mb-3">Tạo user mới</h3>
+      <label class="block text-sm text-gray-600">Tên</label>
+      <input id="user-modal-name" class="w-full mt-1 px-2 py-1 border rounded focus:outline-blue-500" />
+      <div class="mt-3 space-y-1 text-sm">
+        <label class="flex items-center gap-2"><input type="radio" name="user-role" value="employee" checked /> Nhân viên</label>
+        <label class="flex items-center gap-2"><input type="radio" name="user-role" value="boss" /> Boss</label>
+      </div>
+      <div class="mt-4 flex justify-end gap-2">
+        <button id="user-modal-cancel" class="px-3 py-1 text-gray-700 hover:bg-gray-100 rounded">Huỷ</button>
+        <button id="user-modal-ok" class="px-3 py-1 bg-blue-600 text-white rounded hover:bg-blue-700">Tạo</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Group create modal -->
+  <div id="group-modal" class="hidden fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+    <div class="bg-white rounded-lg p-5 w-96 shadow-xl">
+      <h3 class="font-semibold mb-3">Tạo group mới</h3>
+      <label class="block text-sm text-gray-600">Tên</label>
+      <input id="group-modal-name" class="w-full mt-1 px-2 py-1 border rounded focus:outline-blue-500" />
+      <label class="block text-sm text-gray-600 mt-3">Thành viên</label>
+      <ul id="group-modal-members" class="mt-1 max-h-56 overflow-y-auto border rounded divide-y text-sm"></ul>
+      <div class="mt-4 flex justify-end gap-2">
+        <button id="group-modal-cancel" class="px-3 py-1 text-gray-700 hover:bg-gray-100 rounded">Huỷ</button>
+        <button id="group-modal-ok" class="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700">Tạo</button>
+      </div>
+    </div>
   </div>
 
   <script src="/test/static/test.js" type="module"></script>

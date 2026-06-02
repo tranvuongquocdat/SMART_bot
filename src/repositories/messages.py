@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import asyncpg
 
 from src.domain.message import Message, NewMessage
@@ -173,6 +175,36 @@ class MessagesRepo(BossScopedRepo):
                 limit,
             )
             return [_row_to_message(r) for r in rows]
+
+    async def count_filtered(
+        self,
+        query: str | None = None,
+        chat_id: str | None = None,
+        with_users: list[str] | None = None,
+        after: datetime | None = None,
+        before: datetime | None = None,
+    ) -> int:
+        """Count messages matching structured filters — for agent narrow-down probe."""
+        patterns = [f"%{u}%" for u in with_users] if with_users else None
+        async with self.pool.acquire() as c:
+            return await c.fetchval(
+                """
+                SELECT COUNT(*) FROM messages
+                WHERE boss_id=$1
+                  AND ($2::TEXT IS NULL OR chat_id=$2)
+                  AND ($3::TEXT IS NULL
+                       OR fts @@ plainto_tsquery('simple', unaccent($3)))
+                  AND ($4::TIMESTAMPTZ IS NULL OR ts >= $4)
+                  AND ($5::TIMESTAMPTZ IS NULL OR ts < $5)
+                  AND ($6::TEXT[] IS NULL OR sender_name ILIKE ANY($6))
+                """,
+                self.ctx.boss_id,
+                chat_id,
+                query,
+                after,
+                before,
+                patterns,
+            )
 
     async def distinct_senders(self, chat_id: str, days: int = 30) -> list[str]:
         async with self.pool.acquire() as c:

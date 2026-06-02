@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Literal, Protocol
 
 
@@ -17,6 +18,9 @@ class RetrievalContext:
     boss_id: int
     chat_id: str | None = None
     days: int | None = None
+    with_users: list[str] | None = None  # ILIKE substring match against sender_name
+    after: datetime | None = None
+    before: datetime | None = None
 
 
 class RetrievalStage(Protocol):

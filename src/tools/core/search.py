@@ -1,4 +1,6 @@
-"""Search tools — hybrid retrieval + exact-quote lookup."""
+"""Search tools — hybrid retrieval + exact-quote lookup + structured count."""
+
+from datetime import datetime
 
 from src.repositories.base import BossContext
 from src.repositories.messages import MessagesRepo
@@ -7,11 +9,19 @@ from src.tools.base import ToolResult
 from src.tools.registry import tool
 
 
+def _parse_iso(s: str | None) -> datetime | None:
+    if not s:
+        return None
+    # Accept "YYYY-MM-DD" or full ISO; fromisoformat handles both since 3.11.
+    return datetime.fromisoformat(s)
+
+
 @tool(
     name="search_history",
     description=(
-        "Tìm trong lịch sử chat, hybrid (FTS + vector + RRF + MMR). "
-        "Trả top-20 đoạn liên quan nhất."
+        "Tìm trong lịch sử chat (hybrid FTS + vector + RRF + MMR), trả top-20. "
+        "Có thể lọc theo nhóm, người gửi, khoảng thời gian. "
+        "Khi muốn 'tháng trước em A nói gì', truyền with_users=['A'] + after='2026-05-01' + before='2026-06-01'."
     ),
     parameters={
         "type": "object",
@@ -23,7 +33,20 @@ from src.tools.registry import tool
             },
             "days": {
                 "type": "integer",
-                "description": "Giới hạn số ngày gần đây",
+                "description": "Giới hạn số ngày gần đây (ưu tiên dùng after/before nếu cần khoảng cụ thể)",
+            },
+            "with_users": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Substring khớp sender_name (ILIKE); vd ['Tuấn Anh', 'Lan']",
+            },
+            "after": {
+                "type": "string",
+                "description": "ISO datetime/date — chỉ lấy message từ thời điểm này trở đi",
+            },
+            "before": {
+                "type": "string",
+                "description": "ISO datetime/date — chỉ lấy message TRƯỚC thời điểm này",
             },
         },
         "required": ["query"],
@@ -40,13 +63,23 @@ async def search_history(
     query: str,
     group_id: str | None = None,
     days: int | None = None,
+    with_users: list[str] | None = None,
+    after: str | None = None,
+    before: str | None = None,
 ) -> ToolResult:
     if ctx.retriever_factory is None:
         return ToolResult(content=[], error="retriever_factory not available")
     pipeline = await ctx.retriever_factory("qa_with_search")
     hits = await pipeline.run(
         query,
-        RetrievalContext(boss_id=ctx.boss_id, chat_id=group_id, days=days),
+        RetrievalContext(
+            boss_id=ctx.boss_id,
+            chat_id=group_id,
+            days=days,
+            with_users=with_users,
+            after=_parse_iso(after),
+            before=_parse_iso(before),
+        ),
     )
     return ToolResult(
         content=[
@@ -60,6 +93,50 @@ async def search_history(
             for h in hits[:20]
         ]
     )
+
+
+@tool(
+    name="count_messages",
+    description=(
+        "Đếm số message khớp filter — dùng để 'thăm dò' trước khi search_history. "
+        "Vd: count_messages(with_users=['Tuấn Anh'], after='2026-05-01') → "
+        "thấy 800 thì siết thêm filter, thấy 30 thì gọi search_history với cùng filter."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "FTS query optional"},
+            "group_id": {"type": "string"},
+            "with_users": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "after": {"type": "string", "description": "ISO datetime/date"},
+            "before": {"type": "string", "description": "ISO datetime/date"},
+        },
+        "required": [],
+    },
+    available_to={"dm_responder", "in_group_responder"},
+    parallel_safe=True,
+    timeout_s=5,
+)
+async def count_messages(
+    ctx,
+    query: str | None = None,
+    group_id: str | None = None,
+    with_users: list[str] | None = None,
+    after: str | None = None,
+    before: str | None = None,
+) -> ToolResult:
+    repo = MessagesRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
+    count = await repo.count_filtered(
+        query=query,
+        chat_id=group_id,
+        with_users=with_users,
+        after=_parse_iso(after),
+        before=_parse_iso(before),
+    )
+    return ToolResult(content={"count": count})
 
 
 @tool(

@@ -129,6 +129,7 @@ def test_sixteen_core_tools_registered():
         # search
         "search_history",
         "find_exact_quote",
+        "count_messages",
         # notes
         "read_group_note",
         "refresh_group_note",
@@ -154,7 +155,7 @@ def test_sixteen_core_tools_registered():
 
 
 def test_count_matches_spec_at_least_16():
-    # Plan/spec calls for ≥16 named tools (we have 17 incl. fetch_url).
+    # Plan/spec calls for ≥16 named tools (we have 17 incl. fetch_url; +1 count_messages).
     assert len(registry._REGISTRY) >= 16
 
 
@@ -187,6 +188,82 @@ async def test_search_history(tool_ctx):
     r = await _h("search_history")(ctx=tool_ctx, query="báo cáo Q2")
     assert isinstance(r.content, list)
     assert r.content[0]["text"].startswith("match for")
+
+
+@pytest.mark.asyncio
+async def test_search_history_with_filters_passes_to_retriever(tool_ctx):
+    """search_history forwards with_users / after / before into RetrievalContext."""
+    captured: dict = {}
+
+    class _CapturePipeline:
+        async def run(self, query, retr_ctx):
+            captured["with_users"] = retr_ctx.with_users
+            captured["after"] = retr_ctx.after
+            captured["before"] = retr_ctx.before
+            captured["chat_id"] = retr_ctx.chat_id
+            return []
+
+    async def _factory(feature: str):
+        return _CapturePipeline()
+
+    tool_ctx.retriever_factory = _factory
+    await _h("search_history")(
+        ctx=tool_ctx,
+        query="x",
+        group_id="g1",
+        with_users=["Tuấn Anh"],
+        after="2026-05-01",
+        before="2026-06-01",
+    )
+    assert captured["with_users"] == ["Tuấn Anh"]
+    assert captured["after"] == datetime(2026, 5, 1)
+    assert captured["before"] == datetime(2026, 6, 1)
+    assert captured["chat_id"] == "g1"
+
+
+@pytest.mark.asyncio
+async def test_count_messages(tool_ctx, db_pool, boss_user):
+    from src.domain.message import NewMessage
+
+    repo = MessagesRepo(
+        db_pool, BossContext(boss_user["id"], "boss")
+    )
+    base = datetime(2026, 5, 15, 10, 0, tzinfo=timezone.utc)
+    for i, (sender, ts_offset) in enumerate(
+        [("Tuấn Anh", 0), ("Tuấn Anh", 1), ("Lan", 2), ("Tuấn Anh", -40 * 24)]
+    ):
+        await repo.insert(
+            NewMessage(
+                provider="zalo",
+                chat_id="g1",
+                chat_type="group",
+                provider_msg_id=f"m{i}",
+                sender_provider_id=None,
+                sender_name=sender,
+                text=f"msg {i}",
+                media_kind=None,
+                media_url=None,
+                media_text=None,
+                ts=base + timedelta(hours=ts_offset),
+            )
+        )
+
+    # No filter → 4
+    r = await _h("count_messages")(ctx=tool_ctx)
+    assert r.content["count"] == 4
+
+    # Filter by sender → 3 Tuấn Anh
+    r = await _h("count_messages")(ctx=tool_ctx, with_users=["Tuấn Anh"])
+    assert r.content["count"] == 3
+
+    # Filter by sender + time window (only the 2 inside the window)
+    r = await _h("count_messages")(
+        ctx=tool_ctx,
+        with_users=["Tuấn Anh"],
+        after="2026-05-01",
+        before="2026-06-01",
+    )
+    assert r.content["count"] == 2
 
 
 @pytest.mark.asyncio

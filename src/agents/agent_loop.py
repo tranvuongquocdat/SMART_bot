@@ -13,8 +13,10 @@ from typing import Any
 from src.agents.context import current as current_trace
 from src.domain.memory import MemoryScope
 from src.llm.base import ChatMessage, LLMRequest, ToolSpec
+from src.repositories.action_items import ActionItemsRepo
 from src.repositories.base import BossContext
 from src.repositories.prompts import PromptsRepo
+from src.repositories.reminders import RemindersRepo
 from src.tools import registry
 from src.tools.base import ToolContext
 from src.tools.dispatcher import ToolDispatcher
@@ -35,7 +37,7 @@ async def _load_prompt(prompt_key: str, ctx) -> str:
     return (p.body if p else "") or ""
 
 
-def _format_memory(semantic, episodic) -> str:
+def _format_memory(semantic, episodic, reminders, action_items) -> str:
     lines: list[str] = []
     if semantic:
         lines.append("== Semantic ==")
@@ -46,6 +48,20 @@ def _format_memory(semantic, episodic) -> str:
         lines.append("== Episodic ==")
         for m in episodic:
             lines.append(f"- {m.content}")
+    if reminders or action_items:
+        lines.append("== Prospective ==")
+        if reminders:
+            lines.append("Reminders (pending):")
+            for r in reminders:
+                due = r.due_at.isoformat() if r.due_at else "?"
+                where = f" @{r.chat_id}" if r.chat_id else ""
+                lines.append(f"- #{r.id} [{due}{where}] {r.text}")
+        if action_items:
+            lines.append("Action items (open):")
+            for a in action_items:
+                who = f"{a.assignee_name}: " if a.assignee_name else ""
+                due = f" (due {a.due_at.isoformat()})" if a.due_at else ""
+                lines.append(f"- #{a.id} {who}{a.text}{due}")
     return "\n".join(lines) if lines else "(no memory)"
 
 
@@ -111,9 +127,12 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     # 1. System prompt
     system_prompt = await _load_prompt(cfg.prompt_key, ctx)
 
-    # 2. Memory recall (semantic + episodic when configured)
+    # 2. Memory recall (semantic + episodic + prospective when configured)
     semantic: list[Any] = []
     episodic: list[Any] = []
+    reminders: list[Any] = []
+    action_items: list[Any] = []
+    boss_ctx = BossContext(ctx.boss.id, "boss")
     if "semantic" in (cfg.memory_scopes or []):
         try:
             semantic = await ctx.memory.recall(
@@ -128,12 +147,26 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
             )
         except Exception:
             log.exception("episodic memory recall failed")
+    if "prospective" in (cfg.memory_scopes or []):
+        try:
+            reminders = (
+                await RemindersRepo(ctx.db, boss_ctx).list(status="pending")
+            )[:10]
+        except Exception:
+            log.exception("prospective reminders recall failed")
+        try:
+            action_items = (
+                await ActionItemsRepo(ctx.db, boss_ctx).list_open()
+            )[:10]
+        except Exception:
+            log.exception("prospective action_items recall failed")
 
     msgs: list[ChatMessage] = [
         ChatMessage(role="system", content=system_prompt),
         ChatMessage(
             role="user",
-            content="Memory:\n" + _format_memory(semantic, episodic),
+            content="Memory:\n"
+            + _format_memory(semantic, episodic, reminders, action_items),
             name="memory_block",
         ),
         ChatMessage(role="user", content=event.get("text", "")),

@@ -26,9 +26,10 @@ class DMContext:
     deps_type=DMContext,
     prompt_key="dm_general",
     feature="dm_general",
-    memory_scopes=["semantic", "episodic"],
+    memory_scopes=["semantic", "episodic", "prospective"],
     tools={
         "search_history",
+        "count_messages",
         "list_groups",
         "list_reminders",
         "set_reminder",
