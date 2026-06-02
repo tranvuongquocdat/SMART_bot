@@ -35,6 +35,7 @@ from src.plugins_loader import load_all as load_plugins
 from src.scheduler import make_scheduler
 from src.security.rate_limit import InMemoryRateLimiter
 from src.services.outbound_service import OutboundService
+from src.channels.web.routes import router as web_test_router
 from src.web.routes import admin as web_admin
 from src.web.routes import api as web_api
 from src.web.routes import api_ai as web_api_ai
@@ -136,6 +137,7 @@ app.include_router(web_app.router, prefix="/app")
 app.include_router(web_api.router)
 app.include_router(web_api_ai.router)
 app.include_router(web_admin.router)
+app.include_router(web_test_router)
 
 
 @app.get("/")
