@@ -1,5 +1,5 @@
 function readCsrfCookie(): string | null {
-  const m = document.cookie.match(/(?:^|;\s*)csrf_token=([^;]+)/);
+  const m = document.cookie.match(/(?:^|;\s*)smart_csrf=([^;]+)/);
   return m ? decodeURIComponent(m[1]) : null;
 }
 
