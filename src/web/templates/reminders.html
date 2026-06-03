@@ -6,7 +6,7 @@
 
   <details class="bg-white border rounded p-3 mb-4">
     <summary class="cursor-pointer font-medium">+ Tạo nhắc mới</summary>
-    <form method="post" action="/app/reminders" class="grid grid-cols-4 gap-2 mt-3">
+    <form method="post" action="/legacy-app/reminders" class="grid grid-cols-4 gap-2 mt-3">
       <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <input name="text" required placeholder="Nội dung" class="border rounded px-2 py-1 col-span-2">
       <input name="due_at" required type="datetime-local" class="border rounded px-2 py-1">

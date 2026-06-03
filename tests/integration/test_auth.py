@@ -44,7 +44,8 @@ async def test_login_page_renders(app_client):
 @pytest.mark.asyncio
 async def test_anonymous_app_redirects_or_401(app_client):
     client, _ = app_client
-    r = client.get("/app", follow_redirects=False)
+    # /app is now the public SPA; /legacy-app is the Jinja2 app requiring auth.
+    r = client.get("/legacy-app", follow_redirects=False)
     assert r.status_code in (303, 401, 307)
 
 
@@ -73,7 +74,7 @@ async def test_email_password_login(app_client, db_pool):
     assert r.headers["location"] == "/app"
     assert "smart_session" in r.cookies or "smart_session" in client.cookies
 
-    r2 = client.get("/app")
+    r2 = client.get("/legacy-app")
     assert r2.status_code == 200
     assert "Dashboard" in r2.text
 
@@ -136,5 +137,5 @@ async def test_logout_clears_session(app_client, db_pool):
     )
     assert r.status_code == 303
     # After logout the session cookie should be cleared.
-    r2 = client.get("/app", follow_redirects=False)
+    r2 = client.get("/legacy-app", follow_redirects=False)
     assert r2.status_code in (303, 401, 307)

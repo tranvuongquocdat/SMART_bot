@@ -254,7 +254,7 @@ async def reminders_create(
             dt,
             scope,
         )
-    return RedirectResponse("/app/reminders", status_code=303)
+    return RedirectResponse("/legacy-app/reminders", status_code=303)
 
 
 @router.post("/reminders/{rid}/cancel")
@@ -273,7 +273,7 @@ async def reminders_cancel(
             rid,
             ctx.boss_id,
         )
-    return RedirectResponse("/app/reminders", status_code=303)
+    return RedirectResponse("/legacy-app/reminders", status_code=303)
 
 
 # ---------- Channels ----------
@@ -377,7 +377,7 @@ async def settings_general_save(
             tz,
             language,
         )
-    return RedirectResponse("/app/settings/general", status_code=303)
+    return RedirectResponse("/legacy-app/settings/general", status_code=303)
 
 
 @router.get("/settings/account", response_class=HTMLResponse)
@@ -534,7 +534,7 @@ async def settings_ai_save(
     except Exception:
         pass
 
-    return RedirectResponse("/app/settings/ai", status_code=303)
+    return RedirectResponse("/legacy-app/settings/ai", status_code=303)
 
 
 @router.post("/settings/ai/keys")
@@ -587,4 +587,4 @@ async def settings_ai_save_keys(
     except Exception:
         pass
 
-    return RedirectResponse("/app/settings/ai", status_code=303)
+    return RedirectResponse("/legacy-app/settings/ai", status_code=303)

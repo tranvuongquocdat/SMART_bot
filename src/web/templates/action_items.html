@@ -18,7 +18,7 @@
         {% for it in items %}
         <tr class="border-t">
           <td class="p-2">{{ it.text }}</td>
-          <td class="p-2"><a class="text-blue-700 hover:underline" href="/app/groups/{{ it.chat_id }}">{{ it.group_name or it.chat_id }}</a></td>
+          <td class="p-2"><a class="text-blue-700 hover:underline" href="/legacy-app/groups/{{ it.chat_id }}">{{ it.group_name or it.chat_id }}</a></td>
           <td class="p-2">{{ it.assignee_name or '' }}</td>
           <td class="p-2 whitespace-nowrap">{% if it.due_at %}{{ it.due_at.strftime('%d/%m %H:%M') }}{% endif %}</td>
           <td class="p-2">

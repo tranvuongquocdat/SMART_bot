@@ -60,7 +60,7 @@ async def _seed_model(pool, name: str, tier: str, capabilities: list[str]) -> in
 @pytest.mark.asyncio
 async def test_settings_ai_renders(logged_in_client):
     client, _, _ = logged_in_client
-    r = client.get("/app/settings/ai")
+    r = client.get("/legacy-app/settings/ai")
     assert r.status_code == 200
     assert "smart" in r.text.lower() and "fast" in r.text.lower()
 
@@ -74,7 +74,7 @@ async def test_settings_ai_save_slots_and_cap(logged_in_client, db_pool, boss_us
 
     client, _, csrf = logged_in_client
     r = client.post(
-        "/app/settings/ai",
+        "/legacy-app/settings/ai",
         data={
             "smart_model_id": str(smart_id),
             "fast_model_id": str(fast_id),
@@ -103,7 +103,7 @@ async def test_settings_ai_save_slots_and_cap(logged_in_client, db_pool, boss_us
 async def test_settings_ai_save_keys_encrypted(logged_in_client, db_pool, boss_user):
     client, _, csrf = logged_in_client
     r = client.post(
-        "/app/settings/ai/keys",
+        "/legacy-app/settings/ai/keys",
         data={
             "key_openai": "sk-test-12345",
             "key_groq": "",
@@ -130,14 +130,14 @@ async def test_settings_ai_clear_key(logged_in_client, db_pool, boss_user):
     client, _, csrf = logged_in_client
     # Save first.
     client.post(
-        "/app/settings/ai/keys",
+        "/legacy-app/settings/ai/keys",
         data={"key_openai": "sk-x", "_csrf": csrf},
         headers={"X-CSRF-Token": csrf},
         follow_redirects=False,
     )
     # Now clear.
     r = client.post(
-        "/app/settings/ai/keys",
+        "/legacy-app/settings/ai/keys",
         data={"clear_openai": "on", "_csrf": csrf},
         headers={"X-CSRF-Token": csrf},
         follow_redirects=False,

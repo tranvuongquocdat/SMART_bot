@@ -54,17 +54,17 @@ def logged_in_client(boss_user, db_pool):
 
 
 USER_PAGES = [
-    "/app",
-    "/app/groups",
-    "/app/action-items",
-    "/app/projects",
-    "/app/reminders",
-    "/app/channels",
-    "/app/usage",
-    "/app/settings/general",
-    "/app/settings/account",
-    "/app/settings/ai",
-    "/app/subscription",
+    "/legacy-app",
+    "/legacy-app/groups",
+    "/legacy-app/action-items",
+    "/legacy-app/projects",
+    "/legacy-app/reminders",
+    "/legacy-app/channels",
+    "/legacy-app/usage",
+    "/legacy-app/settings/general",
+    "/legacy-app/settings/account",
+    "/legacy-app/settings/ai",
+    "/legacy-app/subscription",
 ]
 
 
@@ -89,7 +89,7 @@ async def test_anonymous_blocked(boss_user):
 async def test_create_and_cancel_reminder(logged_in_client, db_pool, boss_user):
     client, _, csrf = logged_in_client
     r = client.post(
-        "/app/reminders",
+        "/legacy-app/reminders",
         data={
             "text": "Họp với khách",
             "due_at": "2030-01-01T10:00",
@@ -109,7 +109,7 @@ async def test_create_and_cancel_reminder(logged_in_client, db_pool, boss_user):
     assert rid is not None
 
     r2 = client.post(
-        f"/app/reminders/{rid}/cancel",
+        f"/legacy-app/reminders/{rid}/cancel",
         data={"_csrf": csrf},
         headers={"X-CSRF-Token": csrf},
         follow_redirects=False,

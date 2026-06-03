@@ -5,7 +5,7 @@
   <h1 class="text-2xl font-semibold">Cài đặt AI</h1>
 
   {# 3-slot model picker + cost cap #}
-  <form method="post" action="/app/settings/ai" class="bg-white border rounded p-4 space-y-3">
+  <form method="post" action="/legacy-app/settings/ai" class="bg-white border rounded p-4 space-y-3">
     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
 
     <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -64,7 +64,7 @@
   </form>
 
   {# BYO API key form #}
-  <form method="post" action="/app/settings/ai/keys" class="bg-white border rounded p-4 space-y-3">
+  <form method="post" action="/legacy-app/settings/ai/keys" class="bg-white border rounded p-4 space-y-3">
     <input type="hidden" name="_csrf" value="{{ csrf_token }}">
     <h2 class="font-semibold">API key của anh (BYO)</h2>
     <p class="text-xs text-gray-500">Nhập key để dùng quota của anh thay vì quota nền tảng. Key được mã hoá (Fernet) trước khi lưu DB.</p>

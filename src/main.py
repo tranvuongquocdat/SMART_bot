@@ -132,10 +132,13 @@ if _STATIC_DIR.is_dir():
 # Web routers.
 app.include_router(web_auth.router)
 app.include_router(web_oauth.router)
-app.include_router(web_app.router, prefix="/app")
+app.include_router(web_app.router, prefix="/legacy-app")
 app.include_router(web_api.router)
 app.include_router(web_api_ai.router)
 app.include_router(web_admin.router)
+
+from src.web.routes.spa import mount_spa
+mount_spa(app)
 if settings.ENABLE_WEB_TEST_CHANNEL:
     from src.channels.web.routes import router as web_test_router, _STATIC_DIR as _web_static
     app.include_router(web_test_router)
