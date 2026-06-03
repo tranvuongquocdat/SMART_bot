@@ -3,12 +3,15 @@ import type { RouteObject } from 'react-router-dom';
 import { requireRole } from '@/lib/rbac';
 import AdminLayout from './layout';
 import GroupDetail, { groupDetailLoader } from './features/groups/group-detail';
+import ComingSoon from '@/components/coming-soon';
+import RootError from '@/components/root-error';
 
 export function adminRoutes(qc: QueryClient): RouteObject {
   return {
     path: '/app/admin',
     element: <AdminLayout />,
     loader: requireRole('boss', qc),
+    errorElement: <RootError />,
     id: 'admin',
     handle: { breadcrumb: 'Admin' },
     children: [
@@ -21,6 +24,10 @@ export function adminRoutes(qc: QueryClient): RouteObject {
         loader: groupDetailLoader(qc),
         handle: { breadcrumb: 'Group' },
       },
+      { path: 'reminders', element: <ComingSoon feature="Reminders" />, handle: { breadcrumb: 'Reminders' } },
+      { path: 'projects', element: <ComingSoon feature="Projects" />, handle: { breadcrumb: 'Projects' } },
+      { path: 'channels', element: <ComingSoon feature="Channels" />, handle: { breadcrumb: 'Channels' } },
+      { path: 'settings', element: <ComingSoon feature="Settings" />, handle: { breadcrumb: 'Settings' } },
     ],
   };
 }

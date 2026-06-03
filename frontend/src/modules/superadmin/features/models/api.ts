@@ -13,10 +13,13 @@ export type BotAccount = {
   label: string;
   handle: string;
   channel: string;
-  assigned_to: string | null;
+  account_kind: string;
+  ownership: string | null;
+  account_status: string;
   messages_in: number;
   messages_out: number;
   status: 'online' | 'warn' | 'offline';
+  last_seen_at: string | null;
 };
 
 export const slotsQuery = queryOptions({

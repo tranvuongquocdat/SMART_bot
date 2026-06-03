@@ -34,16 +34,21 @@ const columns: ColumnDef<BotAccount>[] = [
     header: 'Kênh',
     accessorKey: 'channel',
     cell: ({ row }) => (
-      <span className="inline-flex items-center gap-1.5 px-[7px] py-[1px] rounded text-[11.5px] text-muted-foreground bg-muted font-medium">
-        {CHANNEL_LABEL[row.original.channel] ?? row.original.channel}
-      </span>
+      <div className="flex flex-col gap-0.5">
+        <span className="inline-flex items-center gap-1.5 px-[7px] py-[1px] rounded text-[11.5px] text-muted-foreground bg-muted font-medium w-fit">
+          {CHANNEL_LABEL[row.original.channel] ?? row.original.channel}
+        </span>
+        <span className="text-[10.5px] text-[hsl(var(--dim))] capitalize">{row.original.account_kind}</span>
+      </div>
     ),
   },
   {
     header: 'Phân bổ',
-    accessorKey: 'assigned_to',
-    cell: ({ getValue }) => (
-      <span className={getValue() ? '' : 'text-[hsl(var(--dim))]'}>{(getValue() as string) ?? 'Chưa gán'}</span>
+    accessorKey: 'ownership',
+    cell: ({ row }) => (
+      <span className={row.original.ownership ? '' : 'text-[hsl(var(--dim))]'}>
+        {row.original.ownership ?? 'Chưa gán'}
+      </span>
     ),
   },
   {

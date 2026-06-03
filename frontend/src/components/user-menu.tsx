@@ -8,6 +8,24 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { Me } from '@/lib/auth';
 
+function readCsrfCookie(): string {
+  const m = document.cookie.match(/(?:^|;\s*)smart_csrf=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
+function handleLogout() {
+  const form = document.createElement('form');
+  form.method = 'POST';
+  form.action = '/logout';
+  const csrf = document.createElement('input');
+  csrf.type = 'hidden';
+  csrf.name = '_csrf';
+  csrf.value = readCsrfCookie();
+  form.appendChild(csrf);
+  document.body.appendChild(form);
+  form.submit();
+}
+
 export function UserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
   const initials = (String(me.id)[0] || 'U').toUpperCase();
   return (
@@ -36,7 +54,7 @@ export function UserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="text-destructive focus:text-destructive"
-          onClick={() => { window.location.href = '/auth/logout'; }}
+          onClick={handleLogout}
         >
           <LogOut className="mr-2 h-4 w-4" />Đăng xuất
         </DropdownMenuItem>
