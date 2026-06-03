@@ -31,10 +31,15 @@ async def get_current_boss(request: Request) -> BossContext:
         )
     if not row:
         raise HTTPException(status_code=401, detail="user not found")
+    # Superadmin promotion: env-allowlisted email OR explicit role column.
+    # The role column path lets the web test channel mint a superadmin without
+    # touching env (dev-mode convenience; see ENABLE_WEB_TEST_CHANNEL gate).
+    db_role = row["role"]
     role = (
         "superadmin"
         if row["email"].lower() in settings.superadmin_emails_set
-        else row["role"]
+        or db_role == "superadmin"
+        else db_role
     )
     ctx = BossContext(boss_id=int(row["id"]), user_role=role)
     request.state.boss = ctx
@@ -54,4 +59,13 @@ async def require_superadmin(
 ) -> BossContext:
     if ctx.user_role != "superadmin":
         raise HTTPException(status_code=403, detail="superadmin only")
+    return ctx
+
+
+async def require_boss(
+    ctx: BossContext = Depends(get_current_boss),
+) -> BossContext:
+    """Allow boss or superadmin (superadmin implies boss permissions)."""
+    if ctx.user_role not in ("boss", "superadmin"):
+        raise HTTPException(status_code=403, detail="boss only")
     return ctx

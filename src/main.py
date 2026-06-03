@@ -137,6 +137,9 @@ app.include_router(web_api.router)
 app.include_router(web_api_ai.router)
 app.include_router(web_admin.router)
 
+from src.web.routes import api_me
+app.include_router(api_me.router)
+
 from src.web.routes.spa import mount_spa
 mount_spa(app)
 if settings.ENABLE_WEB_TEST_CHANNEL:
