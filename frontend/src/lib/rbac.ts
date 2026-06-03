@@ -1,7 +1,9 @@
 import { QueryClient } from '@tanstack/react-query';
-import { LoaderFunction, redirect } from 'react-router-dom';
+import { redirect } from 'react-router-dom';
+import type { LoaderFunction } from 'react-router-dom';
 import { ApiError } from './api';
-import { meQuery, Me, Role } from './auth';
+import { meQuery } from './auth';
+import type { Me, Role } from './auth';
 
 export function defaultHomeFor(me: Me): string {
   return me.roles.includes('superadmin')

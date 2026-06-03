@@ -4,8 +4,12 @@ function readCsrfCookie(): string | null {
 }
 
 export class ApiError extends Error {
-  constructor(public status: number, public body: unknown) {
+  status: number;
+  body: unknown;
+  constructor(status: number, body: unknown) {
     super(`API ${status}`);
+    this.status = status;
+    this.body = body;
   }
 }
 
