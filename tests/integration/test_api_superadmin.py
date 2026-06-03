@@ -4,54 +4,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-from fastapi.testclient import TestClient
-
-from src import main as main_mod
-from src.web.security import SESSION_COOKIE, make_session
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def client(clean_db):
-    with TestClient(main_mod.app) as c:
-        yield c
-
-
-@pytest.fixture
-def logged_in_boss(client, clean_db):
-    """Seed a boss user and inject a session cookie."""
-    async def _seed():
-        async with clean_db.acquire() as c:
-            row = await c.fetchrow(
-                "INSERT INTO users (email, name, role) VALUES ($1, $2, 'boss') RETURNING id",
-                "boss-sa-test@example.com",
-                "Boss SA Test",
-            )
-            return int(row["id"])
-
-    uid = asyncio.get_event_loop().run_until_complete(_seed())
-    client.cookies.set(SESSION_COOKIE, make_session(uid))
-    return type("Boss", (), {"boss_id": uid, "user_role": "boss"})()
-
-
-@pytest.fixture
-def logged_in_superadmin(client, clean_db):
-    """Seed a superadmin user and inject a session cookie."""
-    async def _seed():
-        async with clean_db.acquire() as c:
-            row = await c.fetchrow(
-                "INSERT INTO users (email, name, role) VALUES ($1, $2, 'superadmin') RETURNING id",
-                "superadmin-sa-test@example.com",
-                "Superadmin SA Test",
-            )
-            return int(row["id"])
-
-    uid = asyncio.get_event_loop().run_until_complete(_seed())
-    client.cookies.set(SESSION_COOKIE, make_session(uid))
-    return type("Sup", (), {"boss_id": uid, "user_role": "superadmin"})()
 
 
 @pytest.fixture
