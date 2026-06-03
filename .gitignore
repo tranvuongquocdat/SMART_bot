@@ -30,3 +30,8 @@ reference for SMART/
 # Claude Code runtime + worktrees
 .claude/
 .superpowers/
+
+# frontend
+frontend/node_modules
+frontend/dist
+src/web/static/app/
