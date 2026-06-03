@@ -1,0 +1,62 @@
+@import 'tailwindcss';
+
+@font-face {
+  font-family: 'Inter var';
+  src: url('https://rsms.me/inter/font-files/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+:root {
+  --background: 240 6% 7%;
+  --bg-subtle: 240 6% 8.5%;
+  --foreground: 0 0% 98%;
+  --muted: 240 4% 12%;
+  --muted-foreground: 240 5% 60%;
+  --dim: 240 4% 38%;
+  --border: 240 5% 14%;
+  --border-strong: 240 5% 18%;
+  --card: 240 5% 9%;
+  --hover: 240 5% 11%;
+  --primary: 168 65% 55%;
+  --primary-soft: 168 50% 18%;
+  --primary-foreground: 170 80% 6%;
+  --danger: 0 60% 60%;
+  --ok: 142 50% 55%;
+  --warn: 38 88% 60%;
+  --info: 210 80% 65%;
+  --radius: 8px;
+}
+
+.light {
+  --background: 0 0% 100%;
+  --bg-subtle: 240 10% 98.5%;
+  --foreground: 240 10% 4%;
+  --muted: 240 5% 96%;
+  --muted-foreground: 240 4% 42%;
+  --dim: 240 4% 60%;
+  --border: 240 6% 92%;
+  --border-strong: 240 6% 86%;
+  --card: 0 0% 100%;
+  --hover: 240 5% 97%;
+  --primary: 168 75% 32%;
+  --primary-soft: 168 60% 94%;
+  --primary-foreground: 0 0% 100%;
+  --info: 210 80% 50%;
+  --ok: 142 50% 40%;
+  --warn: 38 88% 45%;
+  --danger: 0 60% 50%;
+}
+
+* { box-sizing: border-box; }
+html, body, #root { height: 100%; background: hsl(var(--background)); }
+body {
+  margin: 0;
+  font-family: 'Inter var', 'Inter', system-ui, sans-serif;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  color: hsl(var(--foreground));
+  font-size: 13.5px;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
