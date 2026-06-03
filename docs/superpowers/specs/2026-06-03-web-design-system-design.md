@@ -18,9 +18,13 @@ Dựng lại nền tảng frontend cho cả hai mặt web (admin dành cho boss/
 - Cài + chuẩn hoá danh sách primitive từ shadcn/ui (button, dialog, dropdown, table, sheet, command, …) cộng với một số component dùng chung custom (AppShell, DataTable, UserPicker, EmptyState, StatusDot).
 - Build pipeline tích hợp vào FastAPI: `vite build` xuất ra `src/web/static/app/`, FastAPI mount qua `StaticFiles` và catch-all cho SPA routing.
 - Auth: tái sử dụng nguyên Google OAuth + session cookie hiện tại, fetch từ React dùng `credentials: 'include'`, CSRF token đọc từ cookie sẵn có ở `src/web/security.py`.
-- Hai trang mẫu để validate hệ thống:
-  - **Super-admin · Models & Bots** (quản lý 3 slot model mặc định + danh sách bot account Zalo/Telegram + phân bổ acc-cho-boss + message count 7 ngày).
-  - **Boss · Group note viewer** (xem note 1 nhóm: tóm tắt AI, tab Tóm tắt/Dòng thời gian/Tác vụ/Nhắc lịch/Quyết định/Tệp & link, right panel stats + members + recent files).
+- **Hai module độc lập** trong cùng một SPA, gate bằng RBAC ở route loader:
+  - Module `admin/` cho boss/workspace owner — namespace `/admin/*`.
+  - Module `superadmin/` cho super-admin hệ thống — namespace `/superadmin/*`.
+  - Module dùng chung tokens, `ui/` (shadcn), `AppShell`. Mỗi module tự quản nav, routes, features riêng — dễ mở rộng module mới (`bossadmin/`, `org-admin/`, ...) mà không đụng các module cũ.
+- Hai trang mẫu để validate hệ thống (mỗi module một trang):
+  - **`/superadmin/models`** — Models & Bots (3 slot model mặc định + danh sách bot account Zalo/Telegram + phân bổ acc-cho-boss + message count 7 ngày).
+  - **`/admin/groups/:groupId`** — Group note viewer (tóm tắt AI, tab Tóm tắt/Dòng thời gian/Tác vụ/Nhắc lịch/Quyết định/Tệp & link, right panel stats + members + recent files).
 
 ### Ngoài phạm vi SP1
 - Rewrite toàn bộ admin (12 trang) — đó là **SP2** với chiến lược **big-bang** (đã chốt).
@@ -61,44 +65,86 @@ SMART_bot/
     ├── postcss.config.js
     ├── index.html
     └── src/
-        ├── main.tsx              # ReactDOM.createRoot + router
-        ├── App.tsx               # router definition
-        ├── routes/
-        │   ├── _layout.tsx       # AppShell wrap
-        │   ├── superadmin.models.tsx
-        │   └── groups.$groupId.tsx
-        ├── components/
-        │   ├── ui/               # shadcn primitives (button, dialog, …)
-        │   ├── app-shell.tsx     # sidebar + topbar + user dropdown
+        ├── main.tsx                   # ReactDOM.createRoot + router root
+        ├── App.tsx                    # gộp routes từ các module
+        ├── components/                # dùng chung mọi module
+        │   ├── ui/                    # shadcn primitives
+        │   ├── app-shell.tsx          # sidebar + topbar + user dropdown (nhận prop nav)
         │   ├── data-table.tsx
         │   ├── user-picker.tsx
         │   ├── empty-state.tsx
         │   ├── status-dot.tsx
         │   └── theme-toggle.tsx
-        ├── features/
-        │   ├── superadmin-models/
-        │   └── group-notes/
-        ├── lib/
-        │   ├── api.ts            # fetch wrapper (credentials, csrf header)
-        │   ├── auth.ts           # current-user query
-        │   ├── theme.ts          # light/dark provider + localStorage
+        ├── lib/                       # hạ tầng dùng chung
+        │   ├── api.ts                 # fetch wrapper (credentials, csrf header)
+        │   ├── auth.ts                # /api/v1/me + useCurrentUser
+        │   ├── rbac.ts                # requireRole(role), router guard loader
+        │   ├── theme.ts               # light/dark provider + localStorage
         │   └── format.ts
+        ├── modules/
+        │   ├── admin/                 # surface dành cho boss
+        │   │   ├── routes.tsx         # mảng route objects, exported
+        │   │   ├── nav.ts             # nav items hiển thị trong AppShell
+        │   │   ├── layout.tsx         # AppShell wrap, set nav=adminNav
+        │   │   └── features/
+        │   │       ├── groups/
+        │   │       │   ├── group-detail.tsx        # trang sample SP1
+        │   │       │   ├── group-summary-card.tsx
+        │   │       │   ├── group-timeline.tsx
+        │   │       │   └── api.ts                  # query/mutation cho /api/v1/admin/groups/*
+        │   │       ├── reminders/ ...               # các feature future
+        │   │       └── projects/ ...
+        │   └── superadmin/            # surface dành cho system admin
+        │       ├── routes.tsx
+        │       ├── nav.ts
+        │       ├── layout.tsx
+        │       └── features/
+        │           ├── models/
+        │           │   ├── models-page.tsx          # trang sample SP1
+        │           │   ├── slot-card.tsx
+        │           │   ├── bot-accounts-table.tsx
+        │           │   └── api.ts
+        │           ├── users/ ...
+        │           └── audit-log/ ...
         └── styles/
-            └── globals.css       # tailwind base + theme vars
+            └── globals.css            # tailwind base + theme vars
 ```
 
 **Build pipeline:**
-- Dev: `pnpm dev` chạy Vite ở `:5173`, proxy `/api/*` → FastAPI `:8000`. Lập trình live-reload.
-- Production: `pnpm build` → output thẳng vào `../src/web/static/app/`. FastAPI mount `StaticFiles(directory="src/web/static/app", html=True)` ở path `/app`, kèm một catch-all route trả `index.html` cho mọi sub-path để React Router hoạt động.
-- CI: thêm bước `pnpm install --frozen-lockfile && pnpm build` trước khi build Docker image (hoặc step deploy).
+- Dev: `pnpm dev` chạy Vite ở `:5173`, proxy `/api/*` → FastAPI `:8000`. Live-reload.
+- Production: `pnpm build` → output thẳng vào `../src/web/static/app/`. FastAPI mount `StaticFiles(directory="src/web/static/app", html=True)` ở path `/app`, kèm catch-all route trả `index.html` cho mọi sub-path (`/app/admin/*`, `/app/superadmin/*`, ...) để React Router xử lý.
+- CI: thêm bước `pnpm install --frozen-lockfile && pnpm build` trước khi build Docker image.
 - `src/web/static/app/` được gitignore; build output tạo lúc CI/deploy.
 
-## 4. Auth model
+**Module routing — pattern mở rộng:**
+- `App.tsx` import `adminRoutes` từ `modules/admin/routes.tsx` và `superadminRoutes` từ `modules/superadmin/routes.tsx`, ghép vào React Router data router.
+- Thêm module mới = tạo thư mục `modules/<name>/` với `routes.tsx + nav.ts + layout.tsx + features/`, rồi import 1 dòng vào `App.tsx`. Không cần đụng module cũ.
+- AppShell là component thuần — mỗi module truyền `nav={moduleNav}` và `roleLabel` riêng. Logic sidebar/topbar/theme/user-dropdown chia sẻ tự nhiên.
 
+## 4. Auth model + RBAC
+
+### Auth
 - Giữ nguyên Google OAuth (`src/web/routes/auth.py`) + session cookie (HttpOnly, SameSite=Lax) + CSRF token đã có.
-- Trang `index.html` của React app **không** chứa thông tin nhạy cảm. Trên load, app gọi `GET /api/v1/me`. Nếu 401, redirect về `/login` (route Jinja2 cũ — hoặc về sau port login sang React ở SP2). Nếu 200, render app.
-- Mọi fetch dùng `credentials: 'include'`. Header `X-CSRF-Token` lấy từ cookie `csrf_token` cho các request thay đổi state (POST/PATCH/DELETE).
+- Trang `index.html` của React app **không** chứa thông tin nhạy cảm. Trên load, app gọi `GET /api/v1/me`. Nếu 401, redirect về `/login` (route Jinja2 cũ — port login sang React ở SP2). Nếu 200, render app.
+- Mọi fetch dùng `credentials: 'include'`. Header `X-CSRF-Token` lấy từ cookie `csrf_token` cho POST/PATCH/DELETE.
 - Không lưu JWT, không lưu user info trong localStorage.
+
+### RBAC
+- `/api/v1/me` trả `{ id, name, email, roles: string[] }`. Role trong SP1: `'boss' | 'superadmin'`. `superadmin` ngầm có quyền của `boss` (xem được cả `/admin/*`).
+- React: helper `requireRole(role)` trong `lib/rbac.ts` là route loader chuẩn:
+  ```ts
+  export const requireRole = (role: Role): LoaderFunction => async () => {
+    const me = await queryClient.fetchQuery(meQuery);
+    if (!me.roles.includes(role)) throw redirect(defaultHomeFor(me));
+    return me;
+  };
+  ```
+- Mỗi module export route objects đã gắn sẵn loader:
+  - `modules/admin/routes.tsx` → mọi route gắn `loader: requireRole('boss')`.
+  - `modules/superadmin/routes.tsx` → mọi route gắn `loader: requireRole('superadmin')`.
+- Vào `/` mặc định: redirect tới `/superadmin/dashboard` nếu là superadmin, ngược lại `/admin/dashboard`. Logic gói trong `lib/rbac.ts:defaultHomeFor(me)`.
+- **Backend cũng phải gate**: endpoint `/api/v1/superadmin/*` decorate `Depends(require_superadmin)`; `/api/v1/admin/*` decorate `Depends(require_boss)`. Frontend RBAC chỉ để UX (không hiện link không có quyền) — backend là source-of-truth.
+- AppShell hiển thị nav theo module hiện tại (lấy từ `useModuleContext()`). Sidebar không trộn link admin + superadmin trong cùng 1 trang. Nếu user có cả 2 role, ở user dropdown có item "Chuyển sang Super-admin" / "Chuyển sang Admin" để nhảy namespace.
 
 ## 5. Design tokens
 
@@ -175,7 +221,7 @@ Custom thêm trong `components/`:
 
 ### 7.1 Super-admin · Models & Bots
 
-Route: `/app/superadmin/models`. Quyền: super-admin only (guard ở route loader: gọi `/api/v1/me` rồi check role).
+Route: `/app/superadmin/models`. Module: `superadmin`. Loader: `requireRole('superadmin')`. Truy cập trực tiếp khi không có role → redirect `/admin/dashboard`.
 
 Layout:
 - `AppShell` với nav-section "Super-admin" active item "Models & Bots".
@@ -186,7 +232,7 @@ Layout:
 - Section "Bot accounts" (DataTable): cột Account (tên + handle mono), Kênh (chip), Phân bổ, Tin nhắn 7d (số bold + mô tả), Trạng thái (status dot), action menu ⋯.
 - CTA primary "+ Kết nối account" góc phải section.
 
-API mới cần cho trang này:
+API mới cần cho trang này (tất cả gate `Depends(require_superadmin)`):
 - `GET /api/v1/superadmin/model-slots` → `[{slot, model, provider, status}]`
 - `PATCH /api/v1/superadmin/model-slots/:slot` → đổi model
 - `GET /api/v1/superadmin/bot-accounts?range=7d` → list bot accounts với stats
@@ -194,9 +240,9 @@ API mới cần cho trang này:
 - `PATCH /api/v1/superadmin/bot-accounts/:id` → cập nhật assigned_to
 - `DELETE /api/v1/superadmin/bot-accounts/:id` → xoá (đáp ứng note "ko xoá được acc tạo nhầm")
 
-### 7.2 Boss · Group note viewer
+### 7.2 Admin (boss) · Group note viewer
 
-Route: `/app/groups/:groupId`. Quyền: boss owner của group đó.
+Route: `/app/admin/groups/:groupId`. Module: `admin`. Loader: `requireRole('boss')` + check group ownership (loader fetch group meta; 403 → redirect `/admin/groups`).
 
 Layout:
 - `AppShell` với nav-section "Workspace" active item "Groups".
@@ -211,14 +257,14 @@ Layout:
   - **Phải** (sticky `top: 90px`): card 7-day stats (4 metric với trend), card members (avatar gradient + name + role + status dot), card tệp & link gần đây.
 - Mobile: right panel rơi xuống dưới timeline, single column.
 
-API mới cần:
-- `GET /api/v1/groups/:groupId` → meta nhóm
-- `GET /api/v1/groups/:groupId/summary?date=today` → tóm tắt AI
-- `GET /api/v1/groups/:groupId/items?date=today&type=*` → action items
-- `GET /api/v1/groups/:groupId/timeline?cursor=...` → message timeline với extract markers
-- `GET /api/v1/groups/:groupId/stats?range=7d` → 4 metric
-- `GET /api/v1/groups/:groupId/members` → list member với online status
-- `GET /api/v1/groups/:groupId/files?limit=10` → files & links
+API mới cần (gate `Depends(require_boss)` + ownership check):
+- `GET /api/v1/admin/groups/:groupId` → meta nhóm
+- `GET /api/v1/admin/groups/:groupId/summary?date=today` → tóm tắt AI
+- `GET /api/v1/admin/groups/:groupId/items?date=today&type=*` → action items
+- `GET /api/v1/admin/groups/:groupId/timeline?cursor=...` → message timeline với extract markers
+- `GET /api/v1/admin/groups/:groupId/stats?range=7d` → 4 metric
+- `GET /api/v1/admin/groups/:groupId/members` → list member với online status
+- `GET /api/v1/admin/groups/:groupId/files?limit=10` → files & links
 
 Các endpoint này wrap lại trạng thái đã có trong DB hiện tại; SP1 chỉ port để hai trang sample chạy được với data thật, không thay đổi schema.
 
@@ -237,8 +283,10 @@ Cả hai trang đều **mobile-first thực sự** vì boss xem nhiều qua mobi
 **Tự động:**
 - Lint (`pnpm lint`) + typecheck (`pnpm tsc --noEmit`) pass.
 - Build (`pnpm build`) ra `src/web/static/app/` không lỗi.
-- 1 Playwright test smoke: load `/app/superadmin/models` đã login → thấy "Models & Bots" + ít nhất 1 bot account row.
-- 1 Playwright test smoke: load `/app/groups/<seed-id>` → thấy tên group + summary card render.
+- Smoke Playwright `/app/superadmin/models` (login as superadmin) → thấy "Models & Bots" + ≥ 1 bot account row.
+- Smoke Playwright `/app/admin/groups/<seed-id>` (login as boss) → thấy tên group + summary card render.
+- RBAC test: login as boss → truy cập `/app/superadmin/models` → bị redirect về `/app/admin/dashboard`. Login as superadmin → `/app/admin/groups/<seed-id>` vẫn vào được (superadmin bao quyền boss).
+- Backend test: gọi `/api/v1/superadmin/model-slots` với session boss-only → 403.
 
 **Thủ công (Definition of Done):**
 - Chạy `pnpm dev`, login, mở 2 trang sample, toggle theme — không có lỗi console, transition mượt.
