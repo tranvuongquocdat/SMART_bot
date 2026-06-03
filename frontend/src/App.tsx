@@ -1,31 +1,25 @@
-import { BrowserRouter } from 'react-router-dom';
-import { AppShell } from './components/app-shell';
-import type { NavSection } from './components/app-shell';
-import { LayoutDashboard, Users } from 'lucide-react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { adminRoutes } from './modules/admin/routes';
+import { superadminRoutes } from './modules/superadmin/routes';
+import { requireAuth } from './lib/rbac';
+import { Toaster } from '@/components/ui/sonner';
 
-const nav: NavSection[] = [
-  {
-    label: 'Workspace',
-    items: [
-      { label: 'Dashboard', href: '/app/admin/dashboard', icon: LayoutDashboard },
-      { label: 'Groups', href: '/app/admin/groups', icon: Users },
-    ],
-  },
-];
+const qc = new QueryClient({
+  defaultOptions: { queries: { retry: false, staleTime: 30_000 } },
+});
+
+const router = createBrowserRouter([
+  { path: '/app', loader: requireAuth(qc), id: 'root' },
+  adminRoutes(qc),
+  superadminRoutes(qc),
+]);
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <AppShell
-        nav={nav}
-        me={{ id: 1, roles: ['boss'] }}
-        breadcrumb={<><span>Groups</span> <span className="text-[hsl(var(--dim))]">/</span> <b className="text-foreground font-medium">Phòng Kinh Doanh</b></>}
-      >
-        <div className="p-10">
-          <h1 className="text-2xl font-semibold tracking-tight">Smoke test</h1>
-          <p className="text-muted-foreground mt-1">AppShell renders</p>
-        </div>
-      </AppShell>
-    </BrowserRouter>
+    <QueryClientProvider client={qc}>
+      <RouterProvider router={router} />
+      <Toaster />
+    </QueryClientProvider>
   );
 }
