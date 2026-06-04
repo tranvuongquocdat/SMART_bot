@@ -81,6 +81,17 @@ def verify_csrf(request: Request) -> None:
     raise HTTPException(status_code=403, detail="CSRF check failed")
 
 
+def verify_json_csrf(request: Request) -> None:
+    """For JSON API mutation endpoints. Checks X-CSRF-Token header
+    against the smart_csrf cookie. Safe methods pass through."""
+    if request.method in ("GET", "HEAD", "OPTIONS"):
+        return
+    cookie_token = request.cookies.get(CSRF_COOKIE)
+    header_token = request.headers.get("X-CSRF-Token")
+    if not cookie_token or not header_token or cookie_token != header_token:
+        raise HTTPException(status_code=403, detail="invalid csrf token")
+
+
 async def csrf_middleware(request: Request, call_next):
     """Persist CSRF cookie + bridge form `_csrf` field into request.state.
 
