@@ -1,10 +1,181 @@
-import { FileText, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
+import { useState } from 'react';
+import { FileText, Link as LinkIcon, Image as ImageIcon, MoreHorizontal, UserPlus } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import { formatNumber, relativeTime } from '@/lib/format';
 import { StatusDot } from '@/components/status-dot';
+import { UserPicker, type UserPickerOption } from '@/components/user-picker';
+import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from '@/components/ui/dialog';
 import type { Stats, Member, FileItem } from './api';
+import { membersQuery, peopleSearchQuery, addMember, removeMember } from './api';
 
-export function RightPanel({ stats, members, files }: { stats?: Stats; members?: Member[]; files?: FileItem[] }) {
+// ---------------------------------------------------------------------------
+// Members panel (with add/remove)
+// ---------------------------------------------------------------------------
+
+function MembersPanel({ groupId, members }: { groupId: string; members?: Member[] }) {
+  const [addOpen, setAddOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [selectedId, setSelectedId] = useState<string | number | undefined>();
+  const [removeTarget, setRemoveTarget] = useState<Member | null>(null);
+  const qc = useQueryClient();
+
+  const peopleQuery = useQuery(peopleSearchQuery(q));
+  const options: UserPickerOption[] = (peopleQuery.data ?? []).map(p => ({
+    id: p.id,
+    label: p.display_name,
+    sub: p.external_id ?? undefined,
+  }));
+
+  const addMutation = useMutation({
+    mutationFn: () => {
+      const person = peopleQuery.data?.find(p => p.id === selectedId);
+      if (!person) throw new Error('no person selected');
+      return addMember(groupId, {
+        display_name: person.display_name,
+        external_id: person.external_id ?? undefined,
+      });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries(membersQuery(groupId));
+      toast.success('Đã thêm thành viên');
+      setAddOpen(false);
+      setSelectedId(undefined);
+      setQ('');
+    },
+    onError: () => toast.error('Thêm thất bại'),
+  });
+
+  const removeMutation = useMutation({
+    mutationFn: (mid: number) => removeMember(groupId, mid),
+    onSuccess: () => {
+      qc.invalidateQueries(membersQuery(groupId));
+      toast.success('Đã xoá thành viên');
+      setRemoveTarget(null);
+    },
+    onError: () => toast.error('Xoá thất bại'),
+  });
+
+  return (
+    <>
+      <Card
+        title={`Thành viên (${members?.length ?? 0})`}
+        action={
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setAddOpen(true)}>
+            <UserPlus className="h-3.5 w-3.5" />
+          </Button>
+        }
+      >
+        {(members?.length ?? 0) === 0 && (
+          <p className="text-xs text-muted-foreground">Chưa có dữ liệu thành viên.</p>
+        )}
+        {members?.map((m, i) => (
+          <div key={m.id} className={`flex items-center gap-2.5 py-1.5 ${i > 0 ? 'border-t border-border' : ''}`}>
+            <div className="h-[26px] w-[26px] rounded-full bg-gradient-to-br from-[hsl(168_60%_40%)] to-[hsl(220_50%_35%)] text-white text-[10.5px] font-medium tracking-tight grid place-items-center shrink-0">
+              {(m.name[0] || '?').toUpperCase()}
+            </div>
+            <div className="text-[12.5px] flex-1 min-w-0">
+              {m.name} {m.role && <span className="text-[11px] text-[hsl(var(--dim))]">· {m.role}</span>}
+            </div>
+            <div className="flex items-center gap-1">
+              <StatusDot status={m.last_seen_at ? 'ok' : 'idle'} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="h-6 w-6 p-0 opacity-0 group-hover:opacity-100">
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => setRemoveTarget(m)}
+                  >
+                    Xoá khỏi nhóm
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          </div>
+        ))}
+      </Card>
+
+      {/* Add member dialog */}
+      <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) { setSelectedId(undefined); setQ(''); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Thêm thành viên</DialogTitle>
+          </DialogHeader>
+          <div className="mt-2">
+            <UserPicker
+              options={options}
+              value={selectedId}
+              onChange={id => setSelectedId(id)}
+              onSearchChange={setQ}
+              placeholder="Tìm người dùng…"
+            />
+            <p className="text-xs text-muted-foreground mt-1.5">
+              Gõ để tìm trong workspace
+            </p>
+          </div>
+          <DialogFooter className="mt-4">
+            <Button variant="ghost" onClick={() => setAddOpen(false)}>Huỷ</Button>
+            <Button
+              disabled={!selectedId || addMutation.isPending}
+              onClick={() => addMutation.mutate()}
+            >
+              {addMutation.isPending ? 'Đang thêm…' : 'Thêm'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove confirm dialog */}
+      <Dialog open={!!removeTarget} onOpenChange={v => { if (!v) setRemoveTarget(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Xoá thành viên?</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Xoá <strong>{removeTarget?.name}</strong> khỏi nhóm này?
+          </p>
+          <DialogFooter className="mt-4">
+            <Button variant="ghost" onClick={() => setRemoveTarget(null)}>Huỷ</Button>
+            <Button
+              variant="destructive"
+              disabled={removeMutation.isPending}
+              onClick={() => removeTarget && removeMutation.mutate(removeTarget.id)}
+            >
+              {removeMutation.isPending ? 'Đang xoá…' : 'Xoá'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// RightPanel
+// ---------------------------------------------------------------------------
+
+export function RightPanel({
+  groupId,
+  stats,
+  members,
+  files,
+}: {
+  groupId?: string;
+  stats?: Stats;
+  members?: Member[];
+  files?: FileItem[];
+}) {
   return (
     <aside className="flex flex-col gap-4 sticky top-[90px] self-start">
       <Card title="7 ngày qua">
@@ -15,20 +186,28 @@ export function RightPanel({ stats, members, files }: { stats?: Stats; members?:
           <Stat label="Quyết định" value={stats?.decisions} />
         </div>
       </Card>
-      <Card title={`Thành viên (${members?.length ?? 0})`}>
-        {(members?.length ?? 0) === 0 && <p className="text-xs text-muted-foreground">Chưa có dữ liệu thành viên.</p>}
-        {members?.map((m, i) => (
-          <div key={m.id} className={`flex items-center gap-2.5 py-1.5 ${i > 0 ? 'border-t border-border' : ''}`}>
-            <div className="h-[26px] w-[26px] rounded-full bg-gradient-to-br from-[hsl(168_60%_40%)] to-[hsl(220_50%_35%)] text-white text-[10.5px] font-medium tracking-tight grid place-items-center shrink-0">
-              {(m.name[0] || '?').toUpperCase()}
+
+      {groupId ? (
+        <MembersPanel groupId={groupId} members={members} />
+      ) : (
+        <Card title={`Thành viên (${members?.length ?? 0})`}>
+          {(members?.length ?? 0) === 0 && (
+            <p className="text-xs text-muted-foreground">Chưa có dữ liệu thành viên.</p>
+          )}
+          {members?.map((m, i) => (
+            <div key={m.id} className={`flex items-center gap-2.5 py-1.5 ${i > 0 ? 'border-t border-border' : ''}`}>
+              <div className="h-[26px] w-[26px] rounded-full bg-gradient-to-br from-[hsl(168_60%_40%)] to-[hsl(220_50%_35%)] text-white text-[10.5px] font-medium tracking-tight grid place-items-center shrink-0">
+                {(m.name[0] || '?').toUpperCase()}
+              </div>
+              <div className="text-[12.5px] flex-1 min-w-0">
+                {m.name} {m.role && <span className="text-[11px] text-[hsl(var(--dim))]">· {m.role}</span>}
+              </div>
+              <StatusDot status={m.last_seen_at ? 'ok' : 'idle'} />
             </div>
-            <div className="text-[12.5px] flex-1 min-w-0">
-              {m.name} {m.role && <span className="text-[11px] text-[hsl(var(--dim))]">· {m.role}</span>}
-            </div>
-            <StatusDot status={m.last_seen_at ? 'ok' : 'idle'} />
-          </div>
-        ))}
-      </Card>
+          ))}
+        </Card>
+      )}
+
       <Card title="Tệp & link gần đây">
         <div className="flex flex-col gap-2.5 text-[13px]">
           {(files?.length ?? 0) === 0 && <p className="text-xs text-muted-foreground">Chưa có tệp nào.</p>}
@@ -48,10 +227,13 @@ export function RightPanel({ stats, members, files }: { stats?: Stats; members?:
   );
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+function Card({ title, children, action }: { title: string; children: ReactNode; action?: ReactNode }) {
   return (
     <div className="rounded-[10px] bg-card p-4 shadow-[0_0_0_1px_hsl(var(--border-strong)),0_1px_2px_rgba(0,0,0,.04)]">
-      <h3 className="text-[11px] uppercase tracking-wider text-[hsl(var(--dim))] font-medium mb-3">{title}</h3>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-[11px] uppercase tracking-wider text-[hsl(var(--dim))] font-medium">{title}</h3>
+        {action}
+      </div>
       {children}
     </div>
   );

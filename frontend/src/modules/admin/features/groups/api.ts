@@ -5,6 +5,10 @@ export type Group = {
   id: number; name: string; channel: string;
   members_count: number; messages_30d: number; last_active_at: string | null;
 };
+export type GroupListItem = {
+  id: number; name: string; channel: string;
+  members_count: number; updated_at: string | null;
+};
 export type Summary = { body: string | null; updated_at: string | null };
 export type Item = {
   id: number; type: 'task' | 'reminder' | 'decision';
@@ -18,6 +22,7 @@ export type TimelineMsg = {
 export type Stats = { messages: number; tasks: number; reminders: number; decisions: number };
 export type Member = { id: number; name: string; role: string; last_seen_at: string | null };
 export type FileItem = { id: number; kind: 'doc' | 'link' | 'image'; name: string; url: string; created_at: string };
+export type PersonResult = { id: number; display_name: string; external_id: string | null };
 
 const base = (id: string) => `/api/v1/admin/groups/${id}`;
 
@@ -47,4 +52,31 @@ export const membersQuery = (id: string) => queryOptions({
 export const filesQuery = (id: string) => queryOptions({
   queryKey: ['admin', 'group', id, 'files'],
   queryFn: () => api<FileItem[]>(`${base(id)}/files?limit=10`),
+});
+
+// SP2-4: groups list
+export const groupsListQuery = () => queryOptions({
+  queryKey: ['admin', 'groups'],
+  queryFn: () => api<GroupListItem[]>('/api/v1/admin/groups'),
+});
+
+export const createGroup = (payload: { name: string; channel: string }) =>
+  api<GroupListItem>('/api/v1/admin/groups', { method: 'POST', body: JSON.stringify(payload) });
+
+export const deleteGroup = (id: number) =>
+  api<void>(`/api/v1/admin/groups/${id}`, { method: 'DELETE' });
+
+export const addMember = (groupId: string, payload: { display_name: string; external_id?: string; role?: string }) =>
+  api<{ id: number; display_name: string; role: string | null; joined_at: string | null }>(
+    `/api/v1/admin/groups/${groupId}/members`,
+    { method: 'POST', body: JSON.stringify(payload) },
+  );
+
+export const removeMember = (groupId: string, memberId: number) =>
+  api<void>(`/api/v1/admin/groups/${groupId}/members/${memberId}`, { method: 'DELETE' });
+
+export const peopleSearchQuery = (q: string) => queryOptions({
+  queryKey: ['admin', 'people', q],
+  queryFn: () => api<PersonResult[]>(`/api/v1/admin/people?q=${encodeURIComponent(q)}`),
+  enabled: q.length >= 1,
 });

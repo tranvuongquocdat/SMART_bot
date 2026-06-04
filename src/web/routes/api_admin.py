@@ -680,6 +680,194 @@ async def get_settings_general(
     return dict(row)
 
 
+# ---------------------------------------------------------------------------
+# SP2-4: Groups list, create, delete
+# ---------------------------------------------------------------------------
+
+@router.get("/groups")
+async def groups_list(
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_boss),
+) -> list:
+    """List all group_notes rows owned by the current boss (or all for superadmin)."""
+    async with db.acquire() as c:
+        if ctx.user_role == "superadmin":
+            rows = await c.fetch(
+                """
+                SELECT gn.id,
+                       COALESCE(gn.group_name, gn.chat_id) AS name,
+                       gn.provider                          AS channel,
+                       gn.updated_at,
+                       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
+                FROM group_notes gn
+                ORDER BY gn.updated_at DESC NULLS LAST
+                """
+            )
+        else:
+            rows = await c.fetch(
+                """
+                SELECT gn.id,
+                       COALESCE(gn.group_name, gn.chat_id) AS name,
+                       gn.provider                          AS channel,
+                       gn.updated_at,
+                       (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
+                FROM group_notes gn
+                WHERE gn.boss_id = $1
+                ORDER BY gn.updated_at DESC NULLS LAST
+                """,
+                ctx.boss_id,
+            )
+    return [
+        {
+            "id": int(r["id"]),
+            "name": r["name"],
+            "channel": r["channel"],
+            "members_count": int(r["members_count"]),
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/groups", dependencies=[Depends(verify_json_csrf)], status_code=201)
+async def create_group(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_boss),
+) -> dict:
+    """Create a new group_notes row for the current boss."""
+    name = payload.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name is required")
+    channel = payload.get("channel", "web").strip() or "web"
+    # Generate a unique chat_id for manually-created groups
+    import uuid
+    chat_id = f"manual-{uuid.uuid4().hex[:12]}"
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            INSERT INTO group_notes (boss_id, provider, chat_id, group_name)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, group_name, provider, updated_at
+            """,
+            ctx.boss_id,
+            channel,
+            chat_id,
+            name,
+        )
+    return {
+        "id": int(row["id"]),
+        "name": row["group_name"],
+        "channel": row["provider"],
+        "members_count": 0,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.delete("/groups/{group_id}", dependencies=[Depends(verify_json_csrf)], status_code=204)
+async def delete_group(
+    group_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_boss),
+) -> None:
+    """Delete a group_notes row (must be owned by current boss)."""
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        await c.execute("DELETE FROM group_notes WHERE id=$1", group_id)
+
+
+# ---------------------------------------------------------------------------
+# SP2-4: Group members add/remove
+# ---------------------------------------------------------------------------
+
+@router.post("/groups/{group_id}/members", dependencies=[Depends(verify_json_csrf)], status_code=201)
+async def add_group_member(
+    group_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_boss),
+) -> dict:
+    """Add a member to a group."""
+    await _require_group_owner(group_id, ctx, db)
+    display_name = payload.get("display_name", "").strip()
+    if not display_name:
+        raise HTTPException(status_code=422, detail="display_name is required")
+    external_id = payload.get("external_id") or None
+    role = payload.get("role") or None
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            INSERT INTO group_members (group_id, display_name, external_id, role)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (group_id, external_id) DO UPDATE
+              SET display_name = EXCLUDED.display_name,
+                  role = EXCLUDED.role
+            RETURNING id, display_name, role, joined_at
+            """,
+            group_id,
+            display_name,
+            external_id,
+            role,
+        )
+    return {
+        "id": int(row["id"]),
+        "display_name": row["display_name"],
+        "role": row["role"],
+        "joined_at": row["joined_at"].isoformat() if row["joined_at"] else None,
+    }
+
+
+@router.delete("/groups/{group_id}/members/{member_id}", dependencies=[Depends(verify_json_csrf)], status_code=204)
+async def remove_group_member(
+    group_id: int,
+    member_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_boss),
+) -> None:
+    """Remove a member from a group."""
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        result = await c.execute(
+            "DELETE FROM group_members WHERE id=$1 AND group_id=$2",
+            member_id,
+            group_id,
+        )
+    if result == "DELETE 0":
+        raise HTTPException(status_code=404, detail="member not found")
+
+
+# ---------------------------------------------------------------------------
+# SP2-4: People search (for UserPicker autocomplete)
+# ---------------------------------------------------------------------------
+
+@router.get("/people")
+async def people_search(
+    q: str = Query(default="", max_length=100),
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_boss),
+) -> list:
+    """Search workspace users by display_name (ILIKE). Limit 20."""
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT id, name AS display_name, email AS external_id
+            FROM users
+            WHERE name ILIKE $1
+            ORDER BY name
+            LIMIT 20
+            """,
+            f"%{q}%",
+        )
+    return [
+        {
+            "id": int(r["id"]),
+            "display_name": r["display_name"] or r["external_id"],
+            "external_id": r["external_id"],
+        }
+        for r in rows
+    ]
+
+
 @router.patch("/settings/general", dependencies=[Depends(verify_json_csrf)])
 async def patch_settings_general(
     payload: dict,

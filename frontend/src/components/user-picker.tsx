@@ -18,11 +18,13 @@ export function UserPicker({
   options,
   value,
   onChange,
+  onSearchChange,
   placeholder = 'Chọn người…',
 }: {
   options: UserPickerOption[];
   value?: UserPickerOption['id'];
   onChange: (id: UserPickerOption['id']) => void;
+  onSearchChange?: (q: string) => void;
   placeholder?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -38,7 +40,7 @@ export function UserPicker({
       </PopoverTrigger>
       <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
         <Command>
-          <CommandInput placeholder="Tìm theo tên..." />
+          <CommandInput placeholder="Tìm theo tên..." onValueChange={onSearchChange} />
           <CommandList>
             <CommandEmpty>Không tìm thấy.</CommandEmpty>
             <CommandGroup>

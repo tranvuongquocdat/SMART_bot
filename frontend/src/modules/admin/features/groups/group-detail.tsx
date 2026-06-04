@@ -62,7 +62,7 @@ export default function GroupDetail() {
           </div>
           {timeline.data && <TimelineCard messages={timeline.data.messages} />}
         </div>
-        <RightPanel stats={stats.data} members={members.data} files={files.data} />
+        <RightPanel groupId={id} stats={stats.data} members={members.data} files={files.data} />
       </div>
     </div>
   );
