@@ -1290,3 +1290,224 @@ async def patch_action_item(
             *vals,
         )
     return _action_item_row(row)
+
+
+# ===========================================================================
+# Channels  –  GET /api/v1/admin/channels
+#              POST /api/v1/admin/channels/{provider}/connect  (stub)
+#              DELETE /api/v1/admin/channels/{id}
+# ===========================================================================
+
+def _channel_row(r: asyncpg.Record) -> dict:
+    """Serialize a bot_account_assignments + bot_accounts join row."""
+    # Use the bot_accounts status as primary health indicator
+    bot_status = r.get("bot_status") or "unknown"
+    assign_status = r.get("status") or "unknown"
+    dot: str
+    if bot_status in ("active", "online"):
+        dot = "ok"
+    elif bot_status in ("warn", "degraded"):
+        dot = "warn"
+    elif bot_status in ("inactive", "offline", "error"):
+        dot = "err"
+    else:
+        dot = "idle"
+
+    connected_at = r.get("assigned_at")
+    # Stable identifier: use "{boss_id}:{provider}" encoded as URL-safe string
+    # For DELETE we use provider as the path param since PK is (boss_id, provider).
+    return {
+        "provider": r["provider"],
+        "display_name": r.get("display_name") or None,
+        "status": bot_status,
+        "assign_status": assign_status,
+        "status_dot": dot,
+        "assignment_kind": r.get("assignment_kind"),
+        "ownership": r.get("ownership"),
+        "connected_at": connected_at.isoformat() if connected_at else None,
+    }
+
+
+@router.get("/channels")
+async def list_channels(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    """Return all bot account assignments (channels) for the current boss."""
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT baa.boss_id,
+                   baa.provider,
+                   baa.assignment_kind,
+                   baa.status,
+                   baa.assigned_at,
+                   ba.display_name,
+                   ba.status  AS bot_status,
+                   ba.account_kind,
+                   ba.ownership
+            FROM bot_account_assignments baa
+            JOIN bot_accounts ba ON ba.id = baa.bot_account_id
+            WHERE baa.boss_id = $1
+            ORDER BY baa.status, baa.provider
+            """,
+            ctx.boss_id,
+        )
+    return [_channel_row(r) for r in rows]
+
+
+@router.post("/channels/{provider}/connect", dependencies=[Depends(verify_json_csrf)])
+async def connect_channel(
+    provider: str,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),  # noqa: ARG001
+) -> dict:
+    """Kick off a channel connect flow. Currently stubbed — real OAuth/QR flows TBD."""
+    # Real implementation will return {redirect_url} or {qr_url} depending on provider.
+    # Frontend handles null redirect_url gracefully (shows "coming soon" toast).
+    return {
+        "provider": provider,
+        "redirect_url": None,
+        "qr_url": None,
+        "message": "not_implemented",
+    }
+
+
+@router.delete("/channels/{provider}", dependencies=[Depends(verify_json_csrf)])
+async def disconnect_channel(
+    provider: str,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Remove a bot account assignment (disconnect channel) by provider."""
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT boss_id FROM bot_account_assignments WHERE boss_id = $1 AND provider = $2",
+            ctx.boss_id,
+            provider,
+        )
+    if not row:
+        raise HTTPException(404, "channel assignment not found")
+    # boss_id check is implicit in the SELECT above
+
+    async with db.acquire() as c:
+        await c.execute(
+            "DELETE FROM bot_account_assignments WHERE boss_id = $1 AND provider = $2",
+            ctx.boss_id,
+            provider,
+        )
+    return {"deleted": True, "provider": provider}
+
+
+# ===========================================================================
+# Usage  –  GET /api/v1/admin/usage?range=30d
+# ===========================================================================
+
+@router.get("/usage")
+async def get_usage(
+    range: str = Query("30d", pattern=r"^\d+d$"),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Return aggregated token usage for the boss over the requested time range."""
+    try:
+        days = int(range.rstrip("d"))
+    except ValueError:
+        days = 30
+    days = max(1, min(days, 365))
+
+    async with db.acquire() as c:
+        # Per-day breakdown for DataTable / chart
+        daily_rows = await c.fetch(
+            """
+            SELECT DATE(called_at AT TIME ZONE 'UTC') AS day,
+                   SUM(tokens_in)   AS tokens_in,
+                   SUM(tokens_out)  AS tokens_out,
+                   SUM(tokens_in + tokens_out) AS tokens_total,
+                   COUNT(*)         AS messages,
+                   SUM(cost_usd)    AS cost_usd
+            FROM token_usage
+            WHERE boss_id = $1
+              AND called_at > NOW() - ($2 || ' days')::INTERVAL
+            GROUP BY day
+            ORDER BY day DESC
+            """,
+            ctx.boss_id,
+            str(days),
+        )
+
+        # Summary totals
+        totals = await c.fetchrow(
+            """
+            SELECT COALESCE(SUM(tokens_in), 0)::bigint            AS total_tokens_in,
+                   COALESCE(SUM(tokens_out), 0)::bigint           AS total_tokens_out,
+                   COALESCE(SUM(tokens_in + tokens_out), 0)::bigint AS total_tokens,
+                   COALESCE(COUNT(*), 0)::bigint                  AS total_messages,
+                   COALESCE(SUM(cost_usd), 0.0)::float            AS total_cost_usd
+            FROM token_usage
+            WHERE boss_id = $1
+              AND called_at > NOW() - ($2 || ' days')::INTERVAL
+            """,
+            ctx.boss_id,
+            str(days),
+        )
+
+    return {
+        "range_days": days,
+        "totals": {
+            "tokens_in": totals["total_tokens_in"],
+            "tokens_out": totals["total_tokens_out"],
+            "tokens": totals["total_tokens"],
+            "messages": totals["total_messages"],
+            "cost_usd": float(totals["total_cost_usd"]),
+        },
+        "daily": [
+            {
+                "date": str(r["day"]),
+                "tokens_in": int(r["tokens_in"] or 0),
+                "tokens_out": int(r["tokens_out"] or 0),
+                "tokens": int(r["tokens_total"] or 0),
+                "messages": int(r["messages"] or 0),
+                "cost_usd": float(r["cost_usd"] or 0),
+            }
+            for r in daily_rows
+        ],
+    }
+
+
+# ===========================================================================
+# Subscription  –  GET /api/v1/admin/subscription
+# ===========================================================================
+
+@router.get("/subscription")
+async def get_subscription(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Return current boss's subscription / plan info (read-only)."""
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            SELECT email,
+                   subscription_status,
+                   subscription_plan,
+                   subscription_expiry,
+                   cost_cap_usd_daily
+            FROM users
+            WHERE id = $1
+            """,
+            ctx.boss_id,
+        )
+    if not row:
+        raise HTTPException(404, "user not found")
+
+    return {
+        "billing_email": row["email"],
+        "status": row["subscription_status"] or "free",
+        "plan": row["subscription_plan"] or "free",
+        "expires_at": row["subscription_expiry"].isoformat() if row["subscription_expiry"] else None,
+        "cost_cap_usd_daily": float(row["cost_cap_usd_daily"] or 0),
+        # Future fields (billing portal, last invoice) stubbed as null
+        "last_invoice": None,
+        "upgrade_url": None,
+    }

@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings, BarChart3, CreditCard } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 export const adminNav: NavSection[] = [
@@ -13,9 +13,16 @@ export const adminNav: NavSection[] = [
     ],
   },
   {
-    label: 'Cài đặt',
+    label: 'Tài khoản',
     items: [
       { label: 'Channels', href: '/app/admin/channels', icon: LinkIcon },
+      { label: 'Usage', href: '/app/admin/usage', icon: BarChart3 },
+      { label: 'Subscription', href: '/app/admin/subscription', icon: CreditCard },
+    ],
+  },
+  {
+    label: 'Cài đặt',
+    items: [
       { label: 'Settings', href: '/app/admin/settings', icon: Settings },
     ],
   },

@@ -3,7 +3,6 @@ import type { RouteObject } from 'react-router-dom';
 import { requireRole } from '@/lib/rbac';
 import AdminLayout from './layout';
 import GroupDetail, { groupDetailLoader } from './features/groups/group-detail';
-import ComingSoon from '@/components/coming-soon';
 import RootError from '@/components/root-error';
 
 export function adminRoutes(qc: QueryClient): RouteObject {
@@ -27,7 +26,9 @@ export function adminRoutes(qc: QueryClient): RouteObject {
       { path: 'reminders', lazy: async () => ({ Component: (await import('./features/reminders/page')).default }), handle: { breadcrumb: 'Reminders' } },
       { path: 'projects', lazy: async () => ({ Component: (await import('./features/projects/page')).default }), handle: { breadcrumb: 'Projects' } },
       { path: 'action-items', lazy: async () => ({ Component: (await import('./features/action-items/page')).default }), handle: { breadcrumb: 'Action items' } },
-      { path: 'channels', element: <ComingSoon feature="Channels" />, handle: { breadcrumb: 'Channels' } },
+      { path: 'channels', lazy: async () => ({ Component: (await import('./features/channels/page')).default }), handle: { breadcrumb: 'Channels' } },
+      { path: 'usage', lazy: async () => ({ Component: (await import('./features/usage/page')).default }), handle: { breadcrumb: 'Usage' } },
+      { path: 'subscription', lazy: async () => ({ Component: (await import('./features/subscription/page')).default }), handle: { breadcrumb: 'Subscription' } },
       { path: 'settings', lazy: async () => ({ Component: (await import('./features/settings/page')).default }), handle: { breadcrumb: 'Cai dat' } },
     ],
   };
