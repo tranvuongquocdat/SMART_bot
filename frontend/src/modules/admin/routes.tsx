@@ -27,7 +27,7 @@ export function adminRoutes(qc: QueryClient): RouteObject {
       { path: 'reminders', element: <ComingSoon feature="Reminders" />, handle: { breadcrumb: 'Reminders' } },
       { path: 'projects', element: <ComingSoon feature="Projects" />, handle: { breadcrumb: 'Projects' } },
       { path: 'channels', element: <ComingSoon feature="Channels" />, handle: { breadcrumb: 'Channels' } },
-      { path: 'settings', element: <ComingSoon feature="Settings" />, handle: { breadcrumb: 'Settings' } },
+      { path: 'settings', lazy: async () => ({ Component: (await import('./features/settings/page')).default }), handle: { breadcrumb: 'Cai dat' } },
     ],
   };
 }

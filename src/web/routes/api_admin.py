@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.repositories.base import BossContext
 from src.web.deps import get_db, require_boss
+from src.web.security import verify_json_csrf
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
@@ -414,3 +416,288 @@ async def group_files(
         }
         for r in rows
     ]
+
+
+# ---------------------------------------------------------------------------
+# Settings: account  GET/PATCH /api/v1/admin/settings/account
+# ---------------------------------------------------------------------------
+
+
+@router.get("/settings/account")
+async def get_settings_account(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Return account profile (read-only fields + editable display name)."""
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            SELECT id, email, name, role,
+                   google_sub IS NOT NULL     AS google_linked,
+                   subscription_status,
+                   subscription_expiry,
+                   cost_cap_usd_daily
+            FROM users WHERE id = $1
+            """,
+            ctx.boss_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="user not found")
+    data = dict(row)
+    # Serialize datetimes
+    if data.get("subscription_expiry"):
+        data["subscription_expiry"] = data["subscription_expiry"].isoformat()
+    return data
+
+
+@router.patch("/settings/account", dependencies=[Depends(verify_json_csrf)])
+async def patch_settings_account(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Update whitelisted profile fields: name, tz, language."""
+    allowed = {"name", "tz", "language"}
+    sets = {k: v for k, v in payload.items() if k in allowed}
+    if not sets:
+        return {"updated": 0}
+    keys = list(sets.keys())
+    vals = list(sets.values())
+    col_exprs = ", ".join(f"{k}=${i + 2}" for i, k in enumerate(keys))
+    async with db.acquire() as c:
+        await c.execute(
+            f"UPDATE users SET {col_exprs} WHERE id=$1",
+            ctx.boss_id,
+            *vals,
+        )
+    return {"updated": 1}
+
+
+# ---------------------------------------------------------------------------
+# Settings: AI  GET/PATCH /api/v1/admin/settings/ai
+#              PATCH /api/v1/admin/settings/ai/keys
+# ---------------------------------------------------------------------------
+
+
+def _mask_keys(api_keys_enc: bytes | None) -> dict[str, dict]:
+    """Decrypt api_keys_enc and return per-provider {present, last_4} map.
+    Never returns raw keys. Returns empty dict on any decryption error.
+    """
+    from cryptography.fernet import Fernet
+    from src.config import settings as cfg
+
+    result: dict[str, dict] = {}
+    if not api_keys_enc:
+        return result
+    try:
+        f = Fernet(cfg.FERNET_KEY.encode())
+        data: dict[str, str] = json.loads(f.decrypt(bytes(api_keys_enc)).decode())
+    except Exception:
+        return result
+    for prov, key_val in data.items():
+        last_4 = key_val[-4:] if len(key_val) >= 4 else ""
+        result[prov] = {"present": True, "last_4": last_4}
+    return result
+
+
+@router.get("/settings/ai")
+async def get_settings_ai(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Return 3 model slots + masked API key info + available models list."""
+    async with db.acquire() as c:
+        boss = await c.fetchrow(
+            """
+            SELECT smart_model_id, fast_model_id, vision_model_id,
+                   cost_cap_usd_daily, api_keys_enc
+            FROM users WHERE id = $1
+            """,
+            ctx.boss_id,
+        )
+        models = await c.fetch(
+            """
+            SELECT id, name, provider, tier, capabilities,
+                   cost_per_1m_input_usd, cost_per_1m_output_usd, is_platform_default
+            FROM models
+            WHERE is_active = TRUE
+            ORDER BY tier, provider, name
+            """
+        )
+
+    slots = [
+        {
+            "slot": "smart",
+            "model_id": boss["smart_model_id"] if boss else None,
+        },
+        {
+            "slot": "fast",
+            "model_id": boss["fast_model_id"] if boss else None,
+        },
+        {
+            "slot": "vision",
+            "model_id": boss["vision_model_id"] if boss else None,
+        },
+    ]
+
+    keys = _mask_keys(boss["api_keys_enc"] if boss else None)
+    # Ensure all 3 standard providers appear (even if absent)
+    for prov in ("openai", "groq", "gemini"):
+        keys.setdefault(prov, {"present": False})
+
+    models_list = [
+        {
+            "id": int(m["id"]),
+            "name": m["name"],
+            "provider": m["provider"],
+            "tier": m["tier"],
+            "capabilities": list(m["capabilities"]) if m["capabilities"] else [],
+            "cost_per_1m_input_usd": float(m["cost_per_1m_input_usd"] or 0),
+            "cost_per_1m_output_usd": float(m["cost_per_1m_output_usd"] or 0),
+            "is_platform_default": bool(m["is_platform_default"]),
+        }
+        for m in models
+    ]
+
+    return {
+        "slots": slots,
+        "keys": keys,
+        "models": models_list,
+        "cost_cap_usd_daily": float(boss["cost_cap_usd_daily"] or 0) if boss else 0.0,
+    }
+
+
+@router.patch("/settings/ai", dependencies=[Depends(verify_json_csrf)])
+async def patch_settings_ai(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Update a single model slot or cost_cap_usd_daily.
+
+    Accepted payload shapes:
+      {slot: 'smart'|'fast'|'vision', model_id: int|null}
+      {cost_cap_usd_daily: float}
+    """
+    slot = payload.get("slot")
+    model_id = payload.get("model_id")
+    cap = payload.get("cost_cap_usd_daily")
+
+    slot_col_map = {"smart": "smart_model_id", "fast": "fast_model_id", "vision": "vision_model_id"}
+
+    if slot and slot in slot_col_map:
+        col = slot_col_map[slot]
+        async with db.acquire() as c:
+            await c.execute(
+                f"UPDATE users SET {col}=$2 WHERE id=$1",
+                ctx.boss_id,
+                int(model_id) if model_id is not None else None,
+            )
+        return {"updated": 1}
+
+    if cap is not None:
+        async with db.acquire() as c:
+            await c.execute(
+                "UPDATE users SET cost_cap_usd_daily=$2 WHERE id=$1",
+                ctx.boss_id,
+                float(cap),
+            )
+        return {"updated": 1}
+
+    return {"updated": 0}
+
+
+@router.patch("/settings/ai/keys", dependencies=[Depends(verify_json_csrf)])
+async def patch_settings_ai_keys(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Save or clear a single BYO API key for a provider.
+
+    Payload: {provider: 'openai'|'groq'|'gemini', api_key: str}
+          or {provider: '...', clear: true}
+
+    Keys are Fernet-encrypted at rest. Never echoed back.
+    """
+    from cryptography.fernet import Fernet
+    from src.config import settings as cfg
+
+    provider = payload.get("provider", "").strip().lower()
+    if provider not in ("openai", "groq", "gemini"):
+        raise HTTPException(status_code=422, detail="unknown provider")
+
+    async with db.acquire() as c:
+        blob = await c.fetchval(
+            "SELECT api_keys_enc FROM users WHERE id=$1", ctx.boss_id
+        )
+
+    f = Fernet(cfg.FERNET_KEY.encode())
+    existing: dict[str, str] = {}
+    if blob:
+        try:
+            existing = json.loads(f.decrypt(bytes(blob)).decode())
+        except Exception:
+            existing = {}
+
+    if payload.get("clear"):
+        existing.pop(provider, None)
+    else:
+        api_key = (payload.get("api_key") or "").strip()
+        if not api_key:
+            raise HTTPException(status_code=422, detail="api_key required")
+        existing[provider] = api_key
+
+    new_blob = f.encrypt(json.dumps(existing).encode())
+    async with db.acquire() as c:
+        await c.execute(
+            "UPDATE users SET api_keys_enc=$2 WHERE id=$1",
+            ctx.boss_id,
+            new_blob,
+        )
+
+    return {"updated": 1}
+
+
+# ---------------------------------------------------------------------------
+# Settings: general  GET/PATCH /api/v1/admin/settings/general
+# ---------------------------------------------------------------------------
+
+
+@router.get("/settings/general")
+async def get_settings_general(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Return general/profile settings: name, tz, language."""
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT id, name, tz, language FROM users WHERE id=$1",
+            ctx.boss_id,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail="user not found")
+    return dict(row)
+
+
+@router.patch("/settings/general", dependencies=[Depends(verify_json_csrf)])
+async def patch_settings_general(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Update name, tz, language."""
+    allowed = {"name", "tz", "language"}
+    sets = {k: v for k, v in payload.items() if k in allowed}
+    if not sets:
+        return {"updated": 0}
+    keys = list(sets.keys())
+    vals = list(sets.values())
+    col_exprs = ", ".join(f"{k}=${i + 2}" for i, k in enumerate(keys))
+    async with db.acquire() as c:
+        await c.execute(
+            f"UPDATE users SET {col_exprs} WHERE id=$1",
+            ctx.boss_id,
+            *vals,
+        )
+    return {"updated": 1}
