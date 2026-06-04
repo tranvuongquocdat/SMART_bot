@@ -889,3 +889,182 @@ async def patch_settings_general(
             *vals,
         )
     return {"updated": 1}
+
+
+# ---------------------------------------------------------------------------
+# Reminders CRUD  GET/POST /api/v1/admin/reminders
+#                 PATCH/DELETE /api/v1/admin/reminders/:id
+# ---------------------------------------------------------------------------
+
+def _reminder_row(r: asyncpg.Record) -> dict:
+    return {
+        "id": int(r["id"]),
+        "text": r["text"],
+        "due_at": r["due_at"].isoformat() if r["due_at"] else None,
+        "status": r["status"],
+        "scope": r["scope"],
+        "provider": r["provider"],
+        "chat_id": r["chat_id"],
+        "recurring": r["recurring"],
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    }
+
+
+@router.get("/reminders")
+async def list_reminders(
+    status: str = Query(default="pending"),
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_boss),
+) -> list:
+    """List reminders for current boss, optionally filtered by status."""
+    if status == "all":
+        if ctx.user_role == "superadmin":
+            where_clause = ""
+            params: list = []
+        else:
+            where_clause = "WHERE boss_id = $1"
+            params = [ctx.boss_id]
+    else:
+        if ctx.user_role == "superadmin":
+            where_clause = "WHERE status = $1"
+            params = [status]
+        else:
+            where_clause = "WHERE boss_id = $1 AND status = $2"
+            params = [ctx.boss_id, status]
+
+    query = f"""
+        SELECT id, text, due_at, status, scope, provider, chat_id, recurring, created_at
+        FROM scheduled_reminders
+        {where_clause}
+        ORDER BY due_at ASC
+        LIMIT 200
+    """
+    async with db.acquire() as c:
+        rows = await c.fetch(query, *params)
+    return [_reminder_row(r) for r in rows]
+
+
+@router.post("/reminders", dependencies=[Depends(verify_json_csrf)], status_code=201)
+async def create_reminder(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Create a new reminder."""
+    text = payload.get("text", "").strip()
+    due_at_raw = payload.get("due_at", "")
+    scope = payload.get("scope", "dm")
+
+    if not text:
+        raise HTTPException(400, "text is required")
+    if not due_at_raw:
+        raise HTTPException(400, "due_at is required")
+
+    try:
+        if isinstance(due_at_raw, str):
+            if due_at_raw.endswith("Z"):
+                due_at = datetime.fromisoformat(due_at_raw.replace("Z", "+00:00"))
+            elif "+" in due_at_raw[10:]:
+                due_at = datetime.fromisoformat(due_at_raw)
+            else:
+                due_at = datetime.fromisoformat(due_at_raw).replace(tzinfo=timezone.utc)
+        else:
+            raise ValueError("due_at must be a string")
+    except (ValueError, IndexError):
+        raise HTTPException(400, "invalid due_at format") from None
+
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            INSERT INTO scheduled_reminders (boss_id, text, due_at, scope, status, created_by_op)
+            VALUES ($1, $2, $3, $4, 'pending', 'web.api')
+            RETURNING id, text, due_at, status, scope, provider, chat_id, recurring, created_at
+            """,
+            ctx.boss_id, text, due_at, scope,
+        )
+    return _reminder_row(row)
+
+
+@router.patch("/reminders/{reminder_id}", dependencies=[Depends(verify_json_csrf)])
+async def patch_reminder(
+    reminder_id: int,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Update reminder fields: status and/or due_at."""
+    allowed = {"status", "due_at"}
+    updates = {k: v for k, v in payload.items() if k in allowed}
+    if not updates:
+        raise HTTPException(400, "no updatable fields provided")
+
+    async with db.acquire() as c:
+        existing = await c.fetchrow(
+            "SELECT id, boss_id FROM scheduled_reminders WHERE id=$1",
+            reminder_id,
+        )
+    if not existing:
+        raise HTTPException(404, "reminder not found")
+    if ctx.user_role != "superadmin" and existing["boss_id"] != ctx.boss_id:
+        raise HTTPException(403, "not your reminder")
+
+    set_parts = []
+    vals: list = []
+    param_idx = 1
+
+    if "due_at" in updates:
+        raw = updates["due_at"]
+        try:
+            if raw.endswith("Z"):
+                due_dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            elif "+" in raw[10:]:
+                due_dt = datetime.fromisoformat(raw)
+            else:
+                due_dt = datetime.fromisoformat(raw).replace(tzinfo=timezone.utc)
+        except (ValueError, IndexError):
+            raise HTTPException(400, "invalid due_at format") from None
+        set_parts.append(f"due_at=${param_idx}")
+        vals.append(due_dt)
+        param_idx += 1
+
+    if "status" in updates:
+        valid_statuses = {"pending", "done", "canceled"}
+        if updates["status"] not in valid_statuses:
+            raise HTTPException(400, f"status must be one of {valid_statuses}")
+        set_parts.append(f"status=${param_idx}")
+        vals.append(updates["status"])
+        param_idx += 1
+
+    vals.append(reminder_id)
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            f"""
+            UPDATE scheduled_reminders
+            SET {', '.join(set_parts)}
+            WHERE id=${param_idx}
+            RETURNING id, text, due_at, status, scope, provider, chat_id, recurring, created_at
+            """,
+            *vals,
+        )
+    return _reminder_row(row)
+
+
+@router.delete("/reminders/{reminder_id}", dependencies=[Depends(verify_json_csrf)], status_code=204)
+async def delete_reminder(
+    reminder_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> None:
+    """Delete a reminder (hard delete)."""
+    async with db.acquire() as c:
+        existing = await c.fetchrow(
+            "SELECT id, boss_id FROM scheduled_reminders WHERE id=$1",
+            reminder_id,
+        )
+    if not existing:
+        raise HTTPException(404, "reminder not found")
+    if ctx.user_role != "superadmin" and existing["boss_id"] != ctx.boss_id:
+        raise HTTPException(403, "not your reminder")
+
+    async with db.acquire() as c:
+        await c.execute("DELETE FROM scheduled_reminders WHERE id=$1", reminder_id)

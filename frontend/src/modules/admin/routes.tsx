@@ -24,7 +24,7 @@ export function adminRoutes(qc: QueryClient): RouteObject {
         loader: groupDetailLoader(qc),
         handle: { breadcrumb: 'Group' },
       },
-      { path: 'reminders', element: <ComingSoon feature="Reminders" />, handle: { breadcrumb: 'Reminders' } },
+      { path: 'reminders', lazy: async () => ({ Component: (await import('./features/reminders/page')).default }), handle: { breadcrumb: 'Reminders' } },
       { path: 'projects', element: <ComingSoon feature="Projects" />, handle: { breadcrumb: 'Projects' } },
       { path: 'channels', element: <ComingSoon feature="Channels" />, handle: { breadcrumb: 'Channels' } },
       { path: 'settings', lazy: async () => ({ Component: (await import('./features/settings/page')).default }), handle: { breadcrumb: 'Cai dat' } },
