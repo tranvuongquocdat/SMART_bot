@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Bell, FolderKanban, Link as LinkIcon, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 export const adminNav: NavSection[] = [
@@ -9,6 +9,7 @@ export const adminNav: NavSection[] = [
       { label: 'Groups', href: '/app/admin/groups', icon: Users },
       { label: 'Reminders', href: '/app/admin/reminders', icon: Bell },
       { label: 'Projects', href: '/app/admin/projects', icon: FolderKanban },
+      { label: 'Action items', href: '/app/admin/action-items', icon: ClipboardList },
     ],
   },
   {

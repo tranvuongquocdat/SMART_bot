@@ -85,7 +85,7 @@ def _maybe_bootstrap_test_db() -> None:
                 ) else None
             finally:
                 await test_conn.close()
-            return current_rev != "0003"
+            return current_rev != "0004"
         finally:
             await conn.close()
 
@@ -134,6 +134,7 @@ async def clean_db(db_pool):
             """
             TRUNCATE
               admin_audit_log, boss_integrations, scheduled_reminders, action_items,
+              projects,
               tool_call_log, token_usage, pins, outbound_messages, messages,
               group_note_versions, group_notes, memory_entries, linking_tokens,
               account_links, bot_account_assignments, bot_accounts, users,

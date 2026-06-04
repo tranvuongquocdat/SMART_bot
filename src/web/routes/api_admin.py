@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
+from typing import Optional
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 from src.repositories.base import BossContext
 from src.web.deps import get_db, require_boss
@@ -1068,3 +1070,223 @@ async def delete_reminder(
 
     async with db.acquire() as c:
         await c.execute("DELETE FROM scheduled_reminders WHERE id=$1", reminder_id)
+
+
+# ===========================================================================
+# Projects
+# ===========================================================================
+
+
+class _ProjectCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+
+
+def _project_row(row: asyncpg.Record) -> dict:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "items_count": row["items_count"],
+        "created_at": row["created_at"].isoformat(),
+        "updated_at": row["updated_at"].isoformat(),
+    }
+
+
+@router.get("/projects")
+async def list_projects(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    """List all projects for the authenticated boss, with action item count."""
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT p.id, p.name, p.description, p.created_at, p.updated_at,
+                   COUNT(ai.id) AS items_count
+            FROM projects p
+            LEFT JOIN action_items ai ON ai.project_id = p.id
+            WHERE p.boss_id = $1
+            GROUP BY p.id
+            ORDER BY p.created_at DESC
+            """,
+            ctx.boss_id,
+        )
+    return [_project_row(r) for r in rows]
+
+
+@router.post("/projects", dependencies=[Depends(verify_json_csrf)], status_code=201)
+async def create_project(
+    body: _ProjectCreate,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Create a new project."""
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            INSERT INTO projects (boss_id, name, description)
+            VALUES ($1, $2, $3)
+            RETURNING id, name, description, created_at, updated_at
+            """,
+            ctx.boss_id,
+            body.name.strip(),
+            body.description,
+        )
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "description": row["description"],
+        "items_count": 0,
+        "created_at": row["created_at"].isoformat(),
+        "updated_at": row["updated_at"].isoformat(),
+    }
+
+
+@router.delete("/projects/{project_id}", dependencies=[Depends(verify_json_csrf)], status_code=204)
+async def delete_project(
+    project_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> None:
+    """Delete a project (hard delete). action_items.project_id set to NULL by FK."""
+    async with db.acquire() as c:
+        existing = await c.fetchrow(
+            "SELECT id, boss_id FROM projects WHERE id=$1", project_id
+        )
+    if not existing:
+        raise HTTPException(404, "project not found")
+    if ctx.user_role != "superadmin" and existing["boss_id"] != ctx.boss_id:
+        raise HTTPException(403, "not your project")
+    async with db.acquire() as c:
+        await c.execute("DELETE FROM projects WHERE id=$1", project_id)
+
+
+# ===========================================================================
+# Action Items (boss-scoped, with filters)
+# ===========================================================================
+
+
+class _ActionItemPatch(BaseModel):
+    done: Optional[bool] = None
+    text: Optional[str] = None
+    assignee_name: Optional[str] = None
+    due_at: Optional[str] = None
+    project_id: Optional[int] = None
+
+
+def _action_item_row(row: asyncpg.Record) -> dict:
+    return {
+        "id": row["id"],
+        "group_note_id": row["group_note_id"],
+        "group_name": row["group_name"],
+        "text": row["text"],
+        "assignee_name": row["assignee_name"],
+        "due_at": row["due_at"].isoformat() if row["due_at"] else None,
+        "status": row["status"],
+        "project_id": row["project_id"],
+        "created_at": row["created_at"].isoformat(),
+    }
+
+
+@router.get("/action-items")
+async def list_action_items(
+    group_id: Optional[int] = Query(None, alias="group_id"),
+    project_id: Optional[int] = Query(None, alias="project_id"),
+    done: Optional[bool] = Query(None),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    """List action items with optional filters: group_id, project_id, done."""
+    # Map done bool to status filter
+    status_filter: Optional[str] = None
+    if done is True:
+        status_filter = "done"
+    elif done is False:
+        status_filter = "open"
+
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT ai.id, ai.group_note_id, ai.text, ai.assignee_name,
+                   ai.due_at, ai.status, ai.project_id, ai.created_at,
+                   COALESCE(gn.group_name, gn.chat_id) AS group_name
+            FROM action_items ai
+            JOIN group_notes gn ON gn.id = ai.group_note_id
+            WHERE ai.boss_id = $1
+              AND ($2::BIGINT IS NULL OR ai.group_note_id = $2)
+              AND ($3::BIGINT IS NULL OR ai.project_id = $3)
+              AND ($4::TEXT IS NULL OR ai.status = $4)
+            ORDER BY ai.status, ai.due_at NULLS LAST, ai.id DESC
+            LIMIT 500
+            """,
+            ctx.boss_id,
+            group_id,
+            project_id,
+            status_filter,
+        )
+    return [_action_item_row(r) for r in rows]
+
+
+@router.patch("/action-items/{item_id}", dependencies=[Depends(verify_json_csrf)])
+async def patch_action_item(
+    item_id: int,
+    body: _ActionItemPatch,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Patch an action item (toggle done, rename, reassign, etc.)."""
+    async with db.acquire() as c:
+        existing = await c.fetchrow(
+            "SELECT id, boss_id, status FROM action_items WHERE id=$1", item_id
+        )
+    if not existing:
+        raise HTTPException(404, "action item not found")
+    if ctx.user_role != "superadmin" and existing["boss_id"] != ctx.boss_id:
+        raise HTTPException(403, "not your item")
+
+    set_parts: list[str] = []
+    vals: list = []
+    param_idx = 1
+
+    if body.done is not None:
+        set_parts.append(f"status=${param_idx}")
+        vals.append("done" if body.done else "open")
+        param_idx += 1
+    if body.text is not None:
+        set_parts.append(f"text=${param_idx}")
+        vals.append(body.text.strip())
+        param_idx += 1
+    if body.assignee_name is not None:
+        set_parts.append(f"assignee_name=${param_idx}")
+        vals.append(body.assignee_name or None)
+        param_idx += 1
+    if body.due_at is not None:
+        set_parts.append(f"due_at=${param_idx}")
+        vals.append(body.due_at)
+        param_idx += 1
+    if body.project_id is not None:
+        set_parts.append(f"project_id=${param_idx}")
+        vals.append(body.project_id)
+        param_idx += 1
+
+    if not set_parts:
+        raise HTTPException(400, "nothing to update")
+
+    set_parts.append(f"updated_at=NOW()")
+    vals.append(item_id)
+
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            f"""
+            UPDATE action_items
+            SET {', '.join(set_parts)}
+            WHERE id=${param_idx}
+            RETURNING id, group_note_id, text, assignee_name, due_at,
+                      status, project_id, created_at,
+                      (SELECT COALESCE(gn.group_name, gn.chat_id)
+                       FROM group_notes gn WHERE gn.id = group_note_id) AS group_name
+            """,
+            *vals,
+        )
+    return _action_item_row(row)
