@@ -86,11 +86,17 @@ async def group_detail(
             row["chat_id"],
         )
 
+    async with db.acquire() as c:
+        members_count = await c.fetchval(
+            "SELECT COUNT(*) FROM group_members WHERE group_id=$1",
+            group_id,
+        ) or 0
+
     return {
         "id": row["id"],
         "name": row["name"],
         "channel": row["channel"],
-        "members_count": 0,  # no group_members table; always 0
+        "members_count": int(members_count),
         "messages_30d": int(messages_30d),
         "last_active_at": last_active.isoformat() if last_active else None,
     }
@@ -229,11 +235,17 @@ async def group_stats(
             cutoff,
         ) or 0
 
+        decisions = await c.fetchval(
+            "SELECT COUNT(*) FROM decisions WHERE group_id=$1 AND created_at>=$2",
+            group_id,
+            cutoff,
+        ) or 0
+
     return {
         "messages": int(messages),
         "tasks": int(tasks),
         "reminders": int(reminders),
-        "decisions": 0,  # no decisions table
+        "decisions": int(decisions),
     }
 
 
@@ -247,12 +259,30 @@ async def group_members(
     db: asyncpg.Pool = Depends(get_db),
     ctx: BossContext = Depends(require_boss),
 ) -> list:
-    """Return group member list.
-
-    No group_members table exists yet; always returns [].
-    """
+    """Return group member list from group_members table."""
     await _require_group_owner(group_id, ctx, db)
-    return []
+
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT id, display_name, role, last_seen_at, joined_at
+            FROM group_members
+            WHERE group_id = $1
+            ORDER BY joined_at DESC
+            """,
+            group_id,
+        )
+
+    return [
+        {
+            "id": int(r["id"]),
+            "display_name": r["display_name"],
+            "role": r["role"],
+            "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+            "joined_at": r["joined_at"].isoformat() if r["joined_at"] else None,
+        }
+        for r in rows
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -266,11 +296,27 @@ async def group_summary(
     db: asyncpg.Pool = Depends(get_db),
     ctx: BossContext = Depends(require_boss),
 ) -> dict:
-    """Return group daily summary.
-
-    No group_summaries table exists yet; returns null body.
-    """
+    """Return group daily summary from group_summaries table."""
     await _require_group_owner(group_id, ctx, db)
+
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            SELECT body, updated_at
+            FROM group_summaries
+            WHERE group_id = $1 AND date_label = $2
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            group_id,
+            date,
+        )
+
+    if row:
+        return {
+            "body": row["body"],
+            "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+        }
     return {"body": None, "updated_at": None}
 
 
@@ -303,6 +349,15 @@ async def group_items(
                    created_at
             FROM action_items
             WHERE group_note_id = $1
+            UNION ALL
+            SELECT id,
+                   'decision'                          AS type,
+                   text,
+                   COALESCE(decided_by, '')            AS assignee,
+                   NULL                                AS due_at,
+                   created_at
+            FROM decisions
+            WHERE group_id = $1
             ORDER BY created_at DESC
             LIMIT 100
             """,
@@ -333,9 +388,29 @@ async def group_files(
     db: asyncpg.Pool = Depends(get_db),
     ctx: BossContext = Depends(require_boss),
 ) -> list:
-    """Return group file artifacts.
-
-    No group_artifacts table exists yet; returns [].
-    """
+    """Return group file artifacts from group_artifacts table."""
     await _require_group_owner(group_id, ctx, db)
-    return []
+
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT id, kind, name, url, created_at
+            FROM group_artifacts
+            WHERE group_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2
+            """,
+            group_id,
+            limit,
+        )
+
+    return [
+        {
+            "id": int(r["id"]),
+            "kind": r["kind"],
+            "name": r["name"],
+            "url": r["url"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]

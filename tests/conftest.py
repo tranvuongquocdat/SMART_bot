@@ -75,15 +75,17 @@ def _maybe_bootstrap_test_db() -> None:
             if not exists:
                 await conn.execute(f'CREATE DATABASE "{target_db}"')
                 return True  # newly created → needs migrations
-            # Already exists; check if schema is applied.
+            # Already exists; check if alembic is at head revision.
             test_conn = await asyncpg.connect(TEST_DSN)
             try:
-                has_users = await test_conn.fetchval(
-                    "SELECT to_regclass('public.users') IS NOT NULL"
-                )
+                current_rev = await test_conn.fetchval(
+                    "SELECT version_num FROM alembic_version LIMIT 1"
+                ) if await test_conn.fetchval(
+                    "SELECT to_regclass('public.alembic_version') IS NOT NULL"
+                ) else None
             finally:
                 await test_conn.close()
-            return not has_users
+            return current_rev != "0003"
         finally:
             await conn.close()
 
