@@ -539,6 +539,142 @@ async def delete_bot_account(
 
 
 # ---------------------------------------------------------------------------
+# GET /bosses — list users with role boss/superadmin
+# ---------------------------------------------------------------------------
+
+@router.get("/bosses")
+async def list_bosses(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT id, email, name, role, subscription_status, tz, created_at
+            FROM users
+            WHERE role IN ('boss', 'superadmin')
+            ORDER BY created_at DESC
+            """
+        )
+    return [
+        {
+            "id": r["id"],
+            "email": r["email"],
+            "name": r["name"],
+            "role": r["role"],
+            "subscription_status": r["subscription_status"],
+            "tz": r["tz"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# POST /bosses — create a user with role boss/superadmin
+# ---------------------------------------------------------------------------
+
+class CreateBossBody(BaseModel):
+    email: str
+    name: Optional[str] = None
+    role: str = "boss"
+
+
+@router.post(
+    "/bosses",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=201,
+)
+async def create_boss(
+    body: CreateBossBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    if body.role not in ("boss", "superadmin"):
+        raise HTTPException(status_code=400, detail="role must be boss or superadmin")
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM users WHERE email = $1", body.email.lower())
+        if existing:
+            raise HTTPException(status_code=409, detail="email already exists")
+        new_id = await c.fetchval(
+            """
+            INSERT INTO users (email, name, role)
+            VALUES ($1, $2, $3)
+            RETURNING id
+            """,
+            body.email.lower(),
+            body.name,
+            body.role,
+        )
+    return {"id": new_id}
+
+
+# ---------------------------------------------------------------------------
+# PATCH /bosses/:id — update name, role, or timezone
+# ---------------------------------------------------------------------------
+
+class PatchBossBody(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    tz: Optional[str] = None
+
+
+@router.patch(
+    "/bosses/{boss_id}",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def patch_boss(
+    boss_id: int,
+    body: PatchBossBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    if body.role is not None and body.role not in ("boss", "superadmin"):
+        raise HTTPException(status_code=400, detail="role must be boss or superadmin")
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM users WHERE id = $1", boss_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="user not found")
+        await c.execute(
+            """
+            UPDATE users
+            SET name       = COALESCE($2, name),
+                role       = COALESCE($3, role),
+                tz         = COALESCE($4, tz)
+            WHERE id = $1
+            """,
+            boss_id,
+            body.name,
+            body.role,
+            body.tz,
+        )
+    return {"id": boss_id, "ok": True}
+
+
+# ---------------------------------------------------------------------------
+# DELETE /bosses/:id — delete (self-delete blocked)
+# ---------------------------------------------------------------------------
+
+@router.delete(
+    "/bosses/{boss_id}",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=204,
+)
+async def delete_boss(
+    boss_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_superadmin),
+) -> None:
+    if boss_id == ctx.boss_id:
+        raise HTTPException(status_code=400, detail="cannot delete yourself")
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM users WHERE id = $1", boss_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="user not found")
+        await c.execute("DELETE FROM users WHERE id = $1", boss_id)
+
+
+# ---------------------------------------------------------------------------
 # GET /bot-accounts/:id/messages — recent messages for a bot account
 # Note: No dedicated per-account messages table exists yet; returns empty list.
 # ---------------------------------------------------------------------------

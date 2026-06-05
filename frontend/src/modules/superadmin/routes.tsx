@@ -17,7 +17,7 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
       { index: true, lazy: async () => ({ Component: (await import('./features/models/page')).default }) },
       { path: 'models', lazy: async () => ({ Component: (await import('./features/models/page')).default }), handle: { breadcrumb: 'Models' } },
       { path: 'bot-accounts', lazy: async () => ({ Component: (await import('./features/bot-accounts/page')).default }), handle: { breadcrumb: 'Bot accounts' } },
-      { path: 'users', element: <ComingSoon feature="Users" />, handle: { breadcrumb: 'Users' } },
+      { path: 'bosses', lazy: async () => ({ Component: (await import('./features/bosses/page')).default }), handle: { breadcrumb: 'Bosses' } },
       { path: 'audit', element: <ComingSoon feature="Audit log" />, handle: { breadcrumb: 'Audit log' } },
       { path: 'usage', element: <ComingSoon feature="Usage" />, handle: { breadcrumb: 'Usage' } },
     ],

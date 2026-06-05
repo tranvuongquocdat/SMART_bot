@@ -7,7 +7,7 @@ export const superadminNav: NavSection[] = [
     items: [
       { label: 'Models', href: '/app/superadmin/models', icon: Cpu },
       { label: 'Bot accounts', href: '/app/superadmin/bot-accounts', icon: Bot },
-      { label: 'Users', href: '/app/superadmin/users', icon: UserCog },
+      { label: 'Bosses', href: '/app/superadmin/bosses', icon: UserCog },
       { label: 'Audit log', href: '/app/superadmin/audit', icon: FileText },
       { label: 'Usage', href: '/app/superadmin/usage', icon: BarChart3 },
     ],
