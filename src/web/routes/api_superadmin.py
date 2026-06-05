@@ -435,3 +435,125 @@ async def list_bot_accounts(
             "last_seen_at": last.isoformat() if last else None,
         })
     return out
+
+
+# ---------------------------------------------------------------------------
+# POST /bot-accounts — create a new bot account connection record
+# ---------------------------------------------------------------------------
+
+class CreateBotAccountBody(BaseModel):
+    provider: str  # zalo | telegram | lark
+    label: str
+    handle: str
+    account_kind: str = "personal"  # personal | official
+    ownership: Optional[str] = None
+
+
+@router.post(
+    "/bot-accounts",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=201,
+)
+async def create_bot_account(
+    body: CreateBotAccountBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        new_id = await c.fetchval(
+            """
+            INSERT INTO bot_accounts
+              (provider, provider_user_id, display_name, account_kind, ownership, status)
+            VALUES ($1, $2, $3, $4, $5, 'active')
+            RETURNING id
+            """,
+            body.provider,
+            body.handle,
+            body.label,
+            body.account_kind,
+            body.ownership,
+        )
+    return {"id": new_id}
+
+
+# ---------------------------------------------------------------------------
+# PATCH /bot-accounts/:id — update label, ownership, account_kind
+# ---------------------------------------------------------------------------
+
+class PatchBotAccountBody(BaseModel):
+    label: Optional[str] = None
+    ownership: Optional[str] = None
+    account_kind: Optional[str] = None
+
+
+@router.patch(
+    "/bot-accounts/{account_id}",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def patch_bot_account(
+    account_id: int,
+    body: PatchBotAccountBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM bot_accounts WHERE id = $1", account_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="bot account not found")
+        await c.execute(
+            """
+            UPDATE bot_accounts
+            SET display_name  = COALESCE($2, display_name),
+                ownership     = COALESCE($3, ownership),
+                account_kind  = COALESCE($4, account_kind),
+                updated_at    = NOW()
+            WHERE id = $1
+            """,
+            account_id,
+            body.label,
+            body.ownership,
+            body.account_kind,
+        )
+    return {"id": account_id, "ok": True}
+
+
+# ---------------------------------------------------------------------------
+# DELETE /bot-accounts/:id
+# ---------------------------------------------------------------------------
+
+@router.delete(
+    "/bot-accounts/{account_id}",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=204,
+)
+async def delete_bot_account(
+    account_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> None:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM bot_accounts WHERE id = $1", account_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="bot account not found")
+        await c.execute("DELETE FROM bot_accounts WHERE id = $1", account_id)
+
+
+# ---------------------------------------------------------------------------
+# GET /bot-accounts/:id/messages — recent messages for a bot account
+# Note: No dedicated per-account messages table exists yet; returns empty list.
+# ---------------------------------------------------------------------------
+
+@router.get("/bot-accounts/{account_id}/messages")
+async def list_bot_account_messages(
+    account_id: int,
+    limit: int = 50,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM bot_accounts WHERE id = $1", account_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="bot account not found")
+        # No per-account messages table exists yet; return empty list.
+        # TODO(SP3+): query chat_messages or inbound_events filtered by bot_account_id.
+    return []
