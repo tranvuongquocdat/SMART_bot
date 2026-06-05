@@ -693,3 +693,379 @@ async def list_bot_account_messages(
         # No per-account messages table exists yet; return empty list.
         # TODO(SP3+): query chat_messages or inbound_events filtered by bot_account_id.
     return []
+
+
+# ===========================================================================
+# Prompts  (versioned — each key has many rows; one has is_active=TRUE)
+# ===========================================================================
+
+@router.get("/prompts")
+async def list_prompts(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    """Return all prompt rows ordered by key / version desc."""
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, key, version, is_active, notes, created_at FROM prompts ORDER BY key, version DESC"
+        )
+    return [
+        {
+            "id": r["id"],
+            "key": r["key"],
+            "version": r["version"],
+            "is_active": r["is_active"],
+            "notes": r["notes"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/prompts/{prompt_id}")
+async def get_prompt(
+    prompt_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        row = await c.fetchrow("SELECT * FROM prompts WHERE id = $1", prompt_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="prompt not found")
+    return {
+        "id": row["id"],
+        "key": row["key"],
+        "version": row["version"],
+        "body": row["body"],
+        "is_active": row["is_active"],
+        "notes": row["notes"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "created_by": row["created_by"],
+    }
+
+
+class CreatePromptBody(BaseModel):
+    key: str
+    body: str
+    notes: Optional[str] = None
+
+
+@router.post(
+    "/prompts",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=201,
+)
+async def create_prompt(
+    body: CreatePromptBody,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        max_ver = await c.fetchval(
+            "SELECT COALESCE(MAX(version), 0) FROM prompts WHERE key = $1", body.key
+        )
+        new_id = await c.fetchval(
+            """
+            INSERT INTO prompts (key, version, body, is_active, notes, created_by)
+            VALUES ($1, $2, $3, FALSE, $4, $5)
+            RETURNING id
+            """,
+            body.key,
+            int(max_ver or 0) + 1,
+            body.body,
+            body.notes,
+            ctx.boss_id,
+        )
+    return {"id": new_id}
+
+
+class PatchPromptBody(BaseModel):
+    body: Optional[str] = None
+    notes: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+@router.patch(
+    "/prompts/{prompt_id}",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def patch_prompt(
+    prompt_id: int,
+    body: PatchPromptBody,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_superadmin),
+) -> dict:
+    """Update body/notes in place, OR activate (deactivates all siblings for same key)."""
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT * FROM prompts WHERE id = $1", prompt_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="prompt not found")
+
+        if body.is_active is True:
+            # Deactivate all versions for same key first
+            await c.execute(
+                "UPDATE prompts SET is_active = FALSE WHERE key = $1", existing["key"]
+            )
+            await c.execute("UPDATE prompts SET is_active = TRUE WHERE id = $1", prompt_id)
+
+        updates: list[str] = []
+        params: list = [prompt_id]
+        if body.body is not None:
+            params.append(body.body)
+            updates.append(f"body = ${len(params)}")
+        if body.notes is not None:
+            params.append(body.notes)
+            updates.append(f"notes = ${len(params)}")
+
+        if updates:
+            await c.execute(
+                f"UPDATE prompts SET {', '.join(updates)} WHERE id = $1",
+                *params,
+            )
+    return {"id": prompt_id, "ok": True}
+
+
+@router.delete(
+    "/prompts/{prompt_id}",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=204,
+)
+async def delete_prompt(
+    prompt_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> None:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM prompts WHERE id = $1", prompt_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="prompt not found")
+        await c.execute("DELETE FROM prompts WHERE id = $1", prompt_id)
+
+
+# ===========================================================================
+# Note templates
+# ===========================================================================
+
+@router.get("/note-templates")
+async def list_note_templates(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch("SELECT * FROM note_templates ORDER BY name")
+    return [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "description": r["description"],
+            "is_system": r["is_system"],
+            "owner_boss_id": r["owner_boss_id"],
+            "sections_json": r["sections_json"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+class CreateNoteTemplateBody(BaseModel):
+    name: str
+    description: Optional[str] = None
+    is_system: bool = False
+    sections_json: list = []
+
+
+@router.post(
+    "/note-templates",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=201,
+)
+async def create_note_template(
+    body: CreateNoteTemplateBody,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        new_id = await c.fetchval(
+            """
+            INSERT INTO note_templates (name, description, is_system, owner_boss_id, sections_json)
+            VALUES ($1, $2, $3, $4, $5::jsonb)
+            RETURNING id
+            """,
+            body.name,
+            body.description,
+            body.is_system,
+            ctx.boss_id if not body.is_system else None,
+            json.dumps(body.sections_json),
+        )
+    return {"id": new_id}
+
+
+class PatchNoteTemplateBody(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    sections_json: Optional[list] = None
+
+
+@router.patch(
+    "/note-templates/{template_id}",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def patch_note_template(
+    template_id: int,
+    body: PatchNoteTemplateBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM note_templates WHERE id = $1", template_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="note_template not found")
+        sections_json_str = json.dumps(body.sections_json) if body.sections_json is not None else None
+        await c.execute(
+            """
+            UPDATE note_templates
+            SET name          = COALESCE($2, name),
+                description   = COALESCE($3, description),
+                sections_json = COALESCE($4::jsonb, sections_json),
+                updated_at    = NOW()
+            WHERE id = $1
+            """,
+            template_id,
+            body.name,
+            body.description,
+            sections_json_str,
+        )
+    return {"id": template_id, "ok": True}
+
+
+@router.delete(
+    "/note-templates/{template_id}",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=204,
+)
+async def delete_note_template(
+    template_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> None:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM note_templates WHERE id = $1", template_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="note_template not found")
+        await c.execute("DELETE FROM note_templates WHERE id = $1", template_id)
+
+
+# ===========================================================================
+# Agent triggers
+# ===========================================================================
+
+@router.get("/agent-triggers")
+async def list_agent_triggers(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch("SELECT * FROM agent_triggers ORDER BY op_name")
+    return [
+        {
+            "id": r["id"],
+            "op_name": r["op_name"],
+            "event_name": r["event_name"],
+            "debounce_json": r["debounce_json"],
+            "threshold_json": r["threshold_json"],
+            "enabled": r["enabled"],
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+class CreateAgentTriggerBody(BaseModel):
+    op_name: str
+    event_name: str
+    debounce_json: Optional[dict] = None
+    threshold_json: Optional[dict] = None
+    enabled: bool = True
+
+
+@router.post(
+    "/agent-triggers",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=201,
+)
+async def create_agent_trigger(
+    body: CreateAgentTriggerBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        new_id = await c.fetchval(
+            """
+            INSERT INTO agent_triggers (op_name, event_name, debounce_json, threshold_json, enabled)
+            VALUES ($1, $2, $3::jsonb, $4::jsonb, $5)
+            RETURNING id
+            """,
+            body.op_name,
+            body.event_name,
+            json.dumps(body.debounce_json) if body.debounce_json is not None else None,
+            json.dumps(body.threshold_json) if body.threshold_json is not None else None,
+            body.enabled,
+        )
+    return {"id": new_id}
+
+
+class PatchAgentTriggerBody(BaseModel):
+    debounce_json: Optional[dict] = None
+    threshold_json: Optional[dict] = None
+    enabled: Optional[bool] = None
+
+
+@router.patch(
+    "/agent-triggers/{trigger_id}",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def patch_agent_trigger(
+    trigger_id: int,
+    body: PatchAgentTriggerBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM agent_triggers WHERE id = $1", trigger_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="agent_trigger not found")
+        debounce_str = json.dumps(body.debounce_json) if body.debounce_json is not None else None
+        threshold_str = json.dumps(body.threshold_json) if body.threshold_json is not None else None
+        await c.execute(
+            """
+            UPDATE agent_triggers
+            SET enabled        = COALESCE($2, enabled),
+                debounce_json  = COALESCE($3::jsonb, debounce_json),
+                threshold_json = COALESCE($4::jsonb, threshold_json),
+                updated_at     = NOW()
+            WHERE id = $1
+            """,
+            trigger_id,
+            body.enabled,
+            debounce_str,
+            threshold_str,
+        )
+    return {"id": trigger_id, "ok": True}
+
+
+@router.delete(
+    "/agent-triggers/{trigger_id}",
+    dependencies=[Depends(verify_json_csrf)],
+    status_code=204,
+)
+async def delete_agent_trigger(
+    trigger_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> None:
+    async with db.acquire() as c:
+        existing = await c.fetchrow("SELECT id FROM agent_triggers WHERE id = $1", trigger_id)
+        if not existing:
+            raise HTTPException(status_code=404, detail="agent_trigger not found")
+        await c.execute("DELETE FROM agent_triggers WHERE id = $1", trigger_id)
