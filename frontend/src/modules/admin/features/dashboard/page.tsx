@@ -64,7 +64,7 @@ export default function DashboardPage() {
 
   return (
     <motion.div
-      className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px] space-y-5"
+      className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px] mx-auto space-y-5"
       variants={staggerContainer(0.08)}
       initial="hidden"
       animate="show"
