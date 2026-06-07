@@ -95,6 +95,13 @@
 }
 
 * { box-sizing: border-box; }
+
+/* Restore Tailwind v3 default border color (was `gray-200`, v4 changed to `currentColor`).
+   Without this, `<div class="border">` from shadcn primitives renders a WHITE outline in dark mode. */
+@layer base {
+  *, ::before, ::after { border-color: hsl(var(--border)); }
+}
+
 html, body, #root { height: 100%; background: hsl(var(--background)); }
 body {
   margin: 0;
