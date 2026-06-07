@@ -44,6 +44,15 @@ def test_dashboard_returns_expected_shape(client, logged_in_boss):
     assert "decisions" in stats
     assert all(isinstance(stats[k], int) for k in ("messages", "tasks", "reminders", "decisions"))
 
+    # stats_prev_30d shape — counts for 60→30 days ago
+    prev = body["stats_prev_30d"]
+    assert "messages" in prev
+    assert "tasks" in prev
+    assert "reminders" in prev
+    assert "decisions" in prev
+    assert all(isinstance(prev[k], int) for k in ("messages", "tasks", "reminders", "decisions"))
+    assert all(prev[k] >= 0 for k in ("messages", "tasks", "reminders", "decisions"))
+
     # With fresh DB everything is empty / zero
     assert body["recent_groups"] == []
     assert body["today_items"] == []

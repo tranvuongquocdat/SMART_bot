@@ -30,6 +30,7 @@ async def get_dashboard(
     now = datetime.now(timezone.utc)
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     thirty_days_ago = now - timedelta(days=30)
+    sixty_days_ago = now - timedelta(days=60)
 
     async with db.acquire() as c:
         # Recent 5 groups
@@ -85,6 +86,28 @@ async def get_dashboard(
             ctx.boss_id, thirty_days_ago,
         )
 
+        # Previous 30-day window (60d → 30d ago) for delta %
+        prev_msg_count = await c.fetchval(
+            "SELECT count(*) FROM messages WHERE boss_id=$1 AND ts >= $2 AND ts < $3",
+            ctx.boss_id, sixty_days_ago, thirty_days_ago,
+        )
+        prev_task_count = await c.fetchval(
+            "SELECT count(*) FROM action_items WHERE boss_id=$1 AND created_at >= $2 AND created_at < $3",
+            ctx.boss_id, sixty_days_ago, thirty_days_ago,
+        )
+        prev_reminder_count = await c.fetchval(
+            "SELECT count(*) FROM scheduled_reminders WHERE boss_id=$1 AND created_at >= $2 AND created_at < $3",
+            ctx.boss_id, sixty_days_ago, thirty_days_ago,
+        )
+        prev_decision_count = await c.fetchval(
+            """
+            SELECT count(*) FROM decisions d
+            JOIN group_notes gn ON gn.id = d.group_id
+            WHERE gn.boss_id = $1 AND d.created_at >= $2 AND d.created_at < $3
+            """,
+            ctx.boss_id, sixty_days_ago, thirty_days_ago,
+        )
+
         # Recent activity: last 10 items updated
         recent_activity = await c.fetch(
             """
@@ -136,6 +159,12 @@ async def get_dashboard(
             "tasks": int(task_count or 0),
             "reminders": int(reminder_count or 0),
             "decisions": int(decision_count or 0),
+        },
+        "stats_prev_30d": {
+            "messages": int(prev_msg_count or 0),
+            "tasks": int(prev_task_count or 0),
+            "reminders": int(prev_reminder_count or 0),
+            "decisions": int(prev_decision_count or 0),
         },
         "recent_activity": [
             {
@@ -579,6 +608,7 @@ async def get_settings_account(
     if not row:
         raise HTTPException(status_code=404, detail="user not found")
     data = dict(row)
+    data["cost_cap_usd_daily"] = float(data["cost_cap_usd_daily"] or 0)
     # Serialize datetimes
     if data.get("subscription_expiry"):
         data["subscription_expiry"] = data["subscription_expiry"].isoformat()
