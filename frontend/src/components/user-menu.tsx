@@ -1,4 +1,5 @@
 import { ChevronDown, LogOut, Settings, User } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,6 +28,7 @@ function handleLogout() {
 }
 
 export function UserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
+  const navigate = useNavigate();
   const initials = (String(me.id)[0] || 'U').toUpperCase();
   return (
     <DropdownMenu>
@@ -49,8 +51,12 @@ export function UserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
-        <DropdownMenuItem><User className="mr-2 h-4 w-4" />Hồ sơ</DropdownMenuItem>
-        <DropdownMenuItem><Settings className="mr-2 h-4 w-4" />Cài đặt</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/app/admin/settings?tab=account')}>
+          <User className="mr-2 h-4 w-4" />Hồ sơ
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => navigate('/app/admin/settings?tab=general')}>
+          <Settings className="mr-2 h-4 w-4" />Cài đặt
+        </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="text-destructive focus:text-destructive"

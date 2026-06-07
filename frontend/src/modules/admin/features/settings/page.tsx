@@ -1,11 +1,16 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import AccountTab from './account-tab';
 import AiTab from './ai-tab';
 import GeneralTab from './general-tab';
 
+const VALID_TABS = ['account', 'ai', 'general'];
+
 export default function SettingsPage() {
-  const [tab, setTab] = useState('account');
+  const [searchParams] = useSearchParams();
+  const initialTab = VALID_TABS.includes(searchParams.get('tab') ?? '') ? searchParams.get('tab')! : 'account';
+  const [tab, setTab] = useState(initialTab);
 
   return (
     <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1100px]">

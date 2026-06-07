@@ -8,7 +8,7 @@ const cardVariants = cva(
     variants: {
       variant: {
         default: 'border-border',
-        glow: 'border-border relative overflow-hidden before:absolute before:inset-0 before:pointer-events-none before:bg-[radial-gradient(120px_60px_at_100%_100%,hsl(var(--primary)/0.10),transparent_70%)]',
+        glow: 'border-border relative overflow-hidden before:absolute before:inset-0 before:pointer-events-none before:bg-[radial-gradient(160px_90px_at_100%_100%,hsl(var(--primary)/0.18),transparent_70%)]',
       },
     },
     defaultVariants: { variant: 'default' },

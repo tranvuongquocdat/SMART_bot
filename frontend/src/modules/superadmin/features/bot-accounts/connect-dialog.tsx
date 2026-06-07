@@ -11,6 +11,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { createBotAccount } from './api';
 
 type Props = {
@@ -61,15 +68,16 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
             <Label>Provider</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={form.provider}
-              onChange={e => set('provider', e.target.value)}
-            >
-              <option value="zalo">Zalo cá nhân</option>
-              <option value="telegram">Telegram</option>
-              <option value="lark">Lark</option>
-            </select>
+            <Select value={form.provider} onValueChange={v => set('provider', v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="zalo">Zalo cá nhân</SelectItem>
+                <SelectItem value="telegram">Telegram</SelectItem>
+                <SelectItem value="lark">Lark</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid gap-1.5">
@@ -92,26 +100,28 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
 
           <div className="grid gap-1.5">
             <Label>Loại tài khoản</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={form.account_kind}
-              onChange={e => set('account_kind', e.target.value)}
-            >
-              <option value="personal">Personal</option>
-              <option value="official">Official</option>
-            </select>
+            <Select value={form.account_kind} onValueChange={v => set('account_kind', v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="personal">Personal</SelectItem>
+                <SelectItem value="official">Official</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid gap-1.5">
             <Label>Ownership</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={form.ownership}
-              onChange={e => set('ownership', e.target.value)}
-            >
-              <option value="platform">Platform (dùng chung)</option>
-              <option value="boss_owned">Boss owned (riêng)</option>
-            </select>
+            <Select value={form.ownership} onValueChange={v => set('ownership', v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="platform">Platform (dùng chung)</SelectItem>
+                <SelectItem value="boss_owned">Boss owned (riêng)</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

@@ -28,19 +28,18 @@ VALUES
   ($BOSS_ID, 'zalo',     'zalo-grp-103', 'Operations',          11, now() - interval '5 hours'),
   ($BOSS_ID, 'telegram', 'tg-grp-202',   'Customer support',     8, now() - interval '1 day');
 
--- 6 action items (4 due today, 2 due upcoming), all open.
-WITH g AS (SELECT id, group_name FROM group_notes WHERE boss_id=$BOSS_ID)
+-- 6 unique action items, each pinned to a specific group.
 INSERT INTO action_items (boss_id, group_note_id, text, assignee_name, due_at, status, source, created_at)
-SELECT $BOSS_ID, g.id, t.text, t.assignee, t.due, 'open', 'demo', now() - interval '1 day' * t.age
+SELECT $BOSS_ID, gn.id, t.text, t.assignee, t.due, 'open', 'demo', now() - interval '1 hour' * t.age_h
 FROM (VALUES
-  ('Review báo cáo Q2',           'Anh Tâm',   (now()::date + interval '14 hours'),                  0),
-  ('Họp team marketing',          'Chị Linh',  (now()::date + interval '15 hours 30 minutes'),       0),
-  ('Duyệt budget tháng 7',         NULL,       (now()::date + interval '17 hours'),                  1),
-  ('Phản hồi email khách VIP',     'Bot',      (now()::date + interval '23 hours'),                  0),
-  ('Chuẩn bị slide kickoff H2',    'Anh Tuấn', (now()::date + interval '2 days'),                    2),
-  ('Ký hợp đồng đối tác Z',        NULL,       (now()::date + interval '4 days'),                    3)
-) AS t(text, assignee, due, age)
-JOIN g ON g.group_name IN ('Marketing Q3','Sales VN','Operations','Product launch H2');
+  ('Review báo cáo Q2',            'Anh Tâm',   (now()::date + interval '14 hours'),               1, 'Marketing Q3'),
+  ('Họp team marketing',           'Chị Linh',  (now()::date + interval '15 hours 30 minutes'),    2, 'Marketing Q3'),
+  ('Duyệt budget tháng 7',          NULL,       (now()::date + interval '17 hours'),               3, 'Sales VN'),
+  ('Phản hồi email khách VIP',      'Bot',      (now()::date + interval '23 hours'),               5, 'Operations'),
+  ('Chuẩn bị slide kickoff H2',     'Anh Tuấn', (now()::date + interval '1 day 10 hours'),         8, 'Product launch H2'),
+  ('Ký hợp đồng đối tác Z',         NULL,       (now()::date + interval '3 days'),                12, 'Sales VN')
+) AS t(text, assignee, due, age_h, group_name)
+JOIN group_notes gn ON gn.boss_id=$BOSS_ID AND gn.group_name = t.group_name;
 
 -- 3 scheduled reminders pending.
 INSERT INTO scheduled_reminders (boss_id, text, due_at, scope, status, created_by_op, created_at)

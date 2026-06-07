@@ -15,6 +15,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { llmRoutesQuery, patchLlmRoute } from './api';
 import type { LlmRoute } from './api';
 
@@ -62,15 +69,16 @@ function EditRouteDialog({
         <div className="flex flex-col gap-3 mt-2">
           <div className="flex flex-col gap-1.5">
             <Label>Target tier</Label>
-            <select
-              value={form.target_tier}
-              onChange={e => set('target_tier', e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              <option value="smart">smart</option>
-              <option value="fast">fast</option>
-              <option value="vision">vision</option>
-            </select>
+            <Select value={form.target_tier} onValueChange={v => set('target_tier', v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="smart">smart</SelectItem>
+                <SelectItem value="fast">fast</SelectItem>
+                <SelectItem value="vision">vision</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Weight</Label>

@@ -15,6 +15,13 @@ import {
 import { Label } from '@/components/ui/label';
 import { slotsQuery, modelsQuery, patchModelSlot } from './api';
 import type { Slot, Model } from './api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const SLOT_ICONS = { smart: RefreshCw, fast: Zap, vision: Eye } as const;
 
@@ -60,17 +67,21 @@ function AssignSlotDialog({
                 Chưa có model nào với tier <strong>{slot.slot}</strong>. Hãy thêm model ở tab Models trước.
               </p>
             ) : (
-              <select
-                value={selectedId ?? ''}
-                onChange={e => setSelectedId(Number(e.target.value))}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              <Select
+                value={selectedId != null ? String(selectedId) : undefined}
+                onValueChange={v => setSelectedId(Number(v))}
               >
-                {eligibleModels.map(m => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} ({m.provider})
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger>
+                  <SelectValue placeholder="Chọn model" />
+                </SelectTrigger>
+                <SelectContent>
+                  {eligibleModels.map(m => (
+                    <SelectItem key={m.id} value={String(m.id)}>
+                      {m.name} ({m.provider})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             )}
           </div>
         </div>

@@ -12,6 +12,19 @@ type Item = {
   group_name: string;
 };
 
+function formatDue(iso: string): string {
+  const due = new Date(iso);
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dayDiff = Math.floor((due.getTime() - startToday) / 86_400_000);
+  const hhmm = due.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+  if (dayDiff < 0) return `Trễ · ${hhmm}`;
+  if (dayDiff === 0) return hhmm;
+  if (dayDiff === 1) return `Mai · ${hhmm}`;
+  if (dayDiff < 7) return `${dayDiff}d sau`;
+  return due.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+}
+
 export function TodayItems({ items }: { items: Item[] }) {
   return (
     <motion.div variants={fadeUp}>
@@ -42,10 +55,7 @@ export function TodayItems({ items }: { items: Item[] }) {
                   </div>
                   {it.due_at && (
                     <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5 tabular-nums">
-                      {new Date(it.due_at).toLocaleTimeString('vi-VN', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                      {formatDue(it.due_at)}
                     </span>
                   )}
                 </li>

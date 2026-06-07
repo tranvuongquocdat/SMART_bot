@@ -23,6 +23,13 @@ import {
   deleteModel,
 } from './api';
 import type { Model } from './api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 const TIER_LABELS: Record<string, string> = {
   smart: 'Smart',
@@ -99,27 +106,29 @@ function AddModelDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Tier</Label>
-              <select
-                value={form.tier}
-                onChange={e => set('tier', e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="smart">smart</option>
-                <option value="fast">fast</option>
-                <option value="vision">vision</option>
-              </select>
+              <Select value={form.tier} onValueChange={v => set('tier', v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="smart">smart</SelectItem>
+                  <SelectItem value="fast">fast</SelectItem>
+                  <SelectItem value="vision">vision</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Endpoint kind</Label>
-              <select
-                value={form.endpoint_kind}
-                onChange={e => set('endpoint_kind', e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="openai_chat">openai_chat</option>
-                <option value="google_gemini">google_gemini</option>
-                <option value="groq_chat">groq_chat</option>
-              </select>
+              <Select value={form.endpoint_kind} onValueChange={v => set('endpoint_kind', v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="openai_chat">openai_chat</SelectItem>
+                  <SelectItem value="google_gemini">google_gemini</SelectItem>
+                  <SelectItem value="groq_chat">groq_chat</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -245,15 +254,16 @@ function EditModelDialog({
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
               <Label>Tier</Label>
-              <select
-                value={form.tier}
-                onChange={e => set('tier', e.target.value)}
-                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="smart">smart</option>
-                <option value="fast">fast</option>
-                <option value="vision">vision</option>
-              </select>
+              <Select value={form.tier} onValueChange={v => set('tier', v)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="smart">smart</SelectItem>
+                  <SelectItem value="fast">fast</SelectItem>
+                  <SelectItem value="vision">vision</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label>Ctx max</Label>

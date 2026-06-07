@@ -7,6 +7,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { createGroup, groupsListQuery } from './api';
 
 const CHANNELS = [
@@ -64,16 +71,18 @@ export function CreateGroupDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="group-channel">Kênh</Label>
-            <select
-              id="group-channel"
-              value={channel}
-              onChange={e => setChannel(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
-            >
-              {CHANNELS.map(c => (
-                <option key={c.value} value={c.value}>{c.label}</option>
-              ))}
-            </select>
+            <Select value={channel} onValueChange={setChannel}>
+              <SelectTrigger id="group-channel">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CHANNELS.map(c => (
+                  <SelectItem key={c.value} value={c.value}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter className="mt-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>

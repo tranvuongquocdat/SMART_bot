@@ -16,6 +16,13 @@ import {
 } from '@/components/ui/dialog';
 import { featureBudgetsQuery, patchFeatureBudget } from './api';
 import type { FeatureBudget } from './api';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 
 function EditBudgetDialog({
   budget,
@@ -79,16 +86,20 @@ function EditBudgetDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Compression strategy</Label>
-            <select
+            <Select
               value={form.compression_strategy}
-              onChange={e => set('compression_strategy', e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              onValueChange={v => set('compression_strategy', v)}
             >
-              <option value="none">none</option>
-              <option value="truncate">truncate</option>
-              <option value="summarize">summarize</option>
-              <option value="drop_oldest">drop_oldest</option>
-            </select>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">none</SelectItem>
+                <SelectItem value="truncate">truncate</SelectItem>
+                <SelectItem value="summarize">summarize</SelectItem>
+                <SelectItem value="drop_oldest">drop_oldest</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Cache prefix hint</Label>

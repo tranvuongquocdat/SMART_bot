@@ -1,4 +1,11 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { groupsListQuery } from '../groups/api';
 import { projectsQuery } from '../projects/api';
 import type { ActionItemFilters } from './api';
@@ -24,36 +31,44 @@ export function ActionItemFiltersBar({
   return (
     <div className="flex flex-wrap gap-3 items-center">
       {/* Group filter */}
-      <select
-        value={filters.group_id ?? ''}
-        onChange={e =>
-          onChange({ ...filters, group_id: e.target.value ? Number(e.target.value) : null })
+      <Select
+        value={filters.group_id != null ? String(filters.group_id) : 'all'}
+        onValueChange={value =>
+          onChange({ ...filters, group_id: value === 'all' ? null : Number(value) })
         }
-        className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        <option value="">Tất cả nhóm</option>
-        {groups.map(g => (
-          <option key={g.id} value={g.id}>
-            {g.name}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="w-auto min-w-[150px]">
+          <SelectValue placeholder="Tất cả nhóm" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Tất cả nhóm</SelectItem>
+          {groups.map(g => (
+            <SelectItem key={g.id} value={String(g.id)}>
+              {g.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {/* Project filter */}
-      <select
-        value={filters.project_id ?? ''}
-        onChange={e =>
-          onChange({ ...filters, project_id: e.target.value ? Number(e.target.value) : null })
+      <Select
+        value={filters.project_id != null ? String(filters.project_id) : 'all'}
+        onValueChange={value =>
+          onChange({ ...filters, project_id: value === 'all' ? null : Number(value) })
         }
-        className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
       >
-        <option value="">Tất cả dự án</option>
-        {projects.map(p => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="w-auto min-w-[150px]">
+          <SelectValue placeholder="Tất cả dự án" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">Tất cả dự án</SelectItem>
+          {projects.map(p => (
+            <SelectItem key={p.id} value={String(p.id)}>
+              {p.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
 
       {/* Status toggle */}
       <div className="flex rounded-md border overflow-hidden">

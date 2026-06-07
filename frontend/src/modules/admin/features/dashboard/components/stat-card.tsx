@@ -40,7 +40,7 @@ export function StatCard({ label, value, previous }: Props) {
   return (
     <motion.div variants={fadeUp}>
       <Card variant="glow" className="px-4 py-3.5 relative">
-        <div className="absolute left-0 right-0 top-0 h-px bg-accent-gradient opacity-50" />
+        <div className="absolute left-0 right-0 top-0 h-[2px] bg-accent-gradient" />
         <div className="text-[10px] uppercase tracking-wider text-[hsl(var(--dim))] font-medium">
           {label}
         </div>

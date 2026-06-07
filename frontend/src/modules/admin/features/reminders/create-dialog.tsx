@@ -11,6 +11,13 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { createReminder, remindersQuery } from './api';
 
 export function CreateReminderDialog({
@@ -80,15 +87,15 @@ export function CreateReminderDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="reminder-scope">Phạm vi</Label>
-            <select
-              id="reminder-scope"
-              value={scope}
-              onChange={e => setScope(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              <option value="dm">DM (tin nhắn riêng)</option>
-              <option value="group">Nhóm</option>
-            </select>
+            <Select value={scope} onValueChange={setScope}>
+              <SelectTrigger id="reminder-scope">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="dm">DM (tin nhắn riêng)</SelectItem>
+                <SelectItem value="group">Nhóm</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter>
             <Button

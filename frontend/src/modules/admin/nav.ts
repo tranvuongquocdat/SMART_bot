@@ -5,25 +5,25 @@ export const adminNav: NavSection[] = [
   {
     label: 'Workspace',
     items: [
-      { label: 'Dashboard', href: '/app/admin/dashboard', icon: LayoutDashboard },
-      { label: 'Groups', href: '/app/admin/groups', icon: Users },
-      { label: 'Reminders', href: '/app/admin/reminders', icon: Bell },
-      { label: 'Projects', href: '/app/admin/projects', icon: FolderKanban },
-      { label: 'Action items', href: '/app/admin/action-items', icon: ClipboardList },
+      { label: 'Tổng quan', href: '/app/admin/dashboard', icon: LayoutDashboard },
+      { label: 'Nhóm', href: '/app/admin/groups', icon: Users },
+      { label: 'Nhắc nhở', href: '/app/admin/reminders', icon: Bell },
+      { label: 'Dự án', href: '/app/admin/projects', icon: FolderKanban },
+      { label: 'Việc cần làm', href: '/app/admin/action-items', icon: ClipboardList },
     ],
   },
   {
     label: 'Tài khoản',
     items: [
-      { label: 'Channels', href: '/app/admin/channels', icon: LinkIcon },
-      { label: 'Usage', href: '/app/admin/usage', icon: BarChart3 },
-      { label: 'Subscription', href: '/app/admin/subscription', icon: CreditCard },
+      { label: 'Kênh kết nối', href: '/app/admin/channels', icon: LinkIcon },
+      { label: 'Sử dụng', href: '/app/admin/usage', icon: BarChart3 },
+      { label: 'Gói cước', href: '/app/admin/subscription', icon: CreditCard },
     ],
   },
   {
     label: 'Cài đặt',
     items: [
-      { label: 'Settings', href: '/app/admin/settings', icon: Settings },
+      { label: 'Cài đặt', href: '/app/admin/settings', icon: Settings },
     ],
   },
 ];

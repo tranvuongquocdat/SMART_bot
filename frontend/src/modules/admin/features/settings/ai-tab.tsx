@@ -4,6 +4,13 @@ import { toast } from 'sonner';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { aiQuery, patchAiSlot, patchAiCap, patchAiKey, type ModelOption, type SlotInfo } from './api';
 
 const SLOT_LABELS: Record<string, string> = {
@@ -47,18 +54,22 @@ function SlotCard({
   return (
     <div className="rounded-lg border bg-card p-4 space-y-3">
       <p className="text-sm font-semibold">{SLOT_LABELS[slot.slot]}</p>
-      <select
-        className="w-full rounded-md border bg-background px-3 py-1.5 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        value={selected}
-        onChange={(e) => setSelected(e.target.value)}
+      <Select
+        value={selected || 'default'}
+        onValueChange={(v) => setSelected(v === 'default' ? '' : v)}
       >
-        <option value="">— mặc định nền tảng —</option>
-        {tierModels.map((m) => (
-          <option key={m.id} value={m.id.toString()}>
-            {m.provider} / {m.name}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="default">— mặc định nền tảng —</SelectItem>
+          {tierModels.map((m) => (
+            <SelectItem key={m.id} value={m.id.toString()}>
+              {m.provider} / {m.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       {dirty && (
         <Button
           size="sm"

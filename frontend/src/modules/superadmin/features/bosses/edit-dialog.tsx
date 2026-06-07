@@ -11,6 +11,13 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { patchBoss } from './api';
 import type { Boss } from './api';
 
@@ -74,14 +81,15 @@ export function EditDialog({ boss, onOpenChange }: Props) {
 
           <div className="grid gap-1.5">
             <Label>Vai trò</Label>
-            <select
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              value={form.role}
-              onChange={e => set('role', e.target.value)}
-            >
-              <option value="boss">Boss</option>
-              <option value="superadmin">Super-admin</option>
-            </select>
+            <Select value={form.role} onValueChange={v => set('role', v)}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="boss">Boss</SelectItem>
+                <SelectItem value="superadmin">Super-admin</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="grid gap-1.5">
