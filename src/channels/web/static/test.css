@@ -1,4 +1,51 @@
-.bubble-self { background: #dbeafe; align-self: flex-end; }
-.bubble-other { background: #f1f5f9; }
-.bubble-bot { background: #fef3c7; }
-.chat-item.active { background: #eff6ff; font-weight: 600; }
+/* Message bubble + chat-item theme for the test channel — matches admin dark theme. */
+
+.bubble-self {
+  background: linear-gradient(135deg, #14b8a6, #22d3ee);
+  color: #0a0a0a;
+  align-self: flex-end;
+  border-radius: 12px 12px 4px 12px;
+  padding: 7px 12px;
+  max-width: 75%;
+  word-wrap: break-word;
+}
+
+.bubble-other {
+  background: #1c1d24;
+  color: #fafafa;
+  border: 1px solid #16171c;
+  border-radius: 12px 12px 12px 4px;
+  padding: 7px 12px;
+  max-width: 75%;
+  word-wrap: break-word;
+}
+
+.bubble-bot {
+  background: rgba(20, 184, 166, 0.12);
+  color: #5eead4;
+  border: 1px solid rgba(20, 184, 166, 0.25);
+  border-radius: 12px 12px 12px 4px;
+  padding: 7px 12px;
+  max-width: 75%;
+  word-wrap: break-word;
+}
+
+.chat-item {
+  padding: 8px 12px;
+  cursor: pointer;
+  color: #9aa0aa;
+  border-left: 2px solid transparent;
+  transition: background-color 120ms, color 120ms;
+}
+
+.chat-item:hover {
+  background: #1c1d24;
+  color: #fafafa;
+}
+
+.chat-item.active {
+  background: #1c1d24;
+  color: #fafafa;
+  font-weight: 500;
+  border-left-color: #14b8a6;
+}
