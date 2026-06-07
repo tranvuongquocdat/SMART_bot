@@ -61,3 +61,9 @@ note:
 Note:
 - bấm trang admin bị lỗi:
  {"detail":"not logged in"}
+
+
+ Note:
+ - check lại xem web này đang thiếu những tính năng nào, phần nào chưa hoàn thiện so với bản đề xuất
+
+ 
