@@ -13,7 +13,7 @@ def client(clean_db):
 def test_create_and_list_users(client, clean_db):
     r = client.post(
         "/test/api/users",
-        json={"name": "Boss A", "is_boss": True},
+        json={"name": "Boss A", "role": "boss"},
     )
     assert r.status_code == 200, r.text
     uid = r.json()["id"]
@@ -24,8 +24,8 @@ def test_create_and_list_users(client, clean_db):
 
 
 def test_create_group_with_members(client, clean_db):
-    u1 = client.post("/test/api/users", json={"name": "A", "is_boss": True}).json()["id"]
-    u2 = client.post("/test/api/users", json={"name": "B", "is_boss": False}).json()["id"]
+    u1 = client.post("/test/api/users", json={"name": "A", "role": "boss"}).json()["id"]
+    u2 = client.post("/test/api/users", json={"name": "B", "role": "employee"}).json()["id"]
     r = client.post(
         "/test/api/groups",
         json={"name": "team", "member_ids": [u1, u2]},
@@ -37,7 +37,7 @@ def test_create_group_with_members(client, clean_db):
 
 
 def test_delete_user_cascade(client, clean_db):
-    u1 = client.post("/test/api/users", json={"name": "A", "is_boss": False}).json()["id"]
+    u1 = client.post("/test/api/users", json={"name": "A", "role": "employee"}).json()["id"]
     gid = client.post(
         "/test/api/groups", json={"name": "g", "member_ids": [u1]}
     ).json()["id"]
@@ -53,7 +53,7 @@ def test_send_publishes_inbound_event_and_replay_returns_messages(
 ):
     # Setup: boss + DM
     uid = client.post(
-        "/test/api/users", json={"name": "Boss", "is_boss": True}
+        "/test/api/users", json={"name": "Boss", "role": "boss"}
     ).json()["id"]
 
     # Send a message as the boss in their DM

@@ -37,13 +37,13 @@ async def test_boss_dm_recalls_content_from_two_groups(clean_db):
     with TestClient(app) as client:
         # 1. Create boss + 2 non-bosses
         boss_uid = client.post(
-            "/test/api/users", json={"name": "Boss", "is_boss": True}
+            "/test/api/users", json={"name": "Boss", "role": "boss"}
         ).json()["id"]
         u_alice = client.post(
-            "/test/api/users", json={"name": "Alice", "is_boss": False}
+            "/test/api/users", json={"name": "Alice", "role": "employee"}
         ).json()["id"]
         u_bob = client.post(
-            "/test/api/users", json={"name": "Bob", "is_boss": False}
+            "/test/api/users", json={"name": "Bob", "role": "employee"}
         ).json()["id"]
 
         # 2. Two groups, both include boss

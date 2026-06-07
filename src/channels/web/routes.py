@@ -11,11 +11,12 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
 from src.channels.web.promotion import BossPromotionService
+from src.web.security import set_session_cookie
 
 router = APIRouter(prefix="/test")
 _templates_dir = Path(__file__).parent / "templates"
@@ -35,7 +36,16 @@ def _adapter(request: Request):
 
 class CreateUserBody(BaseModel):
     name: str
-    is_boss: bool = False
+    role: str = "employee"  # employee | boss | superadmin
+
+
+def _promotion_role(role: str) -> str | None:
+    """Map test-channel role label → promotion role; None means no promotion."""
+    if role == "boss":
+        return "boss"
+    if role == "superadmin":
+        return "superadmin"
+    return None  # employee — stays a plain web_user, no users row needed
 
 
 class CreateGroupBody(BaseModel):
@@ -65,8 +75,9 @@ async def list_users(request: Request):
 async def create_user(request: Request, body: CreateUserBody):
     a = _adapter(request)
     uid = await a.users_repo.create(name=body.name, is_boss=False)
-    if body.is_boss:
-        await BossPromotionService(a.pool).promote(uid)
+    promo = _promotion_role(body.role)
+    if promo is not None:
+        await BossPromotionService(a.pool).promote(uid, role=promo)
     return {"id": uid}
 
 
@@ -77,10 +88,14 @@ async def update_user(request: Request, uid: str, body: CreateUserBody):
     existing = await a.users_repo.get(uid)
     if existing is None:
         raise HTTPException(404, "user not found")
-    if body.is_boss and not existing["is_boss"]:
-        await BossPromotionService(a.pool).promote(uid)
-    elif not body.is_boss and existing["is_boss"]:
+    promo = _promotion_role(body.role)
+    if promo is not None and not existing["is_boss"]:
+        await BossPromotionService(a.pool).promote(uid, role=promo)
+    elif promo is None and existing["is_boss"]:
         await BossPromotionService(a.pool).demote(uid)
+    elif promo is not None and existing["is_boss"]:
+        # Already promoted — re-promote so role column reflects new selection.
+        await BossPromotionService(a.pool).promote(uid, role=promo)
     return {"ok": True}
 
 
@@ -265,3 +280,40 @@ async def replay_messages(request: Request, chat_id: str, limit: int = 50):
         }
         for r in rows
     ]
+
+
+def _safe_next(raw: str | None, fallback: str = "/app") -> str:
+    """Same-origin only — single leading slash, no protocol-relative."""
+    if not raw or not raw.startswith("/") or raw.startswith("//") or raw.startswith("/\\"):
+        return fallback
+    return raw
+
+
+@router.get("/login-as/{web_user_id}")
+async def login_as(request: Request, web_user_id: str, next: str | None = None):
+    """Dev-mode backdoor: set session cookie as the boss linked to a web_user.
+
+    Only mounted when ENABLE_WEB_TEST_CHANNEL=true. Resolves
+    web_users.boss_user_id → users.id and signs a session cookie.
+    """
+    a = _adapter(request)
+    async with a.pool.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT boss_user_id, is_boss, name FROM web_users WHERE id=$1",
+            web_user_id,
+        )
+    if row is None:
+        raise HTTPException(404, "web_user not found")
+    if not row["is_boss"] or row["boss_user_id"] is None:
+        raise HTTPException(
+            400,
+            f"'{row['name']}' chưa được promote — chọn Boss hoặc Superadmin khi tạo user.",
+        )
+    target = _safe_next(next)
+    response = RedirectResponse(target, status_code=303)
+    set_session_cookie(
+        response,
+        int(row["boss_user_id"]),
+        secure=request.url.scheme == "https",
+    )
+    return response

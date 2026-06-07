@@ -44,7 +44,12 @@ class WebUsersRepo:
     async def list_all(self) -> list[dict[str, Any]]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(
-                "SELECT * FROM web_users ORDER BY created_at"
+                """
+                SELECT w.*, u.role AS app_role
+                FROM web_users w
+                LEFT JOIN users u ON u.id = w.boss_user_id
+                ORDER BY w.created_at
+                """
             )
         return [dict(r) for r in rows]
 

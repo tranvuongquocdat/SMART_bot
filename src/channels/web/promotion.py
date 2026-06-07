@@ -18,7 +18,9 @@ class BossPromotionService:
     def __init__(self, pool: asyncpg.Pool) -> None:
         self.pool = pool
 
-    async def promote(self, web_user_id: str) -> int:
+    async def promote(self, web_user_id: str, role: str = "boss") -> int:
+        if role not in ("boss", "superadmin"):
+            raise ValueError(f"role must be 'boss' or 'superadmin', got {role!r}")
         async with self.pool.acquire() as c:
             async with c.transaction():
                 wu = await c.fetchrow(
@@ -30,12 +32,15 @@ class BossPromotionService:
                 boss_id = await c.fetchval(
                     """
                     INSERT INTO users (email, name, role)
-                    VALUES ($1, $2, 'boss')
-                    ON CONFLICT (email) DO UPDATE SET name=EXCLUDED.name
+                    VALUES ($1, $2, $3)
+                    ON CONFLICT (email) DO UPDATE SET
+                      name=EXCLUDED.name,
+                      role=EXCLUDED.role
                     RETURNING id
                     """,
                     f"{web_user_id}@web.test.local",
                     wu["name"],
+                    role,
                 )
 
                 await c.execute(

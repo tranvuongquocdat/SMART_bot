@@ -21,6 +21,8 @@ const btnAdmin = $("btn-admin");
 const adminPane = $("admin-pane");
 const adminUsersUl = $("admin-users");
 const adminGroupsUl = $("admin-groups");
+const btnOpenAdmin = $("btn-open-admin");
+const btnOpenApp = $("btn-open-app");
 const chatHeader = $("chat-header").querySelector("h2");
 
 // Detect `@bot` anywhere in the message (case-insensitive, word boundary).
@@ -53,9 +55,15 @@ async function api(path, opts = {}) {
 }
 
 // --- Render ---
+function userBadge(u) {
+  if (u.app_role === "superadmin") return " ✦";
+  if (u.is_boss) return " ★";
+  return "";
+}
+
 function renderUsers() {
   asSelect.innerHTML = '<option value="">-- chọn user --</option>' +
-    state.users.map(u => `<option value="${u.id}" ${u.id === state.asUid ? "selected" : ""}>${u.name}${u.is_boss ? " ★" : ""}</option>`).join("");
+    state.users.map(u => `<option value="${u.id}" ${u.id === state.asUid ? "selected" : ""}>${u.name}${userBadge(u)}</option>`).join("");
 }
 
 function renderChats() {
@@ -184,7 +192,7 @@ async function submitUserModal() {
   const name = userModalName.value.trim();
   if (!name) { userModalName.focus(); return; }
   const role = userModal.querySelector('input[name="user-role"]:checked').value;
-  await api("/api/users", { method: "POST", body: JSON.stringify({ name, is_boss: role === "boss" }) });
+  await api("/api/users", { method: "POST", body: JSON.stringify({ name, role }) });
   closeUserModal();
   await loadUsers();
 }
@@ -204,7 +212,7 @@ function openGroupModal() {
     ? state.users.map(u => `
         <li class="flex items-center gap-2 px-2 py-1 hover:bg-gray-50">
           <input type="checkbox" value="${u.id}" id="gm-${u.id}" />
-          <label for="gm-${u.id}" class="flex-1 cursor-pointer">${escapeHtml(u.name)}${u.is_boss ? " ★" : ""}</label>
+          <label for="gm-${u.id}" class="flex-1 cursor-pointer">${escapeHtml(u.name)}${userBadge(u)}</label>
         </li>
       `).join("")
     : '<li class="px-2 py-2 text-gray-400">Chưa có user nào — tạo user trước.</li>';
@@ -236,7 +244,7 @@ async function renderAdminPane() {
   adminUsersUl.innerHTML = state.users.length
     ? state.users.map(u => `
         <li class="flex items-center justify-between px-2 py-1">
-          <span class="truncate">${escapeHtml(u.name)}${u.is_boss ? " ★" : ""}</span>
+          <span class="truncate">${escapeHtml(u.name)}${userBadge(u)}</span>
           <button data-uid="${u.id}" class="admin-del-user text-red-600 hover:bg-red-50 px-2 rounded" title="Xoá user">×</button>
         </li>
       `).join("")
@@ -299,6 +307,33 @@ btnAdmin.onclick = async () => {
   adminPane.classList.toggle("hidden");
   if (opening) await renderAdminPane();
 };
+
+// --- Login-as shortcuts (dev backdoor: opens /test/login-as/{uid}?next=...) ---
+function currentSelectedUser() {
+  return state.users.find(u => u.id === state.asUid);
+}
+
+function loginAsAndOpen(next, requireSuperadmin) {
+  const u = currentSelectedUser();
+  if (!u) {
+    alert("Chọn user (Sending as) trước khi mở.");
+    return;
+  }
+  if (requireSuperadmin && u.app_role !== "superadmin") {
+    alert(`"${u.name}" không phải Superadmin — trang /admin yêu cầu quyền Superadmin.\n` +
+          "Tạo user mới với role = Superadmin rồi chọn user đó.");
+    return;
+  }
+  if (!requireSuperadmin && !u.is_boss) {
+    alert(`"${u.name}" chưa được promote — chọn Boss hoặc Superadmin khi tạo user.`);
+    return;
+  }
+  const url = `/test/login-as/${encodeURIComponent(u.id)}?next=${encodeURIComponent(next)}`;
+  window.open(url, "_blank");
+}
+
+btnOpenAdmin.onclick = () => loginAsAndOpen("/admin/bosses", true);
+btnOpenApp.onclick = () => loginAsAndOpen("/app", false);
 
 // Init
 const params = new URLSearchParams(location.search);
