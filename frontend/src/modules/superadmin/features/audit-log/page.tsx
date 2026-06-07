@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { fetchAuditLog } from './api';
 import type { AuditLogItem } from './api';
 
@@ -41,7 +42,7 @@ function AuditRow({ item }: { item: AuditLogItem }) {
   const target = [item.target_kind, item.target_id].filter(Boolean).join('/') || '—';
 
   return (
-    <tr className="border-b last:border-b-0 hover:bg-muted/30 transition-colors">
+    <tr className="border-row hover:bg-[hsl(var(--hover))] transition-colors">
       <td className="px-4 py-2.5 text-xs text-muted-foreground whitespace-nowrap">
         <span title={new Date(item.created_at).toLocaleString('vi-VN')}>
           {relativeTime(item.created_at)}
@@ -118,71 +119,71 @@ export default function AuditLogPage() {
   }, [nextCursor, loadingMore, appliedActor, appliedAction]);
 
   return (
-    <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px]">
-      <header className="mb-6">
-        <h1 className="text-[24px] font-semibold tracking-tight">Audit log</h1>
-        <p className="text-muted-foreground mt-1.5">
-          Lịch sử hành động của super-admin. Read-only.
-        </p>
-      </header>
+    <PageWrap>
+      <PageHeader
+        title="Audit log"
+        subtitle="Lịch sử hành động của super-admin. Chỉ đọc."
+      />
 
-      {/* Filter row */}
-      <div className="flex gap-2 mb-4 flex-wrap">
-        <Input
-          placeholder="Actor (email / tên)"
-          value={actorFilter}
-          onChange={e => setActorFilter(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && applyFilters()}
-          className="w-52"
-        />
-        <Input
-          placeholder="Action (vd: update_model)"
-          value={actionFilter}
-          onChange={e => setActionFilter(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && applyFilters()}
-          className="w-52"
-        />
-        <Button variant="secondary" size="default" onClick={applyFilters}>
-          <Search className="h-3.5 w-3.5 mr-1" />
-          Lọc
-        </Button>
-      </div>
-
-      {/* Table */}
-      {result.isLoading ? (
-        <Skeleton className="h-[320px] rounded-[10px]" />
-      ) : result.isError ? (
-        <p className="text-destructive text-sm py-4">Lỗi tải dữ liệu.</p>
-      ) : allItems.length === 0 ? (
-        <EmptyState icon={FileText} title="Chưa có sự kiện nào" />
-      ) : (
-        <div className="border rounded-[10px] overflow-hidden bg-white dark:bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Thời gian</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Actor</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Action</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Target</th>
-                <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Payload</th>
-              </tr>
-            </thead>
-            <tbody>
-              {allItems.map(item => (
-                <AuditRow key={item.id} item={item} />
-              ))}
-            </tbody>
-          </table>
-
-          {nextCursor && (
-            <div className="flex justify-center py-3 border-t">
-              <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
-                {loadingMore ? 'Đang tải...' : 'Tải thêm'}
-              </Button>
-            </div>
-          )}
+      <PageSection>
+        <div className="flex gap-2 flex-wrap">
+          <Input
+            placeholder="Actor (email / tên)"
+            value={actorFilter}
+            onChange={e => setActorFilter(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && applyFilters()}
+            className="w-52"
+          />
+          <Input
+            placeholder="Action (vd: update_model)"
+            value={actionFilter}
+            onChange={e => setActionFilter(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && applyFilters()}
+            className="w-52"
+          />
+          <Button variant="secondary" size="default" onClick={applyFilters}>
+            <Search className="h-3.5 w-3.5 mr-1" />
+            Lọc
+          </Button>
         </div>
-      )}
-    </div>
+      </PageSection>
+
+      <PageSection>
+        {result.isLoading ? (
+          <Skeleton className="h-[320px] rounded-[12px]" />
+        ) : result.isError ? (
+          <p className="text-destructive text-sm py-4">Lỗi tải dữ liệu.</p>
+        ) : allItems.length === 0 ? (
+          <EmptyState icon={FileText} title="Chưa có sự kiện nào" />
+        ) : (
+          <div className="rounded-[12px] bg-card-grad surface-section overflow-hidden">
+            <table className="w-full text-sm">
+              <thead className="bg-[hsl(var(--muted))]">
+                <tr>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Thời gian</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Actor</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Action</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Target</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Payload</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allItems.map(item => (
+                  <AuditRow key={item.id} item={item} />
+                ))}
+              </tbody>
+            </table>
+
+            {nextCursor && (
+              <div className="flex justify-center py-3 border-t border-border">
+                <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
+                  {loadingMore ? 'Đang tải...' : 'Tải thêm'}
+                </Button>
+              </div>
+            )}
+          </div>
+        )}
+      </PageSection>
+    </PageWrap>
   );
 }

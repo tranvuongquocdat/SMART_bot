@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
@@ -188,38 +189,36 @@ export default function AgentTriggersPage() {
   ];
 
   return (
-    <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px]">
-      <header className="mb-8">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-[24px] font-semibold tracking-tight">Agent triggers</h1>
-            <p className="text-muted-foreground mt-1.5">
-              Cấu hình debounce, threshold và bật/tắt từng trigger cho agent.
-            </p>
-          </div>
+    <PageWrap>
+      <PageHeader
+        title="Agent triggers"
+        subtitle="Cấu hình debounce, threshold và bật/tắt từng trigger cho agent."
+        actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             Thêm trigger
           </Button>
-        </div>
-      </header>
+        }
+      />
 
-      {triggers.isLoading ? (
-        <Skeleton className="h-[220px] rounded-[10px]" />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={triggers.data ?? []}
-          mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
-          empty={
-            <EmptyState
-              icon={Zap}
-              title="Chưa có trigger nào"
-              action={{ label: '+ Thêm trigger', onClick: () => setCreateOpen(true) }}
-            />
-          }
-        />
-      )}
+      <PageSection>
+        {triggers.isLoading ? (
+          <Skeleton className="h-[220px] rounded-[12px]" />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={triggers.data ?? []}
+            mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
+            empty={
+              <EmptyState
+                icon={Zap}
+                title="Chưa có trigger nào"
+                action={{ label: '+ Thêm trigger', onClick: () => setCreateOpen(true) }}
+              />
+            }
+          />
+        )}
+      </PageSection>
 
       <EditDialog trigger={null} open={createOpen} onOpenChange={setCreateOpen} />
       <EditDialog
@@ -228,6 +227,6 @@ export default function AgentTriggersPage() {
         onOpenChange={v => !v && setEditTarget(null)}
       />
       <DeleteDialog trigger={deleteTarget} onClose={() => setDeleteTarget(null)} />
-    </div>
+    </PageWrap>
   );
 }

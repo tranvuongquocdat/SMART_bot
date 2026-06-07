@@ -20,6 +20,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { noteTemplatesQuery, deleteNoteTemplate } from './api';
 import type { NoteTemplate } from './api';
 import { EditDialog } from './edit-dialog';
@@ -154,38 +155,36 @@ export default function NoteTemplatesPage() {
   ];
 
   return (
-    <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px]">
-      <header className="mb-8">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-[24px] font-semibold tracking-tight">Note templates</h1>
-            <p className="text-muted-foreground mt-1.5">
-              Các mẫu ghi chú dùng cho group notes.
-            </p>
-          </div>
+    <PageWrap>
+      <PageHeader
+        title="Note templates"
+        subtitle="Các mẫu ghi chú dùng cho group notes."
+        actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             Thêm template
           </Button>
-        </div>
-      </header>
+        }
+      />
 
-      {templates.isLoading ? (
-        <Skeleton className="h-[220px] rounded-[10px]" />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={templates.data ?? []}
-          mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
-          empty={
-            <EmptyState
-              icon={BookTemplate}
-              title="Chưa có template nào"
-              action={{ label: '+ Thêm template', onClick: () => setCreateOpen(true) }}
-            />
-          }
-        />
-      )}
+      <PageSection>
+        {templates.isLoading ? (
+          <Skeleton className="h-[220px] rounded-[12px]" />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={templates.data ?? []}
+            mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
+            empty={
+              <EmptyState
+                icon={BookTemplate}
+                title="Chưa có template nào"
+                action={{ label: '+ Thêm template', onClick: () => setCreateOpen(true) }}
+              />
+            }
+          />
+        )}
+      </PageSection>
 
       <EditDialog
         template={null}
@@ -198,6 +197,6 @@ export default function NoteTemplatesPage() {
         onOpenChange={v => !v && setEditTarget(null)}
       />
       <DeleteDialog template={deleteTarget} onClose={() => setDeleteTarget(null)} />
-    </div>
+    </PageWrap>
   );
 }

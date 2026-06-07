@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, MoreHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
-import { Link } from 'react-router-dom';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from '@/components/data-table';
 import { StatusDot } from '@/components/status-dot';
@@ -30,6 +29,7 @@ import {
 import type { BotAccount, BotMessage } from './api';
 import { ConnectDialog } from './connect-dialog';
 import { EditDialog } from './edit-dialog';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 
 const STATUS_LABEL: Record<BotAccount['status'], { s: 'ok' | 'warn' | 'err'; label: string }> = {
   online: { s: 'ok', label: 'Online' },
@@ -234,50 +234,39 @@ export default function BotAccountsPage() {
   ];
 
   return (
-    <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px]">
-      <header className="mb-8">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-[24px] font-semibold tracking-tight">Bot accounts</h1>
-            <p className="text-muted-foreground mt-1.5">
-              Tài khoản Zalo cá nhân và Telegram bot phục vụ các boss.
-            </p>
-          </div>
+    <PageWrap>
+      <PageHeader
+        title="Tài khoản bot"
+        subtitle="Tài khoản Zalo cá nhân và Telegram bot phục vụ các boss."
+        actions={
           <Button onClick={() => setConnectOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             Kết nối account
           </Button>
-        </div>
+        }
+      />
 
-        <div className="mt-3 text-sm text-muted-foreground">
-          <Link
-            to="/app/superadmin/models"
-            className="underline underline-offset-2 hover:text-foreground"
-          >
-            ← Quay lại Models
-          </Link>
-        </div>
-      </header>
-
-      {bots.isLoading ? (
-        <Skeleton className="h-[220px] rounded-[10px]" />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={bots.data ?? []}
-          mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
-          empty={
-            <div className="rounded-[10px] bg-card shadow-[var(--shadow-card,0_0_0_1px_hsl(var(--border-strong)),0_1px_2px_rgba(0,0,0,.04))] p-12 text-center text-muted-foreground text-sm">
-              Chưa có bot account nào. Nhấn "+ Kết nối account" để thêm mới.
-            </div>
-          }
-        />
-      )}
+      <PageSection>
+        {bots.isLoading ? (
+          <Skeleton className="h-[220px] rounded-[12px]" />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={bots.data ?? []}
+            mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
+            empty={
+              <div className="rounded-[12px] bg-card-grad surface-section p-12 text-center text-muted-foreground text-sm">
+                Chưa có bot account nào. Nhấn "+ Kết nối account" để thêm mới.
+              </div>
+            }
+          />
+        )}
+      </PageSection>
 
       <ConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
       <EditDialog account={editTarget} onOpenChange={v => !v && setEditTarget(null)} />
       <MessagesDialog account={msgsTarget} onClose={() => setMsgsTarget(null)} />
       <DeleteDialog account={deleteTarget} onClose={() => setDeleteTarget(null)} />
-    </div>
+    </PageWrap>
   );
 }

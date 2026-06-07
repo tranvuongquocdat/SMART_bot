@@ -15,16 +15,22 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
     handle: { breadcrumb: 'Super-admin' },
     children: [
       { index: true, lazy: async () => ({ Component: (await import('./features/models/page')).default }) },
-      { path: 'models', lazy: async () => ({ Component: (await import('./features/models/page')).default }), handle: { breadcrumb: 'Models' } },
-      { path: 'bot-accounts', lazy: async () => ({ Component: (await import('./features/bot-accounts/page')).default }), handle: { breadcrumb: 'Bot accounts' } },
-      { path: 'bosses', lazy: async () => ({ Component: (await import('./features/bosses/page')).default }), handle: { breadcrumb: 'Bosses' } },
-      { path: 'prompts', lazy: async () => ({ Component: (await import('./features/prompts/list-page')).default }), handle: { breadcrumb: 'Prompts' } },
-      { path: 'prompts/:id', lazy: async () => ({ Component: (await import('./features/prompts/detail-page')).default }), handle: { breadcrumb: 'Prompt detail' } },
+      { path: 'models', lazy: async () => ({ Component: (await import('./features/models/page')).default }), handle: { breadcrumb: 'Models AI' } },
+      { path: 'bot-accounts', lazy: async () => ({ Component: (await import('./features/bot-accounts/page')).default }), handle: { breadcrumb: 'Tài khoản bot' } },
+      { path: 'bosses', lazy: async () => ({ Component: (await import('./features/bosses/page')).default }), handle: { breadcrumb: 'Boss' } },
+      {
+        path: 'prompts',
+        handle: { breadcrumb: 'Prompts' },
+        children: [
+          { index: true, lazy: async () => ({ Component: (await import('./features/prompts/list-page')).default }) },
+          { path: ':id', lazy: async () => ({ Component: (await import('./features/prompts/detail-page')).default }), handle: { breadcrumb: 'Chi tiết prompt' } },
+        ],
+      },
       { path: 'note-templates', lazy: async () => ({ Component: (await import('./features/note-templates/page')).default }), handle: { breadcrumb: 'Note templates' } },
       { path: 'agent-triggers', lazy: async () => ({ Component: (await import('./features/agent-triggers/page')).default }), handle: { breadcrumb: 'Agent triggers' } },
       { path: 'audit', lazy: async () => ({ Component: (await import('./features/audit-log/page')).default }), handle: { breadcrumb: 'Audit log' } },
       { path: 'retrieval-pipelines', lazy: async () => ({ Component: (await import('./features/retrieval-pipelines/page')).default }), handle: { breadcrumb: 'Retrieval pipelines' } },
-      { path: 'usage', element: <ComingSoon feature="Usage" />, handle: { breadcrumb: 'Usage' } },
+      { path: 'usage', element: <ComingSoon feature="Usage" />, handle: { breadcrumb: 'Sử dụng' } },
     ],
   };
 }

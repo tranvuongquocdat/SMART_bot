@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -267,41 +268,39 @@ export default function PromptsListPage() {
   ];
 
   return (
-    <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px]">
-      <header className="mb-8">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div>
-            <h1 className="text-[24px] font-semibold tracking-tight">Prompts</h1>
-            <p className="text-muted-foreground mt-1.5">
-              Quản lý system prompts theo version cho từng key.
-            </p>
-          </div>
+    <PageWrap>
+      <PageHeader
+        title="Prompts"
+        subtitle="Quản lý system prompts theo version cho từng key."
+        actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
             Thêm prompt
           </Button>
-        </div>
-      </header>
+        }
+      />
 
-      {prompts.isLoading ? (
-        <Skeleton className="h-[220px] rounded-[10px]" />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={prompts.data ?? []}
-          mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
-          empty={
-            <EmptyState
-              icon={FileCode}
-              title="Chưa có prompt nào"
-              action={{ label: '+ Thêm prompt', onClick: () => setCreateOpen(true) }}
-            />
-          }
-        />
-      )}
+      <PageSection>
+        {prompts.isLoading ? (
+          <Skeleton className="h-[220px] rounded-[12px]" />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={prompts.data ?? []}
+            mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
+            empty={
+              <EmptyState
+                icon={FileCode}
+                title="Chưa có prompt nào"
+                action={{ label: '+ Thêm prompt', onClick: () => setCreateOpen(true) }}
+              />
+            }
+          />
+        )}
+      </PageSection>
 
       <CreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <DeleteDialog prompt={deleteTarget} onClose={() => setDeleteTarget(null)} />
-    </div>
+    </PageWrap>
   );
 }

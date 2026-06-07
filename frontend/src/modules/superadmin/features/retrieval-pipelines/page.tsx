@@ -4,6 +4,7 @@ import { MoreHorizontal, GitBranch } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { DataTable } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
 import {
@@ -98,36 +99,36 @@ export default function RetrievalPipelinesPage() {
   ];
 
   return (
-    <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px]">
-      <header className="mb-8">
-        <h1 className="text-[24px] font-semibold tracking-tight">Retrieval pipelines</h1>
-        <p className="text-muted-foreground mt-1.5">
-          Cấu hình stages và mô tả cho từng pipeline retrieval.
-        </p>
-      </header>
+    <PageWrap>
+      <PageHeader
+        title="Retrieval pipelines"
+        subtitle="Cấu hình stages và mô tả cho từng pipeline retrieval."
+      />
 
-      {pipelines.isLoading ? (
-        <Skeleton className="h-[220px] rounded-[10px]" />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={pipelines.data ?? []}
-          mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
-          empty={
-            <EmptyState
-              icon={GitBranch}
-              title="Chưa có pipeline nào"
-              description="Dữ liệu sẽ xuất hiện khi có pipeline được cấu hình."
-            />
-          }
-        />
-      )}
+      <PageSection>
+        {pipelines.isLoading ? (
+          <Skeleton className="h-[220px] rounded-[12px]" />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={pipelines.data ?? []}
+            mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
+            empty={
+              <EmptyState
+                icon={GitBranch}
+                title="Chưa có pipeline nào"
+                description="Dữ liệu sẽ xuất hiện khi có pipeline được cấu hình."
+              />
+            }
+          />
+        )}
+      </PageSection>
 
       <EditDialog
         pipeline={editTarget}
         open={editTarget !== null}
         onOpenChange={v => !v && setEditTarget(null)}
       />
-    </div>
+    </PageWrap>
   );
 }
