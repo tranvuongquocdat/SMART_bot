@@ -39,24 +39,36 @@ export function StatCard({ label, value, previous }: Props) {
 
   return (
     <motion.div variants={fadeUp}>
-      <Card variant="glow" className="px-4 py-3.5 relative">
-        <div className="absolute left-0 right-0 top-0 h-[2px] bg-accent-gradient" />
-        <div className="text-[10px] uppercase tracking-wider text-[hsl(var(--dim))] font-medium">
+      <Card variant="stat" className="px-4 pt-[14px] pb-3">
+        {/* accent strip top */}
+        <div className="absolute left-0 right-0 top-0 h-[2px] bg-accent-gradient opacity-90" />
+        {/* glow corner */}
+        <div
+          className="absolute pointer-events-none"
+          style={{
+            right: '-10px',
+            bottom: '-10px',
+            width: '180px',
+            height: '110px',
+            background: 'radial-gradient(circle at center, hsl(var(--primary) / 0.16), transparent 65%)',
+          }}
+        />
+        <div className="text-[10px] uppercase tracking-[0.07em] text-[hsl(var(--dim))] font-medium">
           {label}
         </div>
-        <div className="text-[22px] font-semibold tracking-tight mt-1 tabular-nums">
+        <div className="text-[26px] font-semibold tracking-[-0.02em] mt-[3px] tabular-nums leading-none">
           {display.toLocaleString('vi-VN')}
         </div>
         <div
           className={cn(
-            'text-[10px] mt-0.5 tabular-nums font-medium',
+            'text-[10.5px] mt-1 tabular-nums font-medium',
             delta.tone === 'up' && 'text-[hsl(var(--ok))]',
             delta.tone === 'down' && 'text-[hsl(var(--danger))]',
             delta.tone === 'flat' && 'text-[hsl(var(--dim))]',
             delta.tone === 'new' && 'text-[hsl(var(--primary))]',
           )}
         >
-          {delta.text} <span className="text-[hsl(var(--dim))] font-normal">vs 30d trước</span>
+          {delta.text} <span className="text-[hsl(var(--dim))] font-normal ml-0.5">vs 30d trước</span>
         </div>
       </Card>
     </motion.div>

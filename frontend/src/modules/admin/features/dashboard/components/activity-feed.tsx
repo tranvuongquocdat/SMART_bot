@@ -32,22 +32,26 @@ export function ActivityFeed({ items }: { items: Activity[] }) {
           <CardTitle>Hoạt động gần đây</CardTitle>
           <Badge variant="live">Realtime</Badge>
         </CardHeader>
-        <CardBody>
+        <CardBody className="p-0">
           {items.length === 0 ? (
             <div className="flex flex-col items-center py-8 gap-2">
               <BarChart2 className="h-7 w-7 text-muted-foreground/30" />
               <p className="text-[12px] text-muted-foreground">Chưa có hoạt động nào</p>
             </div>
           ) : (
-            <ul className="divide-y divide-border">
+            <ul>
               {items.map((a, i) => (
                 <li
                   key={`${a.kind}-${a.id}-${i}`}
-                  className="py-2 flex items-center gap-3 transition-transform hover:translate-x-[2px]"
+                  className={
+                    'flex items-center gap-3 px-[14px] py-[9px] ' +
+                    'transition-[background-color,transform] duration-150 hover:translate-x-[2px] hover:bg-[hsl(var(--hover))] ' +
+                    (i < items.length - 1 ? 'border-row' : '')
+                  }
                 >
                   <Badge variant="secondary">{kindLabel(a.kind)}</Badge>
                   <span className="text-[12.5px] truncate flex-1">{a.title}</span>
-                  <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                  <span className="text-[10.5px] text-muted-foreground shrink-0 tabular-nums">
                     {relativeTime(a.ts)}
                   </span>
                 </li>

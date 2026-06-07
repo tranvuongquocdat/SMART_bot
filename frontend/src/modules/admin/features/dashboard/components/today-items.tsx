@@ -33,28 +33,32 @@ export function TodayItems({ items }: { items: Item[] }) {
           <CardTitle>Việc cần làm hôm nay</CardTitle>
           <span className="text-[10px] text-[hsl(var(--dim))]">{items.length} việc</span>
         </CardHeader>
-        <CardBody>
+        <CardBody className="p-0">
           {items.length === 0 ? (
             <div className="flex flex-col items-center py-8 gap-2">
               <ClipboardList className="h-7 w-7 text-muted-foreground/30" />
               <p className="text-[12px] text-muted-foreground">Hôm nay rảnh, nghỉ thôi.</p>
             </div>
           ) : (
-            <ul className="divide-y divide-border">
-              {items.map((it) => (
+            <ul>
+              {items.map((it, i) => (
                 <li
                   key={it.id}
-                  className="py-2 flex items-start justify-between gap-2 transition-transform hover:translate-x-[2px]"
+                  className={
+                    'flex items-center justify-between gap-3 px-[14px] py-[9px] ' +
+                    'transition-[background-color,transform] duration-150 hover:translate-x-[2px] hover:bg-[hsl(var(--hover))] ' +
+                    (i < items.length - 1 ? 'border-row' : '')
+                  }
                 >
                   <div className="min-w-0">
                     <div className="text-[12.5px] truncate">{it.text}</div>
-                    <div className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                    <div className="text-[10.5px] text-[hsl(var(--dim))] mt-0.5 truncate">
                       {it.group_name}
                       {it.assignee_name && ` · ${it.assignee_name}`}
                     </div>
                   </div>
                   {it.due_at && (
-                    <span className="text-[10px] text-muted-foreground shrink-0 mt-0.5 tabular-nums">
+                    <span className="text-[10.5px] text-muted-foreground shrink-0 tabular-nums">
                       {formatDue(it.due_at)}
                     </span>
                   )}

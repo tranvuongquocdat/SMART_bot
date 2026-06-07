@@ -18,16 +18,18 @@
   --muted: 240 5% 11%;
   --muted-foreground: 240 5% 62%;
   --dim: 240 4% 40%;
-  --border: 240 6% 10%;
-  --border-strong: 240 6% 15%;
-  --card: 240 7% 7.5%;
+  --border: 240 6% 14%;
+  --border-strong: 240 6% 19%;
+  --card: 240 7% 8%;
+  --card-grad-top: 240 7% 10%;
+  --card-grad-bot: 240 8% 7%;
   --hover: 240 6% 12%;
   --primary: 172 70% 45%;
   --primary-strong: 188 80% 50%;
   --primary-soft: 172 50% 14%;
   --primary-foreground: 170 80% 6%;
   --danger: 0 62% 60%;
-  --ok: 158 60% 50%;
+  --ok: 158 60% 55%;
   --warn: 38 88% 60%;
   --info: 210 80% 65%;
   --radius: 8px;
@@ -38,27 +40,52 @@
   --text-xl: 1.125rem;
   --text-2xl: 1.375rem;
   --text-3xl: 1.75rem;
+  /* Surface borders — per-context, semi-transparent so they blend */
+  --ring-card:    240 6% 14% / 0.65;
+  --ring-section: 240 6% 11% / 0.70;
+  --ring-row:     240 6% 10% / 0.65;
+  --ring-hover-stat: 172 40% 22% / 0.45;
+  /* Inset highlights for top of cards (subtle "beveled" feel) */
+  --hl-top: 0 0% 100% / 0.025;
+  --hl-top-strong: 0 0% 100% / 0.04;
+  /* Provider pill colors */
+  --pill-zalo-bg: 210 60% 16%;
+  --pill-zalo-fg: 210 70% 70%;
+  --pill-tg-bg:   195 60% 16%;
+  --pill-tg-fg:   195 75% 75%;
 }
 
 .light {
-  --background: 0 0% 100%;
-  --bg-subtle: 240 10% 98.5%;
-  --foreground: 240 10% 4%;
-  --muted: 240 5% 96%;
-  --muted-foreground: 240 4% 38%;
+  --background: 0 0% 98%;
+  --bg-subtle: 240 10% 96%;
+  --foreground: 240 10% 6%;
+  --muted: 240 6% 95%;
+  --muted-foreground: 240 4% 35%;
   --dim: 240 4% 58%;
-  --border: 240 6% 92%;
+  --border: 240 6% 91%;
   --border-strong: 240 6% 84%;
   --card: 0 0% 100%;
+  --card-grad-top: 0 0% 100%;
+  --card-grad-bot: 240 10% 99%;
   --hover: 240 5% 96%;
-  --primary: 172 78% 32%;
-  --primary-strong: 188 85% 38%;
+  --primary: 172 78% 30%;
+  --primary-strong: 188 85% 36%;
   --primary-soft: 172 60% 94%;
   --primary-foreground: 0 0% 100%;
   --info: 210 80% 50%;
-  --ok: 158 60% 38%;
+  --ok: 158 60% 32%;
   --warn: 38 88% 42%;
-  --danger: 0 62% 50%;
+  --danger: 0 65% 48%;
+  --ring-card:    240 6% 91% / 1;
+  --ring-section: 240 6% 94% / 1;
+  --ring-row:     240 6% 94% / 1;
+  --ring-hover-stat: 172 50% 75% / 1;
+  --hl-top: 0 0% 100% / 1;
+  --hl-top-strong: 0 0% 100% / 1;
+  --pill-zalo-bg: 210 80% 94%;
+  --pill-zalo-fg: 210 78% 38%;
+  --pill-tg-bg:   195 80% 94%;
+  --pill-tg-fg:   195 80% 35%;
 }
 
 * { box-sizing: border-box; }
@@ -91,8 +118,38 @@ body {
   .bg-accent-gradient {
     background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-strong)));
   }
+
+  /* Card / surface utilities — inset shadow as border, gradient bg */
+  .bg-card-grad {
+    background: linear-gradient(180deg, hsl(var(--card-grad-top)) 0%, hsl(var(--card-grad-bot)) 100%);
+  }
+  .surface-card {
+    box-shadow:
+      inset 0 1px 0 hsl(var(--hl-top)),
+      inset 0 0 0 1px hsl(var(--ring-card));
+  }
+  .surface-section {
+    box-shadow:
+      inset 0 1px 0 hsl(var(--hl-top)),
+      inset 0 0 0 1px hsl(var(--ring-section));
+  }
+  .surface-stat-hover {
+    box-shadow:
+      inset 0 1px 0 hsl(var(--hl-top-strong)),
+      inset 0 0 0 1px hsl(var(--ring-hover-stat)),
+      0 6px 20px -10px hsl(172 70% 30% / 0.45);
+  }
+  .border-row {
+    border-bottom: 1px solid hsl(var(--ring-row));
+  }
 }
 
 @keyframes shimmer {
   100% { transform: translateX(100%); }
+}
+
+@keyframes pulse-ring {
+  0%   { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.6); }
+  70%  { box-shadow: 0 0 0 6px hsl(var(--primary) / 0); }
+  100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
 }

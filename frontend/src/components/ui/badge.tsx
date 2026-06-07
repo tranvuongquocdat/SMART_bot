@@ -12,6 +12,8 @@ const badgeVariants = cva(
         outline: 'border border-border text-muted-foreground',
         destructive: 'bg-[hsl(var(--danger)/0.15)] text-[hsl(var(--danger))]',
         live: 'bg-[hsl(var(--primary-soft))] text-[hsl(var(--primary))]',
+        zalo: 'bg-[hsl(var(--pill-zalo-bg))] text-[hsl(var(--pill-zalo-fg))]',
+        telegram: 'bg-[hsl(var(--pill-tg-bg))] text-[hsl(var(--pill-tg-fg))]',
       },
     },
     defaultVariants: { variant: 'default' },
@@ -26,10 +28,10 @@ function Badge({ className, variant, children, ...props }: BadgeProps) {
   return (
     <div className={cn(badgeVariants({ variant }), className)} {...props}>
       {variant === 'live' && (
-        <span className="relative inline-flex h-1.5 w-1.5">
-          <span className="absolute inset-0 rounded-full bg-[hsl(var(--primary))] opacity-60 animate-ping" />
-          <span className="relative rounded-full bg-[hsl(var(--primary))] h-1.5 w-1.5" />
-        </span>
+        <span
+          className="inline-block h-1.5 w-1.5 rounded-full bg-[hsl(var(--primary))]"
+          style={{ animation: 'pulse-ring 1.8s ease-out infinite' }}
+        />
       )}
       {children}
     </div>

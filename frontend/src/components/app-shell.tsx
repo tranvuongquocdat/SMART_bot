@@ -3,7 +3,6 @@ import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, Menu, Search, type LucideIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Button } from '@/components/ui/button';
 import { Kbd } from '@/components/ui/kbd';
 import { ThemeToggle } from './theme-toggle';
 import { UserMenu } from './user-menu';
@@ -74,7 +73,7 @@ export function AppShell({
       <motion.aside
         className={cn(
           'flex flex-col border-r border-border bg-card relative z-30',
-          'md:static md:translate-x-0 md:w-auto md:min-w-0',
+          'md:sticky md:top-0 md:h-screen md:translate-x-0 md:w-auto md:min-w-0',
           'fixed inset-y-0 left-0 w-[260px]',
         )}
         animate={{ x: isMobile && !mobileOpen ? -260 : 0 }}
@@ -152,17 +151,16 @@ export function AppShell({
             <div className="text-[13px] text-muted-foreground truncate">{breadcrumb}</div>
           </div>
           <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-[30px] gap-2"
+            <button
+              type="button"
               onClick={() => setPaletteOpen(true)}
               aria-label="Tìm kiếm"
+              className="h-[30px] px-[10px] rounded-[7px] bg-transparent text-[hsl(var(--muted-foreground))] flex items-center gap-2 text-[11px] surface-section hover:bg-[hsl(var(--hover))] transition-colors"
             >
               <Search className="h-3.5 w-3.5" />
-              <span className="max-sm:hidden text-[11px]">Tìm kiếm</span>
+              <span className="max-sm:hidden">Tìm kiếm</span>
               <Kbd className="max-sm:hidden">⌘K</Kbd>
-            </Button>
+            </button>
             <ThemeToggle />
           </div>
         </div>
