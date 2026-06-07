@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* App theme is class-based (default dark, `.light` on <html> for light mode).
+   Override Tailwind's default `dark:` variant (prefers-color-scheme) to follow it. */
+@custom-variant dark (&:where(html:not(.light), html:not(.light) *));
+
 @font-face {
   font-family: 'Inter var';
   src: url('https://rsms.me/inter/font-files/InterVariable.woff2') format('woff2');
@@ -8,24 +12,32 @@
 }
 
 :root {
-  --background: 240 6% 7%;
-  --bg-subtle: 240 6% 8.5%;
+  --background: 240 8% 5%;
+  --bg-subtle: 240 7% 7%;
   --foreground: 0 0% 98%;
-  --muted: 240 4% 12%;
-  --muted-foreground: 240 5% 60%;
-  --dim: 240 4% 38%;
-  --border: 240 5% 14%;
-  --border-strong: 240 5% 18%;
-  --card: 240 5% 9%;
-  --hover: 240 5% 11%;
-  --primary: 168 65% 55%;
-  --primary-soft: 168 50% 18%;
+  --muted: 240 5% 11%;
+  --muted-foreground: 240 5% 62%;
+  --dim: 240 4% 40%;
+  --border: 240 6% 14%;
+  --border-strong: 240 6% 19%;
+  --card: 240 7% 9%;
+  --hover: 240 6% 12%;
+  --primary: 172 70% 45%;
+  --primary-strong: 188 80% 50%;
+  --primary-soft: 172 50% 14%;
   --primary-foreground: 170 80% 6%;
-  --danger: 0 60% 60%;
-  --ok: 142 50% 55%;
+  --danger: 0 62% 60%;
+  --ok: 158 60% 50%;
   --warn: 38 88% 60%;
   --info: 210 80% 65%;
   --radius: 8px;
+  --text-xs: .6875rem;
+  --text-sm: .78125rem;
+  --text-base: .84375rem;
+  --text-lg: .9375rem;
+  --text-xl: 1.125rem;
+  --text-2xl: 1.375rem;
+  --text-3xl: 1.75rem;
 }
 
 .light {
@@ -33,19 +45,20 @@
   --bg-subtle: 240 10% 98.5%;
   --foreground: 240 10% 4%;
   --muted: 240 5% 96%;
-  --muted-foreground: 240 4% 42%;
-  --dim: 240 4% 60%;
+  --muted-foreground: 240 4% 38%;
+  --dim: 240 4% 58%;
   --border: 240 6% 92%;
-  --border-strong: 240 6% 86%;
+  --border-strong: 240 6% 84%;
   --card: 0 0% 100%;
-  --hover: 240 5% 97%;
-  --primary: 168 75% 32%;
-  --primary-soft: 168 60% 94%;
+  --hover: 240 5% 96%;
+  --primary: 172 78% 32%;
+  --primary-strong: 188 85% 38%;
+  --primary-soft: 172 60% 94%;
   --primary-foreground: 0 0% 100%;
   --info: 210 80% 50%;
-  --ok: 142 50% 40%;
-  --warn: 38 88% 45%;
-  --danger: 0 60% 50%;
+  --ok: 158 60% 38%;
+  --warn: 38 88% 42%;
+  --danger: 0 62% 50%;
 }
 
 * { box-sizing: border-box; }
@@ -59,4 +72,27 @@ body {
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@layer utilities {
+  .shadow-ring {
+    box-shadow: 0 0 0 1px hsl(var(--border));
+  }
+  .shadow-pop {
+    box-shadow: 0 8px 24px -12px hsl(0 0% 0% / 0.55);
+  }
+  .text-accent-gradient {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-strong)));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+  .bg-accent-gradient {
+    background: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary-strong)));
+  }
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
 }
