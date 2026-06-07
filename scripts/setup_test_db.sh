@@ -5,7 +5,7 @@
 
 set -e
 
-DEV_DSN="${POSTGRES_DSN:-postgresql://smart:smart@localhost:5432/smart_bot}"
+DEV_DSN="${POSTGRES_DSN:-postgresql://smart:smart@localhost:5433/smart_bot}"
 TEST_DSN="${POSTGRES_TEST_DSN:-${DEV_DSN%/*}/smart_bot_test}"
 
 echo "Test DSN: $TEST_DSN"

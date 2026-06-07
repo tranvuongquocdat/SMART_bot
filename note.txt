@@ -66,4 +66,10 @@ Note:
  Note:
  - check lại xem web này đang thiếu những tính năng nào, phần nào chưa hoàn thiện so với bản đề xuất
 
- 
+   ┌────────────────────────────────┬──────────────────┬──────────┬────────────────────────┐
+  │            Khu vực             │      Email       │ Password │     Sau login vào      │
+  ├────────────────────────────────┼──────────────────┼──────────┼────────────────────────┤
+  │ Admin (/app/admin/*)           │ boss@local.test  │ boss123  │ /app/admin/dashboard   │
+  ├────────────────────────────────┼──────────────────┼──────────┼────────────────────────┤
+  │ Superadmin (/app/superadmin/*) │ admin@local.test │ admin123 │ /app/superadmin/models │
+  └────────────────────────────────┴──────────────────┴──────────┴────────────────────────┘

@@ -32,6 +32,7 @@ dependencies = [
   "pillow-heif>=0.18",
   "pyyaml>=6.0",
   "prometheus-client>=0.20",
+  "greenlet>=3.5.1",
 ]
 
 [project.optional-dependencies]
