@@ -140,6 +140,9 @@ app.include_router(web_admin.router)
 from src.web.routes import api_me
 app.include_router(api_me.router)
 
+from src.web.routes import api_auth
+app.include_router(api_auth.router)
+
 from src.web.routes import api_superadmin
 app.include_router(api_superadmin.router)
 
