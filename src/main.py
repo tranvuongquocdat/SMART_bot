@@ -35,10 +35,8 @@ from src.plugins_loader import load_all as load_plugins
 from src.scheduler import make_scheduler
 from src.security.rate_limit import InMemoryRateLimiter
 from src.services.outbound_service import OutboundService
-from src.web.routes import admin as web_admin
 from src.web.routes import api as web_api
 from src.web.routes import api_ai as web_api_ai
-from src.web.routes import app as web_app
 from src.web.routes import auth as web_auth
 from src.web.routes import oauth as web_oauth
 from src.web.security import csrf_middleware
@@ -132,10 +130,8 @@ if _STATIC_DIR.is_dir():
 # Web routers.
 app.include_router(web_auth.router)
 app.include_router(web_oauth.router)
-app.include_router(web_app.router, prefix="/legacy-app")
 app.include_router(web_api.router)
 app.include_router(web_api_ai.router)
-app.include_router(web_admin.router)
 
 from src.web.routes import api_me
 app.include_router(api_me.router)

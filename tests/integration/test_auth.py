@@ -36,17 +36,16 @@ async def test_login_page_renders(app_client):
     client, _ = app_client
     r = client.get("/login")
     assert r.status_code == 200
-    assert "csrf-token" in r.text
-    # CSRF cookie minted by middleware/ensure_csrf
+    # CSRF cookie minted by ensure_csrf in the login route
     assert "smart_csrf" in r.cookies
 
 
 @pytest.mark.asyncio
-async def test_anonymous_app_redirects_or_401(app_client):
+async def test_anonymous_api_me_401(app_client):
     client, _ = app_client
-    # /app is now the public SPA; /legacy-app is the Jinja2 app requiring auth.
-    r = client.get("/legacy-app", follow_redirects=False)
-    assert r.status_code in (303, 401, 307)
+    # /api/v1/me requires auth; anonymous call must return 401.
+    r = client.get("/api/v1/me", follow_redirects=False)
+    assert r.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -74,9 +73,9 @@ async def test_email_password_login(app_client, db_pool):
     assert r.headers["location"] == "/app"
     assert "smart_session" in r.cookies or "smart_session" in client.cookies
 
-    r2 = client.get("/legacy-app")
+    # After login, /api/v1/me should return the authenticated user.
+    r2 = client.get("/api/v1/me")
     assert r2.status_code == 200
-    assert "Dashboard" in r2.text
 
 
 @pytest.mark.asyncio
@@ -137,5 +136,6 @@ async def test_logout_clears_session(app_client, db_pool):
     )
     assert r.status_code == 303
     # After logout the session cookie should be cleared.
-    r2 = client.get("/legacy-app", follow_redirects=False)
-    assert r2.status_code in (303, 401, 307)
+    # After logout, /api/v1/me should return 401.
+    r2 = client.get("/api/v1/me", follow_redirects=False)
+    assert r2.status_code == 401

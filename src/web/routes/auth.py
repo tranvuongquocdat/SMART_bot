@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path as _Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 import bcrypt as _bcrypt
 
@@ -24,30 +23,39 @@ from src.web.security import (
 
 router = APIRouter()
 
+_SPA_INDEX = _Path("src/web/static/app/index.html")
+_SPA_MISSING = _Path("src/web/templates/spa-missing.html")
+
 
 def hash_password(plain: str) -> str:
     """Bcrypt-hash a password. Truncates to 72 bytes (bcrypt limit)."""
     salt = _bcrypt.gensalt()
     return _bcrypt.hashpw(plain.encode("utf-8")[:72], salt).decode("utf-8")
 
-_TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
+
+def _safe_next(raw: str | None, fallback: str = "/app") -> str:
+    """Only allow same-origin redirects beginning with a single '/'."""
+    if not raw or not raw.startswith("/") or raw.startswith("//") or raw.startswith("/\\"):
+        return fallback
+    return raw
 
 
 @router.get("/login", response_class=HTMLResponse)
 async def login_page(
     request: Request,
     error: str | None = None,
+    next: str | None = None,
     boss=Depends(get_optional_boss),
 ):
+    target = _safe_next(next)
     if boss is not None:
-        return RedirectResponse("/app", status_code=303)
-    csrf = ensure_csrf(request)
-    return templates.TemplateResponse(
-        request,
-        "login.html",
-        {"request": request, "csrf_token": csrf, "boss_ctx": None, "error": error},
-    )
+        return RedirectResponse(target, status_code=303)
+    # Mint the CSRF cookie so the React login form can read it.
+    ensure_csrf(request)
+    # Serve the React SPA; the client-side router handles /login.
+    if _SPA_INDEX.exists():
+        return FileResponse(_SPA_INDEX)
+    return FileResponse(_SPA_MISSING, status_code=503)
 
 
 @router.post("/login")
@@ -55,6 +63,7 @@ async def login_submit(
     request: Request,
     email: str = Form(...),
     password: str = Form(...),
+    next: str = Form("/app"),
     csrf_field: str = Form("", alias="_csrf"),
 ):
     # Form-field CSRF for non-HTMX form posts.
@@ -65,13 +74,17 @@ async def login_submit(
     ip = request.client.host if request.client else "unknown"
     await rate_check(request, f"login:{ip}", limit=5, window_sec=300)
 
+    target = _safe_next(next)
+
     pool = request.app.state.db_pool
     async with pool.acquire() as c:
         row = await c.fetchrow(
             "SELECT id, password_hash FROM users WHERE email=$1", email.lower()
         )
     if not row or not row["password_hash"]:
-        return RedirectResponse("/login?error=sai+thong+tin", status_code=303)
+        return RedirectResponse(
+            f"/login?error=sai+thong+tin&next={target}", status_code=303
+        )
     try:
         pw_bytes = password.encode("utf-8")[:72]
         hash_bytes = row["password_hash"].encode("utf-8") if isinstance(
@@ -81,9 +94,11 @@ async def login_submit(
     except Exception:
         ok = False
     if not ok:
-        return RedirectResponse("/login?error=sai+thong+tin", status_code=303)
+        return RedirectResponse(
+            f"/login?error=sai+thong+tin&next={target}", status_code=303
+        )
 
-    response = RedirectResponse("/app", status_code=303)
+    response = RedirectResponse(target, status_code=303)
     response.set_cookie(
         SESSION_COOKIE,
         make_session(int(row["id"])),
