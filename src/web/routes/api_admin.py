@@ -17,6 +17,131 @@ from src.web.security import verify_json_csrf
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
+# ---------------------------------------------------------------------------
+# GET /dashboard  — boss home-page summary
+# ---------------------------------------------------------------------------
+
+@router.get("/dashboard")
+async def get_dashboard(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Return dashboard summary: recent groups, today's items, 30-day stats, recent activity."""
+    now = datetime.now(timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    thirty_days_ago = now - timedelta(days=30)
+
+    async with db.acquire() as c:
+        # Recent 5 groups
+        recent_groups = await c.fetch(
+            """
+            SELECT id,
+                   COALESCE(group_name, chat_id) AS name,
+                   provider,
+                   msg_count_7d,
+                   updated_at
+            FROM group_notes
+            WHERE boss_id = $1
+            ORDER BY updated_at DESC
+            LIMIT 5
+            """,
+            ctx.boss_id,
+        )
+
+        # Today's open action items (due today or overdue)
+        today_items = await c.fetch(
+            """
+            SELECT ai.id, ai.text, ai.due_at, ai.status, ai.assignee_name,
+                   COALESCE(gn.group_name, gn.chat_id) AS group_name
+            FROM action_items ai
+            JOIN group_notes gn ON gn.id = ai.group_note_id
+            WHERE ai.boss_id = $1
+              AND ai.status = 'open'
+            ORDER BY ai.due_at NULLS LAST, ai.id DESC
+            LIMIT 10
+            """,
+            ctx.boss_id,
+        )
+
+        # 30-day stats
+        msg_count = await c.fetchval(
+            "SELECT count(*) FROM messages WHERE boss_id=$1 AND ts >= $2",
+            ctx.boss_id, thirty_days_ago,
+        )
+        task_count = await c.fetchval(
+            "SELECT count(*) FROM action_items WHERE boss_id=$1 AND created_at >= $2",
+            ctx.boss_id, thirty_days_ago,
+        )
+        reminder_count = await c.fetchval(
+            "SELECT count(*) FROM scheduled_reminders WHERE boss_id=$1 AND created_at >= $2",
+            ctx.boss_id, thirty_days_ago,
+        )
+
+        # Recent activity: last 10 items updated
+        recent_activity = await c.fetch(
+            """
+            SELECT 'action_item' AS kind,
+                   ai.id,
+                   ai.text AS title,
+                   ai.status,
+                   ai.updated_at AS ts
+            FROM action_items ai
+            WHERE ai.boss_id = $1
+            UNION ALL
+            SELECT 'reminder' AS kind,
+                   sr.id,
+                   sr.text AS title,
+                   sr.status,
+                   sr.created_at AS ts
+            FROM scheduled_reminders sr
+            WHERE sr.boss_id = $1
+            ORDER BY ts DESC
+            LIMIT 10
+            """,
+            ctx.boss_id,
+        )
+
+    return {
+        "recent_groups": [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "provider": r["provider"],
+                "msg_count_7d": r["msg_count_7d"],
+                "updated_at": r["updated_at"].isoformat(),
+            }
+            for r in recent_groups
+        ],
+        "today_items": [
+            {
+                "id": r["id"],
+                "text": r["text"],
+                "due_at": r["due_at"].isoformat() if r["due_at"] else None,
+                "status": r["status"],
+                "assignee_name": r["assignee_name"],
+                "group_name": r["group_name"],
+            }
+            for r in today_items
+        ],
+        "stats_30d": {
+            "messages": int(msg_count or 0),
+            "tasks": int(task_count or 0),
+            "reminders": int(reminder_count or 0),
+            "decisions": 0,  # placeholder — no decisions table yet
+        },
+        "recent_activity": [
+            {
+                "kind": r["kind"],
+                "id": r["id"],
+                "title": r["title"],
+                "status": r["status"],
+                "ts": r["ts"].isoformat(),
+            }
+            for r in recent_activity
+        ],
+    }
+
+
 async def _require_group_owner(
     group_id: int,
     ctx: BossContext,
