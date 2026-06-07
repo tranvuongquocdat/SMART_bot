@@ -16,12 +16,18 @@ export function adminRoutes(qc: QueryClient): RouteObject {
     children: [
       { index: true, lazy: async () => ({ Component: (await import('./features/dashboard/page')).default }) },
       { path: 'dashboard', lazy: async () => ({ Component: (await import('./features/dashboard/page')).default }), handle: { breadcrumb: 'Tổng quan' } },
-      { path: 'groups', lazy: async () => ({ Component: (await import('./features/groups/list-page')).default }), handle: { breadcrumb: 'Nhóm' } },
       {
-        path: 'groups/:groupId',
-        element: <GroupDetail />,
-        loader: groupDetailLoader(qc),
-        handle: { breadcrumb: 'Chi tiết nhóm' },
+        path: 'groups',
+        handle: { breadcrumb: 'Nhóm' },
+        children: [
+          { index: true, lazy: async () => ({ Component: (await import('./features/groups/list-page')).default }) },
+          {
+            path: ':groupId',
+            element: <GroupDetail />,
+            loader: groupDetailLoader(qc),
+            handle: { breadcrumb: 'Chi tiết nhóm' },
+          },
+        ],
       },
       { path: 'reminders', lazy: async () => ({ Component: (await import('./features/reminders/page')).default }), handle: { breadcrumb: 'Nhắc nhở' } },
       { path: 'projects', lazy: async () => ({ Component: (await import('./features/projects/page')).default }), handle: { breadcrumb: 'Dự án' } },
