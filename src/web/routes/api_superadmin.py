@@ -1069,3 +1069,144 @@ async def delete_agent_trigger(
         if not existing:
             raise HTTPException(status_code=404, detail="agent_trigger not found")
         await c.execute("DELETE FROM agent_triggers WHERE id = $1", trigger_id)
+
+
+# ---------------------------------------------------------------------------
+# GET /audit-log  — paginated read-only (cursor-based on created_at)
+# ---------------------------------------------------------------------------
+
+@router.get("/audit-log")
+async def list_audit_log(
+    cursor: Optional[str] = None,
+    limit: int = 50,
+    actor: Optional[str] = None,
+    action: Optional[str] = None,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    limit = min(max(limit, 1), 200)
+
+    conditions = []
+    params: list = []
+    idx = 1
+
+    if cursor:
+        try:
+            cursor_dt = datetime.fromisoformat(cursor)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="invalid cursor")
+        conditions.append(f"al.created_at < ${idx}")
+        params.append(cursor_dt)
+        idx += 1
+
+    if actor:
+        conditions.append(f"(u.email ILIKE ${idx} OR u.name ILIKE ${idx})")
+        params.append(f"%{actor}%")
+        idx += 1
+
+    if action:
+        conditions.append(f"al.action ILIKE ${idx}")
+        params.append(f"%{action}%")
+        idx += 1
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+    params.append(limit + 1)
+
+    query = f"""
+        SELECT al.id, al.actor_user_id, al.action, al.target_kind, al.target_id,
+               al.reason, al.payload_json, al.created_at,
+               u.email AS actor_email, u.name AS actor_name
+        FROM admin_audit_log al
+        LEFT JOIN users u ON u.id = al.actor_user_id
+        {where}
+        ORDER BY al.created_at DESC
+        LIMIT ${idx}
+    """
+
+    async with db.acquire() as c:
+        rows = await c.fetch(query, *params)
+
+    has_more = len(rows) > limit
+    items = rows[:limit]
+
+    next_cursor = None
+    if has_more and items:
+        next_cursor = items[-1]["created_at"].isoformat()
+
+    return {
+        "items": [
+            {
+                "id": r["id"],
+                "actor_user_id": r["actor_user_id"],
+                "actor_email": r["actor_email"],
+                "actor_name": r["actor_name"],  # users.name
+                "action": r["action"],
+                "target_kind": r["target_kind"],
+                "target_id": r["target_id"],
+                "reason": r["reason"],
+                "payload_json": json.loads(r["payload_json"]) if r["payload_json"] else None,
+                "created_at": r["created_at"].isoformat(),
+            }
+            for r in items
+        ],
+        "next_cursor": next_cursor,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /retrieval-pipelines  — list all pipeline configs
+# ---------------------------------------------------------------------------
+
+@router.get("/retrieval-pipelines")
+async def list_retrieval_pipelines(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch("SELECT * FROM retrieval_pipelines ORDER BY feature")
+    return [
+        {
+            "feature": r["feature"],
+            "stages_json": json.loads(r["stages_json"]) if r["stages_json"] else [],
+            "description": r["description"],
+            "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+class PatchRetrievalPipelineBody(BaseModel):
+    stages_json: Optional[list] = None
+    description: Optional[str] = None
+
+
+@router.patch(
+    "/retrieval-pipelines/{feature}",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def patch_retrieval_pipeline(
+    feature: str,
+    body: PatchRetrievalPipelineBody,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        existing = await c.fetchrow(
+            "SELECT feature FROM retrieval_pipelines WHERE feature = $1", feature
+        )
+        if not existing:
+            raise HTTPException(status_code=404, detail="retrieval_pipeline not found")
+        stages_str = json.dumps(body.stages_json) if body.stages_json is not None else None
+        await c.execute(
+            """
+            UPDATE retrieval_pipelines
+            SET stages_json = COALESCE($2::jsonb, stages_json),
+                description = COALESCE($3, description),
+                updated_at  = NOW()
+            WHERE feature = $1
+            """,
+            feature,
+            stages_str,
+            body.description,
+        )
+    return {"feature": feature, "ok": True}

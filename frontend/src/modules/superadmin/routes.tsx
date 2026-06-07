@@ -22,7 +22,8 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
       { path: 'prompts/:id', lazy: async () => ({ Component: (await import('./features/prompts/detail-page')).default }), handle: { breadcrumb: 'Prompt detail' } },
       { path: 'note-templates', lazy: async () => ({ Component: (await import('./features/note-templates/page')).default }), handle: { breadcrumb: 'Note templates' } },
       { path: 'agent-triggers', lazy: async () => ({ Component: (await import('./features/agent-triggers/page')).default }), handle: { breadcrumb: 'Agent triggers' } },
-      { path: 'audit', element: <ComingSoon feature="Audit log" />, handle: { breadcrumb: 'Audit log' } },
+      { path: 'audit', lazy: async () => ({ Component: (await import('./features/audit-log/page')).default }), handle: { breadcrumb: 'Audit log' } },
+      { path: 'retrieval-pipelines', lazy: async () => ({ Component: (await import('./features/retrieval-pipelines/page')).default }), handle: { breadcrumb: 'Retrieval pipelines' } },
       { path: 'usage', element: <ComingSoon feature="Usage" />, handle: { breadcrumb: 'Usage' } },
     ],
   };

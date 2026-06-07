@@ -1,4 +1,4 @@
-import { Cpu, Bot, UserCog, FileText, BarChart3, Code2, BookTemplate, Zap } from 'lucide-react';
+import { Cpu, Bot, UserCog, FileText, BarChart3, Code2, BookTemplate, Zap, GitBranch } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 export const superadminNav: NavSection[] = [
@@ -12,6 +12,7 @@ export const superadminNav: NavSection[] = [
       { label: 'Note templates', href: '/app/superadmin/note-templates', icon: BookTemplate },
       { label: 'Agent triggers', href: '/app/superadmin/agent-triggers', icon: Zap },
       { label: 'Audit log', href: '/app/superadmin/audit', icon: FileText },
+      { label: 'Retrieval pipelines', href: '/app/superadmin/retrieval-pipelines', icon: GitBranch },
       { label: 'Usage', href: '/app/superadmin/usage', icon: BarChart3 },
     ],
   },
