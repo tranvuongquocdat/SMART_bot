@@ -26,7 +26,9 @@
   --card-grad-bot: 240 8% 7%;
   --sidebar: 240 8% 8.5%;
   --topbar: 240 8% 6%;
-  --hover: 240 6% 12%;
+  --hover: 240 8% 16%;
+  --accent: 240 8% 16%;
+  --accent-foreground: 0 0% 98%;
   --primary: 172 70% 45%;
   --primary-strong: 188 80% 50%;
   --primary-soft: 172 50% 14%;
@@ -73,7 +75,9 @@
   --card-grad-bot: 240 10% 99%;
   --sidebar: 240 8% 96%;
   --topbar: 0 0% 99%;
-  --hover: 240 5% 92%;
+  --hover: 240 6% 88%;
+  --accent: 240 6% 88%;
+  --accent-foreground: 240 10% 6%;
   --primary: 172 78% 30%;
   --primary-strong: 188 85% 36%;
   --primary-soft: 172 60% 94%;
