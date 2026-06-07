@@ -33,7 +33,7 @@ export function UserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <button className="flex items-center gap-2.5 w-full px-3 py-2.5 border-t border-border hover:bg-[hsl(var(--hover))] transition-colors">
+        <button className="flex items-center gap-2.5 w-full px-3 py-2.5 border-t border-[hsl(var(--divider))] hover:bg-[hsl(var(--hover))] transition-colors">
           <div className="h-7 w-7 rounded-full bg-gradient-to-br from-[hsl(168_70%_45%)] to-[hsl(200_65%_45%)] text-white text-[11px] font-semibold grid place-items-center shrink-0">
             {initials}
           </div>
