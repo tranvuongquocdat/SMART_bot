@@ -24,6 +24,8 @@
   --card: 240 7% 8%;
   --card-grad-top: 240 7% 10%;
   --card-grad-bot: 240 8% 7%;
+  --sidebar: 240 8% 8.5%;
+  --topbar: 240 8% 6%;
   --hover: 240 6% 12%;
   --primary: 172 70% 45%;
   --primary-strong: 188 80% 50%;
@@ -69,7 +71,9 @@
   --card: 0 0% 100%;
   --card-grad-top: 0 0% 100%;
   --card-grad-bot: 240 10% 99%;
-  --hover: 240 5% 96%;
+  --sidebar: 240 8% 96%;
+  --topbar: 0 0% 99%;
+  --hover: 240 5% 92%;
   --primary: 172 78% 30%;
   --primary-strong: 188 85% 36%;
   --primary-soft: 172 60% 94%;

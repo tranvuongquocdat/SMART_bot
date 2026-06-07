@@ -72,7 +72,7 @@ export function AppShell({
 
       <motion.aside
         className={cn(
-          'flex flex-col border-r border-[hsl(var(--divider))] bg-card relative z-30',
+          'flex flex-col border-r border-[hsl(var(--divider))] bg-[hsl(var(--sidebar))] relative z-30',
           'md:sticky md:top-0 md:h-screen md:translate-x-0 md:w-auto md:min-w-0',
           'fixed inset-y-0 left-0 w-[260px]',
         )}
@@ -139,7 +139,7 @@ export function AppShell({
       </motion.aside>
 
       <main>
-        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-[hsl(var(--divider))] bg-[hsl(var(--background)/0.7)] backdrop-blur px-7 py-3.5 max-md:px-4">
+        <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-[hsl(var(--divider))] bg-[hsl(var(--topbar)/0.85)] backdrop-blur px-7 py-3.5 max-md:px-4">
           <div className="flex items-center gap-3 min-w-0">
             <button
               onClick={() => setMobileOpen(true)}
