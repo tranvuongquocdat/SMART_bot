@@ -1,19 +1,18 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ChevronLeft, Menu, Search, type LucideIcon } from 'lucide-react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
+import { Kbd } from '@/components/ui/kbd';
 import { ThemeToggle } from './theme-toggle';
 import { UserMenu } from './user-menu';
+import { CommandPalette } from './command-palette';
 import type { Me } from '@/lib/auth';
 import { cn } from '@/lib/utils';
+import { spring } from '@/lib/motion';
 
-export type NavItem = {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-};
-
+export type NavItem = { label: string; href: string; icon: LucideIcon };
 export type NavSection = { label: string; items: NavItem[] };
 
 export function AppShell({
@@ -29,59 +28,88 @@ export function AppShell({
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(
+    typeof window !== 'undefined' ? window.innerWidth < 768 : false,
+  );
   const location = useLocation();
   const sb = collapsed ? '60px' : '232px';
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < 768);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   return (
     <div
       className="relative grid min-h-screen transition-[grid-template-columns] duration-200 md:grid-cols-[var(--sb)_1fr]"
       style={{ ['--sb' as string]: sb }}
     >
-      {mobileOpen && (
-        <div
-          className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-20"
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
+      <AnimatePresence>
+        {mobileOpen && (
+          <motion.div
+            key="backdrop"
+            className="md:hidden fixed inset-0 bg-black/60 backdrop-blur-sm z-20"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.15 }}
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
+      </AnimatePresence>
 
-      <aside
+      <motion.aside
         className={cn(
           'flex flex-col border-r border-border bg-card relative z-30',
-          'md:static md:translate-x-0',
-          'fixed inset-y-0 left-0 w-[260px] transition-transform',
-          mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
+          'md:static md:translate-x-0 md:w-auto md:min-w-0',
+          'fixed inset-y-0 left-0 w-[260px]',
         )}
+        animate={{ x: isMobile && !mobileOpen ? -260 : 0 }}
+        transition={spring}
       >
-        <div className={cn(
-          'flex items-center justify-between gap-2 px-3.5 pt-3.5 pb-1',
-          collapsed && 'justify-center px-1.5'
-        )}>
+        <div
+          className={cn(
+            'flex items-center justify-between gap-2 px-3.5 pt-3.5 pb-1',
+            collapsed && 'flex-col justify-center gap-1.5 px-1.5',
+          )}
+        >
           <div className={cn('flex items-center gap-2.5 overflow-hidden', collapsed && 'justify-center')}>
-            <div className="h-[26px] w-[26px] rounded-[7px] bg-gradient-to-br from-[hsl(168_72%_48%)] to-[hsl(190_75%_40%)] text-white font-semibold text-xs grid place-items-center shrink-0 shadow-[0_0_0_1px_hsl(168_50%_28%),inset_0_1px_0_hsl(168_80%_70%/0.3)]">
+            <div className="h-[26px] w-[26px] rounded-[7px] bg-accent-gradient text-white font-semibold text-xs grid place-items-center shrink-0 shadow-ring">
               S
             </div>
             {!collapsed && <span className="text-sm font-semibold tracking-tight">SMART_bot</span>}
           </div>
-          {!collapsed && (
-            <button
-              onClick={() => setCollapsed(true)}
-              aria-label="Thu gọn"
-              className="h-[26px] w-[26px] rounded-md grid place-items-center text-[hsl(var(--dim))] hover:text-foreground hover:bg-[hsl(var(--hover))]"
-            >
-              <ChevronLeft className="h-3.5 w-3.5" />
-            </button>
-          )}
+          <button
+            onClick={() => setCollapsed(!collapsed)}
+            aria-label={collapsed ? 'Mở rộng' : 'Thu gọn'}
+            className="h-[26px] w-[26px] rounded-md grid place-items-center text-[hsl(var(--dim))] hover:text-foreground hover:bg-[hsl(var(--hover))] transition-colors"
+          >
+            <ChevronLeft className={cn('h-3.5 w-3.5 transition-transform', collapsed && 'rotate-180')} />
+          </button>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-2.5 py-2">
-          {nav.map(section => (
+          {nav.map((section) => (
             <div key={section.label}>
               {!collapsed && (
                 <div className="text-[10px] uppercase tracking-wider text-[hsl(var(--dim))] px-2.5 pt-4 pb-1.5 font-medium">
                   {section.label}
                 </div>
               )}
-              {section.items.map(item => {
+              {section.items.map((item) => {
                 const active = location.pathname.startsWith(item.href);
                 const Icon = item.icon;
                 return (
@@ -93,10 +121,13 @@ export function AppShell({
                       'flex items-center gap-2.5 rounded-md px-2.5 py-[6.5px] text-[13px] text-muted-foreground transition-colors',
                       active && 'bg-[hsl(var(--hover))] text-foreground font-medium',
                       'hover:bg-[hsl(var(--hover))] hover:text-foreground',
-                      collapsed && 'justify-center px-2.5'
+                      collapsed && 'justify-center px-2.5',
                     )}
                   >
-                    <Icon className={cn('h-[15px] w-[15px] shrink-0', active && 'text-primary')} strokeWidth={1.8} />
+                    <Icon
+                      className={cn('h-[15px] w-[15px] shrink-0', active && 'text-[hsl(var(--primary))]')}
+                      strokeWidth={1.8}
+                    />
                     {!collapsed && <span className="truncate">{item.label}</span>}
                   </Link>
                 );
@@ -105,18 +136,8 @@ export function AppShell({
           ))}
         </nav>
 
-        {collapsed && (
-          <button
-            onClick={() => setCollapsed(false)}
-            aria-label="Mở rộng"
-            className="absolute -right-3 top-4 h-6 w-6 rounded-full bg-card border border-[hsl(var(--border-strong))] grid place-items-center text-[hsl(var(--dim))] hover:text-foreground"
-          >
-            <ChevronLeft className="h-3 w-3 rotate-180" />
-          </button>
-        )}
-
         <UserMenu me={me} collapsed={collapsed} />
-      </aside>
+      </motion.aside>
 
       <main>
         <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-border bg-[hsl(var(--background)/0.7)] backdrop-blur px-7 py-3.5 max-md:px-4">
@@ -131,10 +152,16 @@ export function AppShell({
             <div className="text-[13px] text-muted-foreground truncate">{breadcrumb}</div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="h-[30px] gap-2 text-xs">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-[30px] gap-2"
+              onClick={() => setPaletteOpen(true)}
+              aria-label="Tìm kiếm"
+            >
               <Search className="h-3.5 w-3.5" />
-              <span className="max-sm:hidden">Tìm kiếm</span>
-              <kbd className="bg-muted text-[hsl(var(--dim))] rounded px-1.5 py-0.5 text-[10px] font-mono">⌘K</kbd>
+              <span className="max-sm:hidden text-[11px]">Tìm kiếm</span>
+              <Kbd className="max-sm:hidden">⌘K</Kbd>
             </Button>
             <ThemeToggle />
           </div>
@@ -142,6 +169,8 @@ export function AppShell({
 
         {children}
       </main>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} nav={nav} />
     </div>
   );
 }
