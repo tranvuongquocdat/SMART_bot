@@ -76,6 +76,14 @@ async def get_dashboard(
             "SELECT count(*) FROM scheduled_reminders WHERE boss_id=$1 AND created_at >= $2",
             ctx.boss_id, thirty_days_ago,
         )
+        decision_count = await c.fetchval(
+            """
+            SELECT count(*) FROM decisions d
+            JOIN group_notes gn ON gn.id = d.group_id
+            WHERE gn.boss_id = $1 AND d.created_at >= $2
+            """,
+            ctx.boss_id, thirty_days_ago,
+        )
 
         # Recent activity: last 10 items updated
         recent_activity = await c.fetch(
@@ -127,7 +135,7 @@ async def get_dashboard(
             "messages": int(msg_count or 0),
             "tasks": int(task_count or 0),
             "reminders": int(reminder_count or 0),
-            "decisions": 0,  # placeholder — no decisions table yet
+            "decisions": int(decision_count or 0),
         },
         "recent_activity": [
             {
