@@ -16,12 +16,15 @@ export default function LoginPage() {
     setError(null);
     setLoading(true);
 
+    // Capture FormData SYNCHRONOUSLY — after `await` the synthetic event
+    // is recycled and e.currentTarget becomes null.
+    const fd = new FormData(e.currentTarget);
+
     try {
       // Step 1: ensure CSRF cookie is set
       await api('/api/v1/auth/csrf', { method: 'GET' });
 
       const csrf = readCsrfCookie();
-      const fd = new FormData(e.currentTarget);
 
       // Step 2: build a real form and submit it (full-page POST so the
       //         backend's 303 redirect to /app is followed naturally)
