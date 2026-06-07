@@ -4,6 +4,7 @@ import { Bell, Plus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { CreateReminderDialog } from './create-dialog';
 import { ReminderRow } from './reminder-row';
 import { remindersQuery } from './api';
@@ -59,36 +60,34 @@ export default function RemindersPage() {
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-4xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Nhắc lịch</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Quản lý các nhắc lịch cá nhân và nhóm
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Tạo nhắc lịch
-        </Button>
-      </div>
+    <PageWrap>
+      <PageHeader
+        title="Nhắc nhở"
+        subtitle="Quản lý các nhắc lịch cá nhân và nhóm"
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Tạo nhắc lịch
+          </Button>
+        }
+      />
 
-      {/* Tabs + table */}
-      <Tabs value={activeTab} onValueChange={v => setActiveTab(v as TabValue)}>
-        <TabsList>
-          {TABS.map(t => (
-            <TabsTrigger key={t.value} value={t.value}>
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        <div className="mt-4 rounded-md border bg-card">
-          <RemindersList status={activeTab} />
-        </div>
-      </Tabs>
+      <PageSection>
+        <Tabs value={activeTab} onValueChange={v => setActiveTab(v as TabValue)}>
+          <TabsList>
+            {TABS.map(t => (
+              <TabsTrigger key={t.value} value={t.value}>
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          <div className="mt-4 rounded-[12px] bg-card-grad surface-section overflow-hidden">
+            <RemindersList status={activeTab} />
+          </div>
+        </Tabs>
+      </PageSection>
 
       <CreateReminderDialog open={createOpen} onOpenChange={setCreateOpen} />
-    </div>
+    </PageWrap>
   );
 }

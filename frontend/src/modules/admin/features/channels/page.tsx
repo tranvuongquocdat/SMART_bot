@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { StatusDot } from '@/components/status-dot';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { channelsQuery, connectChannel, disconnectChannel } from './api';
 import type { Channel } from './api';
 
@@ -121,39 +122,37 @@ export default function ChannelsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-3xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Kênh bot</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Quản lý kết nối với Zalo, Telegram, Lark và các nền tảng khác.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {PROVIDERS.map(p => (
-            <Button key={p} variant="outline" size="sm" onClick={() => handleConnect(p)}>
-              <Plug className="mr-1.5 h-3.5 w-3.5" />
-              {p.charAt(0).toUpperCase() + p.slice(1)}
-            </Button>
-          ))}
-        </div>
-      </div>
+    <PageWrap>
+      <PageHeader
+        title="Kênh kết nối"
+        subtitle="Quản lý kết nối với Zalo, Telegram, Lark và các nền tảng khác."
+        actions={
+          <div className="flex gap-2">
+            {PROVIDERS.map(p => (
+              <Button key={p} variant="outline" size="sm" onClick={() => handleConnect(p)}>
+                <Plug className="mr-1.5 h-3.5 w-3.5" />
+                {p.charAt(0).toUpperCase() + p.slice(1)}
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
-      {/* Channel list */}
-      {channels.length === 0 ? (
-        <EmptyState
-          icon={Link2}
-          title="Chưa kết nối kênh nào"
-          description="Nhấn nút bên trên để kết nối Zalo, Telegram hoặc Lark."
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {channels.map(ch => (
-            <ChannelCard key={ch.provider} channel={ch} />
-          ))}
-        </div>
-      )}
-    </div>
+      <PageSection>
+        {channels.length === 0 ? (
+          <EmptyState
+            icon={Link2}
+            title="Chưa kết nối kênh nào"
+            description="Nhấn nút bên trên để kết nối Zalo, Telegram hoặc Lark."
+          />
+        ) : (
+          <div className="flex flex-col gap-3">
+            {channels.map(ch => (
+              <ChannelCard key={ch.provider} channel={ch} />
+            ))}
+          </div>
+        )}
+      </PageSection>
+    </PageWrap>
   );
 }

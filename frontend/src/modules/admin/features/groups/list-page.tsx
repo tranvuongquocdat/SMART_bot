@@ -14,24 +14,16 @@ import {
 import { DataTable } from '@/components/data-table';
 import { EmptyState } from '@/components/empty-state';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { relativeTime } from '@/lib/format';
 import { groupsListQuery, deleteGroup, type GroupListItem } from './api';
 import { CreateGroupDialog } from './create-dialog';
 
-const CHANNEL_COLOR: Record<string, string> = {
-  zalo: 'bg-blue-100 text-blue-700',
-  telegram: 'bg-sky-100 text-sky-700',
-  lark: 'bg-violet-100 text-violet-700',
-  web: 'bg-gray-100 text-gray-600',
-};
-
 function ChannelChip({ channel }: { channel: string }) {
-  const cls = CHANNEL_COLOR[channel] ?? 'bg-gray-100 text-gray-600';
-  return (
-    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11.5px] font-medium ${cls}`}>
-      {channel}
-    </span>
-  );
+  if (channel === 'zalo') return <Badge variant="zalo">{channel}</Badge>;
+  if (channel === 'telegram') return <Badge variant="telegram">{channel}</Badge>;
+  return <Badge variant="secondary">{channel}</Badge>;
 }
 
 export default function GroupsListPage() {
@@ -112,35 +104,31 @@ export default function GroupsListPage() {
   ];
 
   return (
-    <div className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-5xl">
-      {/* Header */}
-      <div className="flex items-start justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Nhóm</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Quản lý các nhóm chat và thành viên
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>+ Tạo nhóm</Button>
-      </div>
+    <PageWrap>
+      <PageHeader
+        title="Nhóm"
+        subtitle="Quản lý các nhóm chat và thành viên"
+        actions={<Button onClick={() => setCreateOpen(true)}>+ Tạo nhóm</Button>}
+      />
 
-      {/* Table */}
-      {isLoading ? (
-        <Skeleton className="h-48 w-full rounded-[10px]" />
-      ) : (
-        <DataTable
-          columns={columns}
-          data={data ?? []}
-          empty={
-            <EmptyState
-              icon={Users}
-              title="Chưa có nhóm"
-              description="Thêm nhóm để bắt đầu theo dõi tin nhắn và tác vụ"
-              action={{ label: '+ Tạo nhóm', onClick: () => setCreateOpen(true) }}
-            />
-          }
-        />
-      )}
+      <PageSection>
+        {isLoading ? (
+          <Skeleton className="h-48 w-full rounded-[12px]" />
+        ) : (
+          <DataTable
+            columns={columns}
+            data={data ?? []}
+            empty={
+              <EmptyState
+                icon={Users}
+                title="Chưa có nhóm"
+                description="Thêm nhóm để bắt đầu theo dõi tin nhắn và tác vụ"
+                action={{ label: '+ Tạo nhóm', onClick: () => setCreateOpen(true) }}
+              />
+            }
+          />
+        )}
+      </PageSection>
 
       {/* Dialogs */}
       <CreateGroupDialog open={createOpen} onOpenChange={setCreateOpen} />
@@ -165,6 +153,6 @@ export default function GroupsListPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </PageWrap>
   );
 }

@@ -1,6 +1,7 @@
 import { useSuspenseQuery } from '@tanstack/react-query';
 import { CreditCard } from 'lucide-react';
 import { StatusDot } from '@/components/status-dot';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { subscriptionQuery } from './api';
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -27,18 +28,14 @@ export default function SubscriptionPage() {
     : '—';
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-2xl">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Gói cước</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Thông tin gói dịch vụ và giới hạn sử dụng.
-        </p>
-      </div>
+    <PageWrap className="max-w-[720px]">
+      <PageHeader
+        title="Gói cước"
+        subtitle="Thông tin gói dịch vụ và giới hạn sử dụng."
+      />
 
-      {/* Plan card */}
-      <div className="rounded-lg border bg-card">
-        <div className="flex items-center gap-3 p-4 border-b">
+      <PageSection className="rounded-[12px] bg-card-grad surface-section overflow-hidden">
+        <div className="flex items-center gap-3 p-4 border-b border-border">
           <CreditCard className="h-5 w-5 text-muted-foreground" />
           <div>
             <p className="font-semibold capitalize">{sub.plan}</p>
@@ -62,12 +59,13 @@ export default function SubscriptionPage() {
             value={sub.last_invoice ?? <span className="text-muted-foreground">—</span>}
           />
         </div>
-      </div>
+      </PageSection>
 
-      {/* Upgrade note */}
-      <p className="text-xs text-muted-foreground">
-        Thanh toán và nâng cấp gói sẽ được tích hợp trong phiên bản tiếp theo.
-      </p>
-    </div>
+      <PageSection>
+        <p className="text-xs text-muted-foreground">
+          Thanh toán và nâng cấp gói sẽ được tích hợp trong phiên bản tiếp theo.
+        </p>
+      </PageSection>
+    </PageWrap>
   );
 }

@@ -11,6 +11,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { CreateProjectDialog } from './create-dialog';
 import { projectsQuery, deleteProject, type Project } from './api';
 
@@ -113,25 +114,23 @@ export default function ProjectsPage() {
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-4xl">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Dự án</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Quản lý các dự án và nhóm việc cần làm
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>
-          <Plus className="mr-2 h-4 w-4" />
-          Tạo dự án
-        </Button>
-      </div>
+    <PageWrap>
+      <PageHeader
+        title="Dự án"
+        subtitle="Quản lý các dự án và nhóm việc cần làm"
+        actions={
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Tạo dự án
+          </Button>
+        }
+      />
 
-      <div className="rounded-md border bg-card">
+      <PageSection className="rounded-[12px] bg-card-grad surface-section overflow-hidden">
         <ProjectList />
-      </div>
+      </PageSection>
 
       <CreateProjectDialog open={createOpen} onOpenChange={setCreateOpen} />
-    </div>
+    </PageWrap>
   );
 }

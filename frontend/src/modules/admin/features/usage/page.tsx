@@ -3,6 +3,7 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { usageQuery } from './api';
 
 const RANGES = [
@@ -22,9 +23,9 @@ function fmt(n: number, decimals = 4) {
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+    <div className="rounded-[12px] bg-card-grad surface-section p-4">
+      <p className="text-[10px] uppercase tracking-[0.07em] text-[hsl(var(--dim))] font-medium">{label}</p>
+      <p className="mt-1 text-[22px] font-semibold tracking-[-0.02em] tabular-nums">{value}</p>
     </div>
   );
 }
@@ -56,7 +57,7 @@ function UsageContent({ range }: { range: RangeValue }) {
       </div>
 
       {/* Daily breakdown table */}
-      <div className="rounded-md border bg-card overflow-x-auto">
+      <div className="rounded-[12px] bg-card-grad surface-section overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-muted-foreground border-b">
@@ -96,31 +97,30 @@ export default function UsagePage() {
   const [range, setRange] = useState<RangeValue>('30d');
 
   return (
-    <div className="flex flex-col gap-6 p-6 max-w-5xl">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Sử dụng</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Thống kê tokens và chi phí AI theo ngày.
-          </p>
-        </div>
-        <div className="flex gap-1 rounded-md border p-1 bg-muted/30">
-          {RANGES.map(r => (
-            <Button
-              key={r.value}
-              variant={range === r.value ? 'default' : 'ghost'}
-              size="sm"
-              className="h-7 text-xs px-3"
-              onClick={() => setRange(r.value)}
-            >
-              {r.label}
-            </Button>
-          ))}
-        </div>
-      </div>
+    <PageWrap>
+      <PageHeader
+        title="Sử dụng"
+        subtitle="Thống kê tokens và chi phí AI theo ngày."
+        actions={
+          <div className="flex gap-1 rounded-md border border-border p-1 bg-[hsl(var(--muted))]">
+            {RANGES.map(r => (
+              <Button
+                key={r.value}
+                variant={range === r.value ? 'default' : 'ghost'}
+                size="sm"
+                className="h-7 text-xs px-3"
+                onClick={() => setRange(r.value)}
+              >
+                {r.label}
+              </Button>
+            ))}
+          </div>
+        }
+      />
 
-      <UsageContent range={range} />
-    </div>
+      <PageSection>
+        <UsageContent range={range} />
+      </PageSection>
+    </PageWrap>
   );
 }
