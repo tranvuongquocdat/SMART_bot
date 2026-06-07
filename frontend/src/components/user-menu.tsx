@@ -1,4 +1,4 @@
-import { ChevronDown, LogOut, Settings, User } from 'lucide-react';
+import { ChevronDown, LogOut, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import {
   DropdownMenu,
@@ -51,10 +51,7 @@ export function UserMenu({ me, collapsed }: { me: Me; collapsed: boolean }) {
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent side="top" align="start" className="w-56">
-        <DropdownMenuItem onClick={() => navigate('/app/admin/settings?tab=account')}>
-          <User className="mr-2 h-4 w-4" />Hồ sơ
-        </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => navigate('/app/admin/settings?tab=general')}>
+        <DropdownMenuItem onClick={() => navigate('/app/admin/settings')}>
           <Settings className="mr-2 h-4 w-4" />Cài đặt
         </DropdownMenuItem>
         <DropdownMenuSeparator />

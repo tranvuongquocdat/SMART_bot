@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
@@ -6,12 +5,13 @@ import AccountTab from './account-tab';
 import AiTab from './ai-tab';
 import GeneralTab from './general-tab';
 
-const VALID_TABS = ['account', 'ai', 'general'];
+const VALID_TABS = ['account', 'ai', 'general'] as const;
 
 export default function SettingsPage() {
-  const [searchParams] = useSearchParams();
-  const initialTab = VALID_TABS.includes(searchParams.get('tab') ?? '') ? searchParams.get('tab')! : 'account';
-  const [tab, setTab] = useState(initialTab);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const raw = searchParams.get('tab') ?? '';
+  const tab = (VALID_TABS as readonly string[]).includes(raw) ? raw : 'account';
+  const setTab = (next: string) => setSearchParams({ tab: next }, { replace: true });
 
   return (
     <PageWrap>
