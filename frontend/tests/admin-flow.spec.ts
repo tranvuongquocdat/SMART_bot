@@ -17,7 +17,24 @@ test.describe('Admin (boss) flow', () => {
 
   test('dashboard — greeting + stat cards', async ({ page }) => {
     await page.goto('/app/admin/dashboard');
-    await expect(page.getByText(/Xin chào|Dashboard/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/Chào buổi|Dashboard/i)).toBeVisible({ timeout: 10000 });
+  });
+
+  test('dashboard — 4 stat cards with delta', async ({ page }) => {
+    await page.goto('/app/admin/dashboard');
+    await expect(page.getByText('Tin nhắn').first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText('Việc cần làm').first()).toBeVisible();
+    await expect(page.getByText('Nhắc nhở').first()).toBeVisible();
+    await expect(page.getByText('Quyết định').first()).toBeVisible();
+    await expect(page.getByText(/Mới|→ 0%|↗|↘/).first()).toBeVisible();
+  });
+
+  test('⌘K opens command palette', async ({ page }) => {
+    await page.goto('/app/admin/dashboard');
+    await page.keyboard.press('Meta+K');
+    await expect(page.getByPlaceholder(/Tìm trang/i)).toBeVisible({ timeout: 5000 });
+    await page.keyboard.press('Escape');
+    await expect(page.getByPlaceholder(/Tìm trang/i)).toBeHidden();
   });
 
   test('groups list — "+ Tạo nhóm" or DataTable', async ({ page }) => {
