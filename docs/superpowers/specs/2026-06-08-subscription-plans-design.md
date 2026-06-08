@@ -9,6 +9,20 @@
 
 Hệ thống quản lý gói cước cho phép boss đăng ký nâng gói, upload minh chứng chuyển khoản, và superadmin duyệt thủ công qua web UI. Gói được lưu trong DB, superadmin có thể chỉnh thông số từng gói qua UI mà không cần deploy lại code. Thiết kế sẵn để tích hợp payment gateway tự động sau này.
 
+### Tools vs Integrations
+
+Hai khái niệm tách biệt hoàn toàn về cơ chế và ownership:
+
+| | Tools | Integrations |
+|---|---|---|
+| Cơ chế | Built-in Python function, in-process | MCP server ngoài, kết nối qua URL |
+| Ai add mới | Chỉ superadmin/platform (cần deploy) | Boss tự add bất kỳ MCP server URL |
+| Boss quản lý | Toggle on/off từ catalog có sẵn | Self-service: add URL + auth token |
+| Limit | `max_active_tools` | `mcp_slots` |
+| Trang | `/app/admin/tools` | `/app/admin/integrations` |
+
+Tools = platform-curated (như App Store). Integrations = self-service URL (như browser extension).
+
 ---
 
 ## Business model
@@ -51,21 +65,21 @@ updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 
 | Field | Ý nghĩa |
 |---|---|
-| `max_groups` | Số nhóm tối đa bot track. `null` = unlimited |
-| `custom_channels` | Được phép add kênh riêng (Telegram bot, Zalo) không |
-| `mcp_slots` | Số MCP server tối đa. `0` = không được dùng, `null` = unlimited |
-| `tools_tier` | `"basic"` / `"standard"` / `"full"` — bộ tool được phép dùng |
+| `max_active_groups` | Số nhóm active tối đa boss được chọn. `null` = unlimited |
+| `max_active_tools` | Số built-in tools active tối đa. `null` = unlimited |
+| `max_active_channels` | Số kênh active tối đa (bot accounts). `null` = unlimited |
+| `mcp_slots` | Số MCP integration tối đa. `0` = không được dùng, `null` = unlimited |
 | `duration_days` | Số ngày subscription khi approve. `null` = không hết hạn |
 | `cost_cap_usd_daily` | Giới hạn chi phí LLM/ngày khi dùng API hệ thống. `null` = không giới hạn |
 
 **Seed data 4 gói mặc định:**
 
-| name | max_groups | custom_channels | mcp_slots | tools_tier | duration_days | cost_cap |
+| name | max_active_groups | max_active_tools | max_active_channels | mcp_slots | duration_days | cost_cap |
 |---|---|---|---|---|---|---|
-| trial | 2 | false | 0 | basic | 14 | 0.5 |
-| starter | 5 | false | 0 | standard | 30 | 2.0 |
-| pro | 30 | true | 2 | full | 30 | 5.0 |
-| custom | null | true | null | full | null | null |
+| trial | 2 | 5 | 1 | 0 | 14 | 0.5 |
+| starter | 5 | 10 | 1 | 0 | 30 | 2.0 |
+| pro | 30 | null | 3 | 2 | 30 | 5.0 |
+| custom | null | null | null | null | null | null |
 
 ---
 
@@ -127,17 +141,21 @@ Enforcement đọc thẳng từ `users` (không join `plans`) vì approve đã c
 
 | Limit | Điểm enforce | Hành động khi vượt |
 |---|---|---|
-| `max_groups` | Khi bot nhận tin từ group mới | Drop message, reply "Gói của bạn đã đạt giới hạn X nhóm" |
-| `custom_channels` | Khi boss add bot account riêng qua API | HTTP 403 |
-| `mcp_slots` | Khi boss add/enable MCP server | HTTP 400 "Đã đạt giới hạn MCP server" |
+| `max_active_groups` | UI khi boss toggle group active | Block toggle, show upgrade prompt |
+| `max_active_tools` | UI khi boss toggle tool active | Block toggle, show upgrade prompt |
+| `max_active_channels` | UI khi boss enable channel | Block action, show upgrade prompt |
+| `mcp_slots` | UI khi boss add/enable MCP server | Block, show upgrade prompt |
 | `cost_cap_usd_daily` | LLM gateway (`src/security/cost_cap.py`) | Agent trả lỗi, không gọi LLM |
-| `tools_tier` | Tool registry filter khi build tool list | Tool không có trong danh sách |
 | `subscription_status = expired/canceled` | Đầu mỗi agent call | Block toàn bộ, trả thông báo hết hạn |
 
-`tools_tier` mapping:
-- `basic`: action_items, reminders, notes, search
-- `standard`: basic + memory (Qdrant), web fetch
-- `full`: standard + media parse + plugins
+Enforcement chủ yếu ở **frontend** (block UI action + show upgrade modal) và **API** (trả 400 nếu vượt limit). Agent chỉ load tools/groups đang active — không cần check limit tại runtime.
+
+### Boss quản lý active items
+
+- **Groups**: `/app/admin/groups` — mỗi group có toggle Active/Inactive. Badge "3/5 nhóm active".
+- **Tools**: `/app/admin/tools` — grid tất cả built-in tools platform cung cấp, toggle từng cái. Badge "6/10 tools active".
+- **Channels**: `/app/admin/channels` — enable/disable bot account. Badge "1/3 kênh active".
+- **Integrations**: `/app/admin/integrations` — tự add MCP server URL + auth. Badge "1/2 integrations".
 
 ---
 
