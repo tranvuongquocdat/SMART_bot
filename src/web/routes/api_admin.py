@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
 from src.repositories.base import BossContext
@@ -1674,3 +1674,233 @@ async def get_subscription(
         "last_invoice": None,
         "upgrade_url": None,
     }
+
+
+# ===========================================================================
+# Subscription — Plans & Requests
+# ===========================================================================
+
+from src.services.subscription import get_effective_limits, check_over_limit  # noqa: E402
+from src.web.uploads import save_upload  # noqa: E402
+
+
+@router.get("/subscription/plans")
+async def list_plans(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, label, limits_json FROM plans WHERE is_active=TRUE ORDER BY sort_order"
+        )
+    return [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "label": r["label"],
+            "limits": r["limits_json"],
+        }
+        for r in rows
+    ]
+
+
+@router.get("/subscription/limits")
+async def get_limits(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    lim = await get_effective_limits(db, ctx.boss_id)
+    over = await check_over_limit(db, ctx.boss_id)
+    return {
+        "max_active_groups": lim.max_active_groups,
+        "max_active_tools": lim.max_active_tools,
+        "max_active_channels": lim.max_active_channels,
+        "mcp_slots": lim.mcp_slots,
+        "cost_cap_usd_daily": lim.cost_cap_usd_daily,
+        "over_limit": {
+            "groups": over.groups,
+            "tools": over.tools,
+            "channels": over.channels,
+            "mcp": over.mcp,
+            "any_over": over.any_over,
+        },
+    }
+
+
+@router.get("/subscription/requests")
+async def list_subscription_requests(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                   sr.reviewer_note, sr.refund_requested, sr.created_at, sr.reviewed_at,
+                   sr.cancelled_at,
+                   p.name AS plan_name, p.label AS plan_label
+            FROM subscription_requests sr
+            JOIN plans p ON p.id = sr.plan_id
+            WHERE sr.boss_id = $1
+            ORDER BY sr.created_at DESC
+            """,
+            ctx.boss_id,
+        )
+    result = []
+    for r in rows:
+        d = dict(r)
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        if d.get("reviewed_at"):
+            d["reviewed_at"] = d["reviewed_at"].isoformat()
+        if d.get("cancelled_at"):
+            d["cancelled_at"] = d["cancelled_at"].isoformat()
+        result.append(d)
+    return result
+
+
+@router.post("/subscription/requests", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_subscription_request(
+    plan_id: int = Form(...),
+    note: str | None = Form(None),
+    amount_paid_vnd: int | None = Form(None),
+    transfer_content: str | None = Form(None),
+    payment_proof: UploadFile = File(...),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    proof_path = await save_upload(payment_proof, "payment_proofs")
+    async with db.acquire() as c:
+        plan = await c.fetchrow(
+            "SELECT id, name FROM plans WHERE id=$1 AND is_active=TRUE", plan_id
+        )
+        if not plan:
+            raise HTTPException(404, "Plan not found")
+        try:
+            row = await c.fetchrow(
+                """
+                INSERT INTO subscription_requests
+                  (boss_id, plan_id, note, payment_proof_path, amount_paid_vnd, transfer_content)
+                VALUES ($1, $2, $3, $4, $5, $6)
+                RETURNING id, status
+                """,
+                ctx.boss_id,
+                plan_id,
+                note,
+                proof_path,
+                amount_paid_vnd,
+                transfer_content,
+            )
+        except Exception as e:
+            if "uq_one_pending_per_boss" in str(e):
+                raise HTTPException(409, "Already have a pending request")
+            raise
+    return {"id": row["id"], "status": row["status"], "plan_name": plan["name"]}
+
+
+@router.post(
+    "/subscription/requests/{req_id}/cancel",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def cancel_subscription_request(
+    req_id: int,
+    cancel_reason: str | None = Form(None),
+    refund_requested: bool = Form(False),
+    refund_qr: UploadFile | None = File(None),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    qr_path = None
+    if refund_requested and refund_qr and refund_qr.filename:
+        qr_path = await save_upload(refund_qr, "refund_qr")
+    async with db.acquire() as c:
+        req = await c.fetchrow(
+            "SELECT id, boss_id, status FROM subscription_requests WHERE id=$1",
+            req_id,
+        )
+        if not req or req["boss_id"] != ctx.boss_id:
+            raise HTTPException(404, "Request not found")
+        if req["status"] != "pending":
+            raise HTTPException(400, "Can only cancel pending requests")
+        await c.execute(
+            """
+            UPDATE subscription_requests SET
+              status='cancelled', cancel_reason=$2,
+              refund_requested=$3, refund_qr_path=$4,
+              cancelled_at=NOW()
+            WHERE id=$1
+            """,
+            req_id,
+            cancel_reason,
+            refund_requested,
+            qr_path,
+        )
+    return {"status": "cancelled", "refund_requested": refund_requested}
+
+
+# ===========================================================================
+# Tools — List & Toggle
+# ===========================================================================
+
+from src.tools import registry as _tool_registry  # noqa: E402
+
+
+@router.get("/tools")
+async def list_tools(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+        )
+    active_names = {r["tool_name"] for r in rows}
+    return [
+        {
+            "name": name,
+            "description": t.description,
+            "active": name in active_names,
+        }
+        for name, t in _tool_registry._REGISTRY.items()
+    ]
+
+
+@router.patch("/tools/{name}/toggle", dependencies=[Depends(verify_json_csrf)])
+async def toggle_tool(
+    name: str,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    if name not in _tool_registry._REGISTRY:
+        raise HTTPException(404, "Tool not found")
+
+    async with db.acquire() as c:
+        exists = await c.fetchval(
+            "SELECT 1 FROM boss_active_tools WHERE boss_id=$1 AND tool_name=$2",
+            ctx.boss_id,
+            name,
+        )
+        if exists:
+            await c.execute(
+                "DELETE FROM boss_active_tools WHERE boss_id=$1 AND tool_name=$2",
+                ctx.boss_id,
+                name,
+            )
+            return {"name": name, "active": False}
+
+        lim = await get_effective_limits(db, ctx.boss_id)
+        if lim.max_active_tools is not None:
+            count = await c.fetchval(
+                "SELECT COUNT(*) FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+            )
+            if count >= lim.max_active_tools:
+                raise HTTPException(
+                    400,
+                    f"Limit reached: max {lim.max_active_tools} active tools on your plan",
+                )
+        await c.execute(
+            "INSERT INTO boss_active_tools (boss_id, tool_name) VALUES ($1, $2)",
+            ctx.boss_id,
+            name,
+        )
+        return {"name": name, "active": True}
