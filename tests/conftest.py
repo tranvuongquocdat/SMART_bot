@@ -85,7 +85,7 @@ def _maybe_bootstrap_test_db() -> None:
                 ) else None
             finally:
                 await test_conn.close()
-            return current_rev != "0004"
+            return current_rev != "0005"
         finally:
             await conn.close()
 
