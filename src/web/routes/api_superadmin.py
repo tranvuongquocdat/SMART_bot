@@ -1210,3 +1210,253 @@ async def patch_retrieval_pipeline(
             body.description,
         )
     return {"feature": feature, "ok": True}
+
+
+# ===========================================================================
+# Subscription Requests — superadmin review
+# ===========================================================================
+
+import json as _json  # noqa: E402
+
+from fastapi.responses import FileResponse  # noqa: E402
+
+from src.services.subscription import apply_plan_to_user  # noqa: E402
+
+
+@router.get("/subscription-requests")
+async def list_subscription_requests_sa(
+    status: str | None = None,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        if status:
+            rows = await c.fetch(
+                """
+                SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                       sr.reviewer_note, sr.refund_requested, sr.refund_qr_path,
+                       sr.created_at, sr.reviewed_at, sr.cancelled_at,
+                       p.name AS plan_name, p.label AS plan_label,
+                       u.email AS boss_email, u.name AS boss_name,
+                       cp.name AS current_plan_name
+                FROM subscription_requests sr
+                JOIN plans p ON p.id = sr.plan_id
+                JOIN users u ON u.id = sr.boss_id
+                LEFT JOIN plans cp ON cp.id = u.plan_id
+                WHERE sr.status = $1
+                ORDER BY sr.created_at DESC
+                """,
+                status,
+            )
+        else:
+            rows = await c.fetch(
+                """
+                SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                       sr.reviewer_note, sr.refund_requested, sr.refund_qr_path,
+                       sr.created_at, sr.reviewed_at, sr.cancelled_at,
+                       p.name AS plan_name, p.label AS plan_label,
+                       u.email AS boss_email, u.name AS boss_name,
+                       cp.name AS current_plan_name
+                FROM subscription_requests sr
+                JOIN plans p ON p.id = sr.plan_id
+                JOIN users u ON u.id = sr.boss_id
+                LEFT JOIN plans cp ON cp.id = u.plan_id
+                ORDER BY sr.created_at DESC
+                """
+            )
+    result = []
+    for r in rows:
+        d = dict(r)
+        for f in ("created_at", "reviewed_at", "cancelled_at"):
+            if d.get(f):
+                d[f] = d[f].isoformat()
+        result.append(d)
+    return result
+
+
+@router.get("/subscription-requests/{req_id}")
+async def get_subscription_request_sa(
+    req_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            SELECT sr.*, p.name AS plan_name, p.label AS plan_label,
+                   p.limits_json AS plan_limits,
+                   u.email AS boss_email, u.name AS boss_name,
+                   u.subscription_status AS current_status,
+                   cp.name AS current_plan_name
+            FROM subscription_requests sr
+            JOIN plans p ON p.id = sr.plan_id
+            JOIN users u ON u.id = sr.boss_id
+            LEFT JOIN plans cp ON cp.id = u.plan_id
+            WHERE sr.id = $1
+            """,
+            req_id,
+        )
+    if not row:
+        raise HTTPException(404, "Request not found")
+    d = dict(row)
+    for f in ("created_at", "reviewed_at", "cancelled_at"):
+        if d.get(f):
+            d[f] = d[f].isoformat()
+    return d
+
+
+@router.post(
+    "/subscription-requests/{req_id}/approve",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def approve_subscription_request(
+    req_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        req = await c.fetchrow(
+            "SELECT boss_id, plan_id, status FROM subscription_requests WHERE id=$1",
+            req_id,
+        )
+    if not req:
+        raise HTTPException(404, "Request not found")
+    if req["status"] != "pending":
+        raise HTTPException(400, "Request is not pending")
+
+    overrides = payload.get("overrides") or {}
+    await apply_plan_to_user(db, req["boss_id"], req["plan_id"], overrides)
+
+    async with db.acquire() as c:
+        await c.execute(
+            "UPDATE subscription_requests SET status='approved', reviewed_at=NOW() WHERE id=$1",
+            req_id,
+        )
+    return {"status": "approved", "request_id": req_id}
+
+
+@router.post(
+    "/subscription-requests/{req_id}/reject",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def reject_subscription_request(
+    req_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        req = await c.fetchrow(
+            "SELECT status FROM subscription_requests WHERE id=$1", req_id
+        )
+        if not req or req["status"] != "pending":
+            raise HTTPException(400, "Request not pending or not found")
+        await c.execute(
+            """
+            UPDATE subscription_requests
+            SET status='rejected', reviewed_at=NOW(), reviewer_note=$2
+            WHERE id=$1
+            """,
+            req_id,
+            payload.get("reviewer_note", ""),
+        )
+    return {"status": "rejected", "request_id": req_id}
+
+
+@router.get("/payment-proof/{filename}")
+async def get_payment_proof(
+    filename: str,
+    _: BossContext = Depends(require_superadmin),
+) -> FileResponse:
+    from pathlib import Path
+
+    safe_name = Path(filename).name
+    for subdir in ("payment_proofs", "refund_qr"):
+        candidate = Path("uploads") / subdir / safe_name
+        if candidate.exists():
+            return FileResponse(str(candidate))
+    raise HTTPException(404, "File not found")
+
+
+# ===========================================================================
+# Plans CRUD — superadmin
+# ===========================================================================
+
+
+@router.get("/plans")
+async def list_plans_superadmin(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, label, limits_json, is_active, sort_order FROM plans ORDER BY sort_order"
+        )
+    return [dict(r) for r in rows]
+
+
+@router.post("/plans", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_plan_sa(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    required = {"name", "label", "limits_json"}
+    if not required.issubset(payload):
+        raise HTTPException(400, f"Required fields: {required}")
+    async with db.acquire() as c:
+        try:
+            row = await c.fetchrow(
+                """
+                INSERT INTO plans (name, label, limits_json, sort_order)
+                VALUES ($1, $2, $3::jsonb, COALESCE($4, 99))
+                RETURNING id, name
+                """,
+                payload["name"],
+                payload["label"],
+                _json.dumps(payload["limits_json"]),
+                payload.get("sort_order"),
+            )
+        except Exception as e:
+            if "unique" in str(e).lower():
+                raise HTTPException(409, "Plan name already exists")
+            raise
+    return {"id": row["id"], "name": row["name"]}
+
+
+@router.patch("/plans/{plan_id}", dependencies=[Depends(verify_json_csrf)])
+async def update_plan_sa(
+    plan_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    allowed_fields = {"label", "limits_json", "is_active", "sort_order"}
+    updates = {k: v for k, v in payload.items() if k in allowed_fields}
+    if not updates:
+        raise HTTPException(400, "No valid fields to update")
+    async with db.acquire() as c:
+        if updates.get("is_active") is False:
+            count = await c.fetchval(
+                "SELECT COUNT(*) FROM users WHERE plan_id=$1", plan_id
+            )
+            if count > 0:
+                raise HTTPException(
+                    400, f"Cannot deactivate plan: {count} users are on it"
+                )
+        sets = []
+        vals = [plan_id]
+        for i, (k, v) in enumerate(updates.items(), start=2):
+            if k == "limits_json":
+                sets.append(f"limits_json=${i}::jsonb")
+                vals.append(_json.dumps(v))
+            else:
+                sets.append(f"{k}=${i}")
+                vals.append(v)
+        sets.append("updated_at=NOW()")
+        await c.execute(
+            f"UPDATE plans SET {', '.join(sets)} WHERE id=$1",
+            *vals,
+        )
+    return {"updated": 1}
