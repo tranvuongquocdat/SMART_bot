@@ -101,6 +101,20 @@ async def _allowed_tools(cfg, ctx) -> set[str]:
         prefix = tname.split("_", 1)[0]
         if prefix in enabled:
             base.add(tname)
+
+    # Intersect with boss's explicitly active tools.
+    # Tools not present in boss_active_tools are skipped regardless of the allowlist.
+    try:
+        async with db.acquire() as c:
+            active_rows = await c.fetch(
+                "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", boss.id
+            )
+        boss_active = {r["tool_name"] for r in active_rows}
+        if boss_active:
+            base = base & boss_active
+    except Exception:
+        log.exception("boss_active_tools query failed — skipping filter")
+
     return base
 
 
