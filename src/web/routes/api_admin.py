@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from src.repositories.base import BossContext
@@ -1522,18 +1522,64 @@ async def list_channels(
 @router.post("/channels/{provider}/connect", dependencies=[Depends(verify_json_csrf)])
 async def connect_channel(
     provider: str,
+    request: Request,
     ctx: BossContext = Depends(require_boss),
-    db: asyncpg.Pool = Depends(get_db),  # noqa: ARG001
+    db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Kick off a channel connect flow. Currently stubbed — real OAuth/QR flows TBD."""
-    # Real implementation will return {redirect_url} or {qr_url} depending on provider.
-    # Frontend handles null redirect_url gracefully (shows "coming soon" toast).
-    return {
-        "provider": provider,
-        "redirect_url": None,
-        "qr_url": None,
-        "message": "not_implemented",
-    }
+    """Self-service connect: cấp phát bot account từ pool nền tảng.
+
+    Zalo dùng acc cá nhân do nền tảng quản lý (không OAuth) — connect nghĩa là
+    chọn acc ít tải nhất còn slot rồi kích hoạt inbound luôn (bấm Connect từ
+    web chính là chấp nhận assignment).
+    """
+    from src.services.bot_account_service import BotAccountService, NoCapacityError
+    from src.services.subscription import get_effective_limits
+
+    provider = provider.lower().strip()
+
+    async with db.acquire() as c:
+        existing = await c.fetchval(
+            """
+            SELECT status FROM bot_account_assignments
+            WHERE boss_id=$1 AND provider=$2 AND status IN ('active', 'pending_accept')
+            """,
+            ctx.boss_id,
+            provider,
+        )
+        if existing:
+            raise HTTPException(409, "Kênh này đã được kết nối")
+
+        limits = await get_effective_limits(db, ctx.boss_id)
+        if limits.max_active_channels is not None:
+            active = await c.fetchval(
+                "SELECT COUNT(*) FROM bot_account_assignments WHERE boss_id=$1 AND status='active'",
+                ctx.boss_id,
+            )
+            if active >= limits.max_active_channels:
+                raise HTTPException(
+                    400,
+                    f"Đã đạt giới hạn {limits.max_active_channels} kênh của gói hiện tại",
+                )
+
+    registry = getattr(request.app.state, "channel_registry", None)
+    adapter_map = (
+        {a.provider: a for a in registry.adapters()} if registry is not None else {}
+    )
+    svc = BotAccountService(db, request.app.state.bus, adapter_map)
+    try:
+        bot_account_id = await svc.auto_assign(ctx.boss_id, provider)
+    except NoCapacityError:
+        raise HTTPException(
+            409,
+            "Hiện chưa có tài khoản bot khả dụng cho kênh này — vui lòng liên hệ quản trị viên",
+        )
+    await svc.accept(ctx.boss_id, provider)
+
+    async with db.acquire() as c:
+        display_name = await c.fetchval(
+            "SELECT display_name FROM bot_accounts WHERE id=$1", bot_account_id
+        )
+    return {"provider": provider, "status": "active", "display_name": display_name}
 
 
 @router.delete("/channels/{provider}", dependencies=[Depends(verify_json_csrf)])

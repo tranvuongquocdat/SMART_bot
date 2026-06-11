@@ -108,14 +108,11 @@ def test_connect_channel_no_csrf(client, logged_in_boss):
     assert r.status_code == 403
 
 
-def test_connect_channel_stub_response(client, logged_in_boss):
+def test_connect_channel_no_capacity(client, logged_in_boss):
+    """Without any platform bot account in the pool, connect returns 409."""
     headers = _csrf(client)
     r = client.post("/api/v1/admin/channels/zalo/connect", json={}, headers=headers)
-    assert r.status_code == 200
-    body = r.json()
-    assert body["provider"] == "zalo"
-    assert body["message"] == "not_implemented"
-    assert "redirect_url" in body
+    assert r.status_code == 409
 
 
 # ---------------------------------------------------------------------------

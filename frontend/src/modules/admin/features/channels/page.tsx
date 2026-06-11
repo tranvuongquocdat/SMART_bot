@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { ApiError } from '@/lib/api';
 import { StatusDot } from '@/components/status-dot';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
@@ -107,17 +108,21 @@ function ChannelCard({ channel }: { channel: Channel }) {
 
 export default function ChannelsPage() {
   const { data: channels } = useSuspenseQuery(channelsQuery());
+  const qc = useQueryClient();
 
   async function handleConnect(provider: string) {
     try {
       const result = await connectChannel(provider);
-      if (result.redirect_url) {
-        window.location.href = result.redirect_url;
-      } else {
-        toast.info('Tính năng đang hoàn thiện.');
-      }
-    } catch {
-      toast.error('Không thể kết nối kênh. Thử lại sau.');
+      await qc.invalidateQueries({ queryKey: ['admin', 'channels'] });
+      toast.success(
+        `Đã kết nối ${result.provider}${result.display_name ? ` — ${result.display_name}` : ''}.`
+      );
+    } catch (e) {
+      const detail =
+        e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
+          ? (e.body as { detail: string }).detail
+          : 'Không thể kết nối kênh. Thử lại sau.';
+      toast.error(detail);
     }
   }
 

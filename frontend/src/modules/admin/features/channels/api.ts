@@ -14,9 +14,8 @@ export type Channel = {
 
 export type ConnectResult = {
   provider: string;
-  redirect_url: string | null;
-  qr_url: string | null;
-  message: string;
+  status: string;
+  display_name: string | null;
 };
 
 export const channelsQuery = () =>
