@@ -97,6 +97,7 @@ export function ChatPanel({
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sentAtRef = useRef(0);
 
   const invalidateMessages = () =>
     qc.invalidateQueries({
@@ -133,6 +134,19 @@ export function ChatPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
 
+  // Bot có thể trả lời xong trước cả khi POST /send return (bus xử lý đồng
+  // bộ) — nếu lịch sử đã có câu trả lời mới hơn thời điểm gửi thì tắt indicator.
+  useEffect(() => {
+    if (!awaitingReply) return;
+    const replied = messages.some(
+      (m) => m.kind === 'out' && Date.parse(m.ts) >= sentAtRef.current - 10_000
+    );
+    if (replied) {
+      setAwaitingReply(false);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    }
+  }, [messages, awaitingReply]);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length, awaitingReply, replyError]);
@@ -153,6 +167,17 @@ export function ChatPanel({
     const text = draft.trim();
     if ((!text && !attachment) || sending) return;
     setSending(true);
+    // Bật indicator TRƯỚC khi gọi API — reply có thể về trong lúc đang await
+    setReplyError(null);
+    setAwaitingReply(true);
+    sentAtRef.current = Date.now();
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = setTimeout(() => {
+      setAwaitingReply(false);
+      setReplyError(
+        'Trợ lý không phản hồi (quá 90 giây). Kiểm tra cấu hình model/API key trong Cài đặt > AI, hoặc thử lại.'
+      );
+    }, REPLY_TIMEOUT_MS);
     try {
       await sendChatMessage({
         text,
@@ -161,17 +186,10 @@ export function ChatPanel({
       });
       setDraft('');
       setAttachment(null);
-      setReplyError(null);
-      setAwaitingReply(true);
       invalidateMessages();
-      if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => {
-        setAwaitingReply(false);
-        setReplyError(
-          'Trợ lý không phản hồi (quá 90 giây). Kiểm tra cấu hình model/API key trong Cài đặt > AI, hoặc thử lại.'
-        );
-      }, REPLY_TIMEOUT_MS);
     } catch (e) {
+      setAwaitingReply(false);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
       toast.error(e instanceof Error ? e.message : 'Không gửi được tin nhắn');
     } finally {
       setSending(false);
