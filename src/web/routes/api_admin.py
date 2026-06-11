@@ -2167,3 +2167,68 @@ async def disable_all_tools(
         )
     disabled = int(result.split()[-1]) if result else 0
     return {"disabled": disabled, "active": 0}
+
+
+@router.post("/groups/enable-all", dependencies=[Depends(verify_json_csrf)])
+async def enable_all_groups(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Bật toàn bộ nhóm trong một lần bấm, cắt theo max_active_groups của gói."""
+    lim = await get_effective_limits(db, ctx.boss_id)
+    async with db.acquire() as c:
+        total = await c.fetchval(
+            "SELECT COUNT(*) FROM group_notes WHERE boss_id=$1", ctx.boss_id
+        )
+        active = await c.fetchval(
+            "SELECT COUNT(*) FROM group_notes WHERE boss_id=$1 AND is_active=TRUE",
+            ctx.boss_id,
+        )
+        slots = None
+        if lim.max_active_groups is not None:
+            slots = max(0, lim.max_active_groups - active)
+        if slots is None:
+            result = await c.execute(
+                "UPDATE group_notes SET is_active=TRUE WHERE boss_id=$1 AND is_active=FALSE",
+                ctx.boss_id,
+            )
+            enabled = int(result.split()[-1]) if result else 0
+        elif slots > 0:
+            # Bật các nhóm hoạt động gần nhất trước
+            result = await c.execute(
+                """
+                UPDATE group_notes SET is_active=TRUE
+                WHERE id IN (
+                  SELECT id FROM group_notes
+                  WHERE boss_id=$1 AND is_active=FALSE
+                  ORDER BY updated_at DESC NULLS LAST
+                  LIMIT $2
+                )
+                """,
+                ctx.boss_id,
+                slots,
+            )
+            enabled = int(result.split()[-1]) if result else 0
+        else:
+            enabled = 0
+    return {
+        "enabled": enabled,
+        "active": active + enabled,
+        "total": total,
+        "limit": lim.max_active_groups,
+    }
+
+
+@router.post("/groups/disable-all", dependencies=[Depends(verify_json_csrf)])
+async def disable_all_groups(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Tắt toàn bộ nhóm trong một lần bấm."""
+    async with db.acquire() as c:
+        result = await c.execute(
+            "UPDATE group_notes SET is_active=FALSE WHERE boss_id=$1 AND is_active=TRUE",
+            ctx.boss_id,
+        )
+    disabled = int(result.split()[-1]) if result else 0
+    return {"disabled": disabled, "active": 0}

@@ -86,3 +86,15 @@ export const toggleGroupActive = (id: number) =>
     `/api/v1/admin/groups/${id}/toggle-active`,
     { method: 'PATCH' },
   );
+
+export const enableAllGroups = () =>
+  api<{ enabled: number; active: number; total: number; limit: number | null }>(
+    '/api/v1/admin/groups/enable-all',
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+
+export const disableAllGroups = () =>
+  api<{ disabled: number; active: number }>(
+    '/api/v1/admin/groups/disable-all',
+    { method: 'POST', body: JSON.stringify({}) },
+  );

@@ -18,7 +18,10 @@ import { Badge } from '@/components/ui/badge';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { relativeTime } from '@/lib/format';
 import { ApiError } from '@/lib/api';
-import { groupsListQuery, deleteGroup, toggleGroupActive, type GroupListItem } from './api';
+import {
+  groupsListQuery, deleteGroup, toggleGroupActive,
+  enableAllGroups, disableAllGroups, type GroupListItem,
+} from './api';
 import { CreateGroupDialog } from './create-dialog';
 
 function ChannelChip({ channel }: { channel: string }) {
@@ -42,6 +45,30 @@ export default function GroupsListPage() {
       setDeleteTarget(null);
     },
     onError: () => toast.error('Xoá thất bại'),
+  });
+
+  const enableAllMut = useMutation({
+    mutationFn: enableAllGroups,
+    onSuccess: (data) => {
+      qc.invalidateQueries(groupsListQuery());
+      if (data.limit !== null && data.active < data.total) {
+        toast.info(
+          `Đã bật ${data.active}/${data.total} nhóm — gói hiện tại giới hạn ${data.limit} nhóm.`
+        );
+      } else {
+        toast.success(`Đã bật toàn bộ ${data.active} nhóm.`);
+      }
+    },
+    onError: () => toast.error('Thao tác thất bại'),
+  });
+
+  const disableAllMut = useMutation({
+    mutationFn: disableAllGroups,
+    onSuccess: (data) => {
+      qc.invalidateQueries(groupsListQuery());
+      toast.success(`Đã tắt ${data.disabled} nhóm.`);
+    },
+    onError: () => toast.error('Thao tác thất bại'),
   });
 
   const toggleMutation = useMutation({
@@ -147,7 +174,31 @@ export default function GroupsListPage() {
       <PageHeader
         title="Nhóm"
         subtitle="Quản lý các nhóm chat và thành viên"
-        actions={<Button onClick={() => setCreateOpen(true)}>+ Tạo nhóm</Button>}
+        actions={
+          <div className="flex gap-2">
+            {(data ?? []).some((g) => g.is_active) && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disableAllMut.isPending}
+                onClick={() => disableAllMut.mutate()}
+              >
+                {disableAllMut.isPending ? 'Đang tắt…' : 'Tắt tất cả'}
+              </Button>
+            )}
+            {(data ?? []).some((g) => !g.is_active) && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={enableAllMut.isPending}
+                onClick={() => enableAllMut.mutate()}
+              >
+                {enableAllMut.isPending ? 'Đang bật…' : 'Bật tất cả'}
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setCreateOpen(true)}>+ Tạo nhóm</Button>
+          </div>
+        }
       />
 
       <PageSection>

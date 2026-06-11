@@ -185,3 +185,57 @@ def test_inactive_group_gates_agent(clean_db, logged_in_boss, seed_group_owned_b
     off, unknown = asyncio.get_event_loop().run_until_complete(_check())
     assert off is False
     assert unknown is True
+
+
+def test_groups_enable_all_respects_limit(client, logged_in_boss, seed_group_owned_by_boss, clean_db):
+    import asyncio
+    from src.web.security import CSRF_COOKIE
+
+    async def _setup():
+        async with clean_db.acquire() as c:
+            pid = await c.fetchval(
+                "INSERT INTO plans (name,label,limits_json) VALUES "
+                "('tiny-grp-all','Tiny','{\"max_active_groups\": 1}'::jsonb) "
+                "ON CONFLICT (name) DO UPDATE SET limits_json=EXCLUDED.limits_json RETURNING id"
+            )
+            await c.execute(
+                "UPDATE users SET plan_id=$2 WHERE id=$1", logged_in_boss.boss_id, pid
+            )
+            await c.execute(
+                "UPDATE group_notes SET is_active=FALSE WHERE boss_id=$1",
+                logged_in_boss.boss_id,
+            )
+            await c.execute(
+                """
+                INSERT INTO group_notes (boss_id, provider, chat_id, group_name, is_active)
+                VALUES ($1, 'zalo', 'zalo-group-test-003', 'Phòng 3', FALSE)
+                ON CONFLICT (boss_id, provider, chat_id) DO UPDATE SET is_active=FALSE
+                """,
+                logged_in_boss.boss_id,
+            )
+
+    asyncio.get_event_loop().run_until_complete(_setup())
+
+    client.cookies.set(CSRF_COOKIE, "csrf-grp-enable-all")
+    r = client.post(
+        "/api/v1/admin/groups/enable-all",
+        headers={"X-CSRF-Token": "csrf-grp-enable-all"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["active"] == 1
+    assert body["limit"] == 1
+
+
+def test_groups_disable_all(client, logged_in_boss, seed_group_owned_by_boss):
+    from src.web.security import CSRF_COOKIE
+
+    client.cookies.set(CSRF_COOKIE, "csrf-grp-disable-all")
+    r = client.post(
+        "/api/v1/admin/groups/disable-all",
+        headers={"X-CSRF-Token": "csrf-grp-disable-all"},
+    )
+    assert r.status_code == 200
+    assert r.json()["active"] == 0
+    r2 = client.get("/api/v1/admin/groups")
+    assert all(not g["is_active"] for g in r2.json())
