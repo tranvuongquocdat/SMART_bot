@@ -64,6 +64,12 @@ def _maybe_bootstrap_test_db() -> None:
     target_db = parsed.path.lstrip("/")
     admin_dsn = urlunparse(parsed._replace(path="/postgres"))
 
+    # Head revision đọc động từ migrations/ — hardcode từng gây lệch schema test DB.
+    from alembic.config import Config as _AlembicConfig
+    from alembic.script import ScriptDirectory as _ScriptDirectory
+
+    head_rev = _ScriptDirectory.from_config(_AlembicConfig("alembic.ini")).get_current_head()
+
     import asyncio
 
     async def _check_and_create() -> bool:
@@ -85,7 +91,7 @@ def _maybe_bootstrap_test_db() -> None:
                 ) else None
             finally:
                 await test_conn.close()
-            return current_rev != "0005"
+            return current_rev != head_rev
         finally:
             await conn.close()
 

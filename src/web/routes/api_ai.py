@@ -1,14 +1,17 @@
-"""Settings → AI helpers (test BYO key)."""
+"""Settings → AI helpers (test BYO key, liệt kê model theo provider)."""
 
 from __future__ import annotations
 
+import json
 import logging
 
 import httpx
-from fastapi import APIRouter, Depends, Form, Request
+from cryptography.fernet import Fernet
+from fastapi import APIRouter, Depends, Form, Query, Request
 
+from src.config import settings
 from src.security.middleware import rate_check
-from src.web.deps import get_current_boss
+from src.web.deps import get_current_boss, get_db
 from src.web.security import verify_csrf
 
 router = APIRouter(prefix="/api/ai")
@@ -67,3 +70,80 @@ async def test_key(
         "status": f"http_{r.status_code}",
         "message": f"Provider trả về {r.status_code}",
     }
+
+
+async def _resolve_key(pool, boss_id: int, provider: str) -> str | None:
+    """Key BYO của boss; fallback key nền tảng (chỉ để duyệt danh sách model)."""
+    async with pool.acquire() as c:
+        blob = await c.fetchval("SELECT api_keys_enc FROM users WHERE id=$1", boss_id)
+    if blob:
+        try:
+            keys = json.loads(Fernet(settings.FERNET_KEY.encode()).decrypt(bytes(blob)).decode())
+            if keys.get(provider):
+                return keys[provider]
+        except Exception:
+            pass
+    return {
+        "openai": settings.PLATFORM_OPENAI_API_KEY,
+        "groq": settings.PLATFORM_GROQ_API_KEY,
+    }.get(provider) or None
+
+
+@router.get("/provider-models")
+async def provider_models(
+    request: Request,
+    provider: str = Query(...),
+    ctx=Depends(get_current_boss),
+    pool=Depends(get_db),
+):
+    """Liệt kê model khả dụng trực tiếp từ provider để boss chọn linh hoạt.
+
+    Returns {ok, models: [{id}], message?}. Không bao giờ trả về key.
+    """
+    await rate_check(request, f"provider_models:{ctx.boss_id}", limit=30, window_sec=60)
+
+    provider = provider.lower().strip()
+    if provider not in ("openai", "groq", "gemini"):
+        return {"ok": False, "models": [], "message": "Provider không hợp lệ"}
+
+    key = await _resolve_key(pool, ctx.boss_id, provider)
+    if not key:
+        return {"ok": False, "models": [], "message": f"Chưa có API key {provider}"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            if provider == "gemini":
+                r = await client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params={"key": key, "pageSize": 1000},
+                )
+            else:
+                base = (
+                    "https://api.openai.com/v1"
+                    if provider == "openai"
+                    else "https://api.groq.com/openai/v1"
+                )
+                r = await client.get(
+                    f"{base}/models", headers={"Authorization": f"Bearer {key}"}
+                )
+    except httpx.RequestError as e:
+        logger.warning("provider_models network err provider=%s: %s", provider, e)
+        return {"ok": False, "models": [], "message": "Không gọi được provider"}
+
+    if r.status_code != 200:
+        return {"ok": False, "models": [], "message": f"Provider trả về {r.status_code}"}
+
+    try:
+        data = r.json()
+        if provider == "gemini":
+            ids = [
+                m["name"].removeprefix("models/")
+                for m in data.get("models", [])
+                if "generateContent" in m.get("supportedGenerationMethods", [])
+            ]
+        else:
+            ids = [m["id"] for m in data.get("data", [])]
+    except Exception:
+        return {"ok": False, "models": [], "message": "Không đọc được phản hồi provider"}
+
+    return {"ok": True, "models": [{"id": i} for i in sorted(ids)]}

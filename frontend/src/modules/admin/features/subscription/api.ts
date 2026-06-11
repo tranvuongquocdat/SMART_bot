@@ -11,6 +11,8 @@ export type SubscriptionData = {
   upgrade_url: string | null;
 };
 
+export type BillingPeriod = '1' | '3' | '12';
+
 export type Plan = {
   id: number;
   name: string;
@@ -23,6 +25,7 @@ export type Plan = {
     duration_days: number | null;
     cost_cap_usd_daily: number | null;
   };
+  prices: Partial<Record<BillingPeriod, number>>;
 };
 
 export type SubscriptionRequest = {
@@ -32,6 +35,7 @@ export type SubscriptionRequest = {
   plan_label: string;
   note: string | null;
   amount_paid_vnd: number | null;
+  billing_months: number | null;
   reviewer_note: string | null;
   refund_requested: boolean;
   created_at: string;

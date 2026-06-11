@@ -683,11 +683,13 @@ async def get_settings_ai(
         models = await c.fetch(
             """
             SELECT id, name, provider, tier, capabilities,
-                   cost_per_1m_input_usd, cost_per_1m_output_usd, is_platform_default
+                   cost_per_1m_input_usd, cost_per_1m_output_usd, is_platform_default,
+                   owner_boss_id
             FROM models
-            WHERE is_active = TRUE
-            ORDER BY tier, provider, name
-            """
+            WHERE is_active = TRUE AND (owner_boss_id IS NULL OR owner_boss_id = $1)
+            ORDER BY owner_boss_id NULLS FIRST, tier, provider, name
+            """,
+            ctx.boss_id,
         )
 
     slots = [
@@ -720,6 +722,7 @@ async def get_settings_ai(
             "cost_per_1m_input_usd": float(m["cost_per_1m_input_usd"] or 0),
             "cost_per_1m_output_usd": float(m["cost_per_1m_output_usd"] or 0),
             "is_platform_default": bool(m["is_platform_default"]),
+            "is_own": m["owner_boss_id"] is not None,
         }
         for m in models
     ]
@@ -753,6 +756,19 @@ async def patch_settings_ai(
     if slot and slot in slot_col_map:
         col = slot_col_map[slot]
         async with db.acquire() as c:
+            if model_id is not None:
+                # Chỉ cho gán model nền tảng hoặc model của chính boss.
+                allowed = await c.fetchval(
+                    """
+                    SELECT 1 FROM models
+                    WHERE id=$1 AND is_active=TRUE
+                      AND (owner_boss_id IS NULL OR owner_boss_id=$2)
+                    """,
+                    int(model_id),
+                    ctx.boss_id,
+                )
+                if not allowed:
+                    raise HTTPException(status_code=404, detail="model not found")
             await c.execute(
                 f"UPDATE users SET {col}=$2 WHERE id=$1",
                 ctx.boss_id,
@@ -822,6 +838,120 @@ async def patch_settings_ai_keys(
         )
 
     return {"updated": 1}
+
+
+# ---------------------------------------------------------------------------
+# Settings: AI — model riêng của boss (BYO)
+#   POST   /api/v1/admin/settings/ai/models
+#   DELETE /api/v1/admin/settings/ai/models/{model_id}
+# ---------------------------------------------------------------------------
+
+_PROVIDER_DEFAULTS = {
+    "openai": ("openai_compat", None),
+    "groq": ("openai_compat", "https://api.groq.com/openai/v1"),
+    "gemini": ("gemini", None),
+}
+
+
+def _boss_has_key(api_keys_enc: bytes | None, provider: str) -> bool:
+    from cryptography.fernet import Fernet
+    from src.config import settings as cfg
+
+    if not api_keys_enc:
+        return False
+    try:
+        f = Fernet(cfg.FERNET_KEY.encode())
+        keys = json.loads(f.decrypt(bytes(api_keys_enc)).decode())
+        return bool(keys.get(provider))
+    except Exception:
+        return False
+
+
+@router.post("/settings/ai/models", dependencies=[Depends(verify_json_csrf)], status_code=201)
+async def create_own_model(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Boss tự thêm model chạy bằng API key của mình.
+
+    Payload: {provider, name, tier, vision?: bool, ctx_max?: int}
+    Yêu cầu boss đã lưu BYO key cho provider — model riêng không có dữ liệu giá
+    nên không được chạy trên quota nền tảng (lách cost cap).
+    """
+    provider = (payload.get("provider") or "").strip().lower()
+    name = (payload.get("name") or "").strip()
+    tier = (payload.get("tier") or "smart").strip().lower()
+
+    if provider not in _PROVIDER_DEFAULTS:
+        raise HTTPException(status_code=422, detail="unknown provider")
+    if not name or len(name) > 200:
+        raise HTTPException(status_code=422, detail="invalid model name")
+    if tier not in ("smart", "fast", "vision"):
+        raise HTTPException(status_code=422, detail="invalid tier")
+
+    async with db.acquire() as c:
+        blob = await c.fetchval("SELECT api_keys_enc FROM users WHERE id=$1", ctx.boss_id)
+    if not _boss_has_key(blob, provider):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cần lưu API key {provider} của bạn trước khi thêm model riêng",
+        )
+
+    endpoint_kind, base_url = _PROVIDER_DEFAULTS[provider]
+    capabilities = ["vision"] if (tier == "vision" or payload.get("vision")) else []
+    ctx_max = int(payload.get("ctx_max") or 128_000)
+
+    from src.repositories.models import ModelsRepo
+
+    repo = ModelsRepo(db, ctx)
+    try:
+        new_id = await repo.insert(
+            name=name,
+            provider=provider,
+            endpoint_kind=endpoint_kind,
+            base_url=base_url,
+            tier=tier,
+            ctx_max=ctx_max,
+            capabilities=capabilities,
+            cost_in=None,
+            cost_out=None,
+            notes="BYO",
+            owner_boss_id=ctx.boss_id,
+        )
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(status_code=409, detail="Model này đã có trong danh sách của bạn")
+    return {"id": new_id}
+
+
+@router.delete("/settings/ai/models/{model_id}", dependencies=[Depends(verify_json_csrf)])
+async def delete_own_model(
+    model_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    async with db.acquire() as c:
+        owned = await c.fetchval(
+            "SELECT 1 FROM models WHERE id=$1 AND owner_boss_id=$2",
+            model_id,
+            ctx.boss_id,
+        )
+        if not owned:
+            raise HTTPException(status_code=404, detail="model not found")
+        # Gỡ model khỏi slot trước khi xoá để không vỡ routing.
+        await c.execute(
+            """
+            UPDATE users SET
+              smart_model_id  = CASE WHEN smart_model_id=$2 THEN NULL ELSE smart_model_id END,
+              fast_model_id   = CASE WHEN fast_model_id=$2 THEN NULL ELSE fast_model_id END,
+              vision_model_id = CASE WHEN vision_model_id=$2 THEN NULL ELSE vision_model_id END
+            WHERE id=$1
+            """,
+            ctx.boss_id,
+            model_id,
+        )
+        await c.execute("DELETE FROM models WHERE id=$1", model_id)
+    return {"deleted": 1}
 
 
 # ---------------------------------------------------------------------------
@@ -1743,17 +1873,23 @@ async def list_plans(
 ) -> list[dict]:
     async with db.acquire() as c:
         rows = await c.fetch(
-            "SELECT id, name, label, limits_json FROM plans WHERE is_active=TRUE ORDER BY sort_order"
+            "SELECT id, name, label, limits_json, prices_json FROM plans WHERE is_active=TRUE ORDER BY sort_order"
         )
-    return [
-        {
-            "id": r["id"],
-            "name": r["name"],
-            "label": r["label"],
-            "limits": r["limits_json"],
-        }
-        for r in rows
-    ]
+    result = []
+    for r in rows:
+        prices = r["prices_json"]
+        if isinstance(prices, str):
+            prices = json.loads(prices)
+        result.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "label": r["label"],
+                "limits": r["limits_json"],
+                "prices": prices or {},
+            }
+        )
+    return result
 
 
 @router.get("/subscription/limits")
@@ -1788,6 +1924,7 @@ async def list_subscription_requests(
         rows = await c.fetch(
             """
             SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                   sr.billing_months,
                    sr.reviewer_note, sr.refund_requested, sr.created_at, sr.reviewed_at,
                    sr.cancelled_at,
                    p.name AS plan_name, p.label AS plan_label
@@ -1817,23 +1954,31 @@ async def create_subscription_request(
     note: str | None = Form(None),
     amount_paid_vnd: int | None = Form(None),
     transfer_content: str | None = Form(None),
+    billing_months: int = Form(1),
     payment_proof: UploadFile = File(...),
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    proof_path = await save_upload(payment_proof, "payment_proofs")
     async with db.acquire() as c:
         plan = await c.fetchrow(
-            "SELECT id, name FROM plans WHERE id=$1 AND is_active=TRUE", plan_id
+            "SELECT id, name, prices_json FROM plans WHERE id=$1 AND is_active=TRUE", plan_id
         )
         if not plan:
             raise HTTPException(404, "Plan not found")
+        prices = plan["prices_json"]
+        if isinstance(prices, str):
+            prices = json.loads(prices)
+        prices = prices or {}
+        if prices and str(billing_months) not in prices:
+            raise HTTPException(422, "Gói không hỗ trợ chu kỳ thanh toán này")
+        proof_path = await save_upload(payment_proof, "payment_proofs")
         try:
             row = await c.fetchrow(
                 """
                 INSERT INTO subscription_requests
-                  (boss_id, plan_id, note, payment_proof_path, amount_paid_vnd, transfer_content)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                  (boss_id, plan_id, note, payment_proof_path, amount_paid_vnd,
+                   transfer_content, billing_months)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
                 RETURNING id, status
                 """,
                 ctx.boss_id,
@@ -1842,6 +1987,7 @@ async def create_subscription_request(
                 proof_path,
                 amount_paid_vnd,
                 transfer_content,
+                billing_months,
             )
         except Exception as e:
             if "uq_one_pending_per_boss" in str(e):

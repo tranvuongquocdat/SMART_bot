@@ -225,3 +225,118 @@ def test_general_patch_csrf_required(client: TestClient, logged_in_boss):
         json={"tz": "UTC"},
     )
     assert r.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# /settings/ai/models — model riêng của boss (BYO)
+# ---------------------------------------------------------------------------
+
+
+def _save_groq_key(client: TestClient):
+    client.cookies.set(CSRF_COOKIE, CSRF_TOK)
+    r = client.patch(
+        "/api/v1/admin/settings/ai/keys",
+        json={"provider": "groq", "api_key": "gsk_testKEY1"},
+        headers=_csrf_headers(),
+    )
+    assert r.status_code == 200
+
+
+def test_own_model_requires_byo_key(client: TestClient, logged_in_boss):
+    client.cookies.set(CSRF_COOKIE, CSRF_TOK)
+    r = client.post(
+        "/api/v1/admin/settings/ai/models",
+        json={"provider": "groq", "name": "llama-3.3-70b-versatile", "tier": "fast"},
+        headers=_csrf_headers(),
+    )
+    assert r.status_code == 409
+
+
+def test_own_model_create_assign_delete(client: TestClient, logged_in_boss):
+    _save_groq_key(client)
+    r = client.post(
+        "/api/v1/admin/settings/ai/models",
+        json={"provider": "groq", "name": "llama-3.3-70b-versatile", "tier": "fast"},
+        headers=_csrf_headers(),
+    )
+    assert r.status_code == 201
+    mid = r.json()["id"]
+
+    # Xuất hiện trong settings/ai với is_own=True
+    body = client.get("/api/v1/admin/settings/ai").json()
+    own = [m for m in body["models"] if m["id"] == mid]
+    assert own and own[0]["is_own"] is True
+
+    # Gán được vào slot
+    r2 = client.patch(
+        "/api/v1/admin/settings/ai",
+        json={"slot": "fast", "model_id": mid},
+        headers=_csrf_headers(),
+    )
+    assert r2.status_code == 200
+
+    # Trùng tên → 409
+    r3 = client.post(
+        "/api/v1/admin/settings/ai/models",
+        json={"provider": "groq", "name": "llama-3.3-70b-versatile", "tier": "fast"},
+        headers=_csrf_headers(),
+    )
+    assert r3.status_code == 409
+
+    # Xoá → gỡ khỏi slot, model biến mất
+    r4 = client.delete(f"/api/v1/admin/settings/ai/models/{mid}", headers=_csrf_headers())
+    assert r4.status_code == 200
+    body2 = client.get("/api/v1/admin/settings/ai").json()
+    assert all(m["id"] != mid for m in body2["models"])
+    fast_slot = next(s for s in body2["slots"] if s["slot"] == "fast")
+    assert fast_slot["model_id"] is None
+
+
+def test_own_model_invisible_to_other_boss(client: TestClient, logged_in_boss, clean_db):
+    import asyncio
+
+    _save_groq_key(client)
+    r = client.post(
+        "/api/v1/admin/settings/ai/models",
+        json={"provider": "groq", "name": "qwen-qwq-32b", "tier": "smart"},
+        headers=_csrf_headers(),
+    )
+    assert r.status_code == 201
+    mid = r.json()["id"]
+
+    async def _check():
+        async with clean_db.acquire() as c:
+            return await c.fetchval(
+                "SELECT owner_boss_id FROM models WHERE id=$1", mid
+            )
+
+    owner = asyncio.get_event_loop().run_until_complete(_check())
+    assert owner == logged_in_boss.boss_id
+
+    # Boss khác không gán được model này vào slot của họ
+    from src.web.security import SESSION_COOKIE, make_session
+
+    async def _mk_other():
+        async with clean_db.acquire() as c:
+            return await c.fetchval(
+                """
+                INSERT INTO users (email, role, name)
+                VALUES ('other-boss@test.local', 'boss', 'Other')
+                ON CONFLICT (email) DO UPDATE SET role='boss'
+                RETURNING id
+                """
+            )
+
+    other_id = asyncio.get_event_loop().run_until_complete(_mk_other())
+    client.cookies.set(SESSION_COOKIE, make_session(other_id))
+    client.cookies.set(CSRF_COOKIE, CSRF_TOK)
+
+    body = client.get("/api/v1/admin/settings/ai").json()
+    assert all(m["id"] != mid for m in body["models"])
+
+    r2 = client.patch(
+        "/api/v1/admin/settings/ai",
+        json={"slot": "smart", "model_id": mid},
+        headers=_csrf_headers(),
+    )
+    assert r2.status_code == 404

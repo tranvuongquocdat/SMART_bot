@@ -6,9 +6,13 @@ export type SAPlan = {
   name: string;
   label: string;
   limits_json: string;
+  prices_json: string | PlanPrices;
   is_active: boolean;
   sort_order: number;
 };
+
+// Giá VND theo chu kỳ; key là số tháng. Thiếu key = không bán chu kỳ đó.
+export type PlanPrices = Partial<Record<'1' | '3' | '12', number | null>>;
 
 export type PlanLimits = {
   max_active_groups?: number | null;
@@ -50,6 +54,7 @@ export function createPlan(payload: {
   name: string;
   label: string;
   limits_json: PlanLimits;
+  prices_json?: PlanPrices;
   sort_order?: number;
 }) {
   return jsonMutation('/api/v1/superadmin/plans', 'POST', payload);
@@ -57,7 +62,13 @@ export function createPlan(payload: {
 
 export function updatePlan(
   id: number,
-  payload: Partial<{ label: string; limits_json: PlanLimits; is_active: boolean; sort_order: number }>,
+  payload: Partial<{
+    label: string;
+    limits_json: PlanLimits;
+    prices_json: PlanPrices;
+    is_active: boolean;
+    sort_order: number;
+  }>,
 ) {
   return jsonMutation(`/api/v1/superadmin/plans/${id}`, 'PATCH', payload);
 }

@@ -1,17 +1,33 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
+import { ApiError } from '@/lib/api';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { aiQuery, patchAiSlot, patchAiCap, patchAiKey, testAiKey, type ModelOption, type SlotInfo } from './api';
+import {
+  aiQuery,
+  patchAiSlot,
+  patchAiCap,
+  patchAiKey,
+  testAiKey,
+  listProviderModels,
+  addOwnModel,
+  deleteOwnModel,
+  type ModelOption,
+  type SlotInfo,
+} from './api';
 
 const SLOT_LABELS: Record<string, string> = {
   smart: 'Smart (suy luận sâu)',
@@ -48,6 +64,8 @@ function SlotCard({
   const tierModels = slot.slot === 'vision'
     ? models.filter((m) => m.capabilities.includes('vision'))
     : models.filter((m) => m.tier === slot.slot);
+  const platformModels = tierModels.filter((m) => !m.is_own);
+  const ownModels = tierModels.filter((m) => m.is_own);
 
   const dirty = selected !== (currentModelId?.toString() ?? '');
 
@@ -63,11 +81,24 @@ function SlotCard({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="default">— mặc định nền tảng —</SelectItem>
-          {tierModels.map((m) => (
-            <SelectItem key={m.id} value={m.id.toString()}>
-              {m.provider} / {m.name}
-            </SelectItem>
-          ))}
+          <SelectGroup>
+            <SelectLabel>Model được cấp</SelectLabel>
+            {platformModels.map((m) => (
+              <SelectItem key={m.id} value={m.id.toString()}>
+                {m.provider} / {m.name}
+              </SelectItem>
+            ))}
+          </SelectGroup>
+          {ownModels.length > 0 && (
+            <SelectGroup>
+              <SelectLabel>Model của bạn</SelectLabel>
+              {ownModels.map((m) => (
+                <SelectItem key={m.id} value={m.id.toString()}>
+                  {m.provider} / {m.name}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          )}
         </SelectContent>
       </Select>
       {dirty && (
@@ -160,6 +191,200 @@ function KeyRow({
         </Button>
       )}
     </div>
+  );
+}
+
+function OwnModelsSection({
+  models,
+  keysPresent,
+}: {
+  models: ModelOption[];
+  keysPresent: Record<string, boolean>;
+}) {
+  const qc = useQueryClient();
+  const ownModels = models.filter((m) => m.is_own);
+
+  const [provider, setProvider] = useState<string>('groq');
+  const [available, setAvailable] = useState<{ id: string }[]>([]);
+  const [name, setName] = useState('');
+  const [tier, setTier] = useState('smart');
+  const [vision, setVision] = useState(false);
+  const [loadingList, setLoadingList] = useState(false);
+
+  const hasKey = keysPresent[provider];
+
+  const loadModels = async () => {
+    setLoadingList(true);
+    try {
+      const res = await listProviderModels(provider);
+      if (!res.ok) {
+        toast.error(res.message ?? 'Không tải được danh sách model.');
+        setAvailable([]);
+      } else {
+        setAvailable(res.models);
+        if (res.models.length === 0) toast.info('Provider không trả về model nào.');
+      }
+    } catch {
+      toast.error('Không tải được danh sách model.');
+    } finally {
+      setLoadingList(false);
+    }
+  };
+
+  const addMut = useMutation({
+    mutationFn: () => addOwnModel({ provider, name: name.trim(), tier, vision }),
+    onSuccess: () => {
+      setName('');
+      qc.invalidateQueries({ queryKey: aiQuery.queryKey });
+      toast.success('Đã thêm model của bạn.');
+    },
+    onError: (e) => {
+      const detail =
+        e instanceof ApiError && e.body && typeof e.body === 'object'
+          ? (e.body as { detail?: string }).detail
+          : undefined;
+      toast.error(detail ?? 'Thêm model thất bại.');
+    },
+  });
+
+  const delMut = useMutation({
+    mutationFn: (id: number) => deleteOwnModel(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: aiQuery.queryKey });
+      toast.success('Đã xoá model.');
+    },
+    onError: () => toast.error('Xoá model thất bại.'),
+  });
+
+  return (
+    <section>
+      <h2 className="text-sm font-semibold mb-1">Model của bạn</h2>
+      <p className="text-xs text-muted-foreground mb-3">
+        Thêm model bất kỳ của provider, chạy bằng API key của bạn. Cần lưu key provider tương ứng
+        trước.
+      </p>
+
+      {ownModels.length > 0 && (
+        <ul className="mb-4 space-y-2">
+          {ownModels.map((m) => (
+            <li
+              key={m.id}
+              className="flex items-center justify-between rounded-md border bg-card px-3 py-2"
+            >
+              <span className="text-sm">
+                {m.provider} / {m.name}
+                <Badge variant="secondary" className="ml-2 text-[10px] uppercase">
+                  {m.tier}
+                </Badge>
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-7 text-xs text-destructive hover:text-destructive"
+                disabled={delMut.isPending}
+                onClick={() => delMut.mutate(m.id)}
+              >
+                Xoá
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="rounded-lg border bg-card p-4 space-y-3">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Provider</Label>
+            <Select
+              value={provider}
+              onValueChange={(v) => {
+                setProvider(v);
+                setAvailable([]);
+                setName('');
+              }}
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PROVIDERS.map((p) => (
+                  <SelectItem key={p} value={p}>
+                    {PROVIDER_LABELS[p]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label className="text-xs">Model</Label>
+            <div className="flex gap-2">
+              {available.length > 0 ? (
+                <Select value={name || undefined} onValueChange={setName}>
+                  <SelectTrigger className="h-8 text-sm flex-1">
+                    <SelectValue placeholder="Chọn model…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {available.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>
+                        {m.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <Input
+                  className="h-8 text-sm flex-1"
+                  placeholder="vd: llama-3.3-70b-versatile"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 text-xs shrink-0"
+                disabled={loadingList}
+                onClick={loadModels}
+              >
+                {loadingList ? 'Đang tải…' : 'Tải danh sách'}
+              </Button>
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-4">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Dùng cho slot</Label>
+            <Select value={tier} onValueChange={setTier}>
+              <SelectTrigger className="h-8 text-sm w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="smart">Smart</SelectItem>
+                <SelectItem value="fast">Fast</SelectItem>
+                <SelectItem value="vision">Vision</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <label className="flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
+            <Checkbox checked={vision} onCheckedChange={(v) => setVision(v === true)} />
+            Hỗ trợ đọc ảnh (vision)
+          </label>
+          <Button
+            size="sm"
+            className="h-8 ml-auto"
+            disabled={!name.trim() || addMut.isPending || !hasKey}
+            onClick={() => addMut.mutate()}
+          >
+            {addMut.isPending ? 'Đang thêm…' : 'Thêm model'}
+          </Button>
+        </div>
+        {!hasKey && (
+          <p className="text-xs text-amber-600 dark:text-amber-500">
+            Bạn cần lưu API key {PROVIDER_LABELS[provider]} ở mục trên trước khi thêm model riêng.
+          </p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -257,6 +482,14 @@ export default function AiTab() {
           })}
         </div>
       </section>
+
+      {/* Own (BYO) models */}
+      <OwnModelsSection
+        models={data.models}
+        keysPresent={Object.fromEntries(
+          PROVIDERS.map((p) => [p, data.keys[p]?.present ?? false])
+        )}
+      />
     </div>
   );
 }

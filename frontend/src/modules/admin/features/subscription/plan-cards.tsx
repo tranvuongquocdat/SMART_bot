@@ -1,7 +1,9 @@
 import { Check, Minus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import type { Plan, SubscriptionData } from './api';
+import type { BillingPeriod, Plan, SubscriptionData } from './api';
+
+const fmtVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + 'đ';
 
 type LimitKey =
   | 'max_active_groups'
@@ -37,11 +39,13 @@ export function PlanCards({
   plans,
   current,
   hasPending,
+  period,
   onSelect,
 }: {
   plans: Plan[];
   current: SubscriptionData;
   hasPending: boolean;
+  period: BillingPeriod;
   onSelect: (plan: Plan) => void;
 }) {
   return (
@@ -65,6 +69,20 @@ export function PlanCards({
                 >
                   <div className="space-y-1">
                     <p className="font-semibold text-base">{plan.label}</p>
+                    <p className="text-sm font-normal text-muted-foreground tabular-nums">
+                      {plan.prices?.[period] != null ? (
+                        <>
+                          <span className="font-semibold text-foreground">
+                            {fmtVnd(plan.prices[period]!)}
+                          </span>
+                          /{period} tháng
+                        </>
+                      ) : plan.name === 'trial' ? (
+                        'Miễn phí'
+                      ) : (
+                        'Liên hệ'
+                      )}
+                    </p>
                     {isCurrent && (
                       <Badge variant="outline" className="text-[10px]">
                         Đang dùng
@@ -89,7 +107,13 @@ export function PlanCards({
                       isCurrent ? 'bg-primary/5 border-x border-primary/30 font-medium' : ''
                     }`}
                   >
-                    <CellValue value={plan.limits[row.key] ?? null} fmt={row.fmt} />
+                    {row.key === 'duration_days' &&
+                    plan.prices &&
+                    Object.keys(plan.prices).length > 0 ? (
+                      <>Theo chu kỳ</>
+                    ) : (
+                      <CellValue value={plan.limits[row.key] ?? null} fmt={row.fmt} />
+                    )}
                   </td>
                 );
               })}

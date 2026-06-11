@@ -159,8 +159,10 @@ export default function SASubscriptionsPage() {
                 </div>
 
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                  {req.billing_months && <span>{req.billing_months} tháng</span>}
                   {req.amount_paid_vnd && (
                     <span>
+                      {req.billing_months ? '· ' : ''}
                       {req.amount_paid_vnd.toLocaleString('vi-VN')} VND
                     </span>
                   )}

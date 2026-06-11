@@ -23,6 +23,7 @@ export type ModelOption = {
   cost_per_1m_input_usd: number;
   cost_per_1m_output_usd: number;
   is_platform_default: boolean;
+  is_own: boolean;
 };
 
 export type SlotInfo = {
@@ -82,3 +83,17 @@ export const testAiKey = (body: { provider: string; api_key: string }) =>
 
 export const patchGeneral = (body: Partial<Pick<GeneralSettings, 'name' | 'tz' | 'language'>>) =>
   api('/api/v1/admin/settings/general', { method: 'PATCH', body: JSON.stringify(body) });
+
+export type ProviderModelsResult = { ok: boolean; models: { id: string }[]; message?: string };
+
+export const listProviderModels = (provider: string) =>
+  api<ProviderModelsResult>(`/api/ai/provider-models?provider=${encodeURIComponent(provider)}`);
+
+export const addOwnModel = (body: { provider: string; name: string; tier: string; vision?: boolean }) =>
+  api<{ id: number }>('/api/v1/admin/settings/ai/models', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const deleteOwnModel = (id: number) =>
+  api(`/api/v1/admin/settings/ai/models/${id}`, { method: 'DELETE' });

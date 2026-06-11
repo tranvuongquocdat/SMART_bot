@@ -31,6 +31,7 @@ class Model:
     is_platform_default: bool = False
     is_active: bool = True
     notes: str | None = None
+    owner_boss_id: int | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

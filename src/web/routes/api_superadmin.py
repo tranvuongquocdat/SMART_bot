@@ -1336,6 +1336,7 @@ async def list_subscription_requests_sa(
             rows = await c.fetch(
                 """
                 SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                       sr.billing_months,
                        sr.reviewer_note, sr.refund_requested, sr.refund_qr_path,
                        sr.created_at, sr.reviewed_at, sr.cancelled_at,
                        p.name AS plan_name, p.label AS plan_label,
@@ -1354,6 +1355,7 @@ async def list_subscription_requests_sa(
             rows = await c.fetch(
                 """
                 SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                       sr.billing_months,
                        sr.reviewer_note, sr.refund_requested, sr.refund_qr_path,
                        sr.created_at, sr.reviewed_at, sr.cancelled_at,
                        p.name AS plan_name, p.label AS plan_label,
@@ -1419,7 +1421,7 @@ async def approve_subscription_request(
 ) -> dict:
     async with db.acquire() as c:
         req = await c.fetchrow(
-            "SELECT boss_id, plan_id, status FROM subscription_requests WHERE id=$1",
+            "SELECT boss_id, plan_id, status, billing_months FROM subscription_requests WHERE id=$1",
             req_id,
         )
     if not req:
@@ -1428,7 +1430,10 @@ async def approve_subscription_request(
         raise HTTPException(400, "Request is not pending")
 
     overrides = payload.get("overrides") or {}
-    await apply_plan_to_user(db, req["boss_id"], req["plan_id"], overrides)
+    await apply_plan_to_user(
+        db, req["boss_id"], req["plan_id"], overrides,
+        billing_months=req["billing_months"],
+    )
 
     async with db.acquire() as c:
         await c.execute(
@@ -1493,7 +1498,7 @@ async def list_plans_superadmin(
 ) -> list[dict]:
     async with db.acquire() as c:
         rows = await c.fetch(
-            "SELECT id, name, label, limits_json, is_active, sort_order FROM plans ORDER BY sort_order"
+            "SELECT id, name, label, limits_json, prices_json, is_active, sort_order FROM plans ORDER BY sort_order"
         )
     return [dict(r) for r in rows]
 
@@ -1511,13 +1516,14 @@ async def create_plan_sa(
         try:
             row = await c.fetchrow(
                 """
-                INSERT INTO plans (name, label, limits_json, sort_order)
-                VALUES ($1, $2, $3::jsonb, COALESCE($4, 99))
+                INSERT INTO plans (name, label, limits_json, prices_json, sort_order)
+                VALUES ($1, $2, $3::jsonb, $4::jsonb, COALESCE($5, 99))
                 RETURNING id, name
                 """,
                 payload["name"],
                 payload["label"],
                 _json.dumps(payload["limits_json"]),
+                _json.dumps(payload.get("prices_json") or {}),
                 payload.get("sort_order"),
             )
         except Exception as e:
@@ -1534,7 +1540,7 @@ async def update_plan_sa(
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> dict:
-    allowed_fields = {"label", "limits_json", "is_active", "sort_order"}
+    allowed_fields = {"label", "limits_json", "prices_json", "is_active", "sort_order"}
     updates = {k: v for k, v in payload.items() if k in allowed_fields}
     if not updates:
         raise HTTPException(400, "No valid fields to update")
@@ -1550,8 +1556,8 @@ async def update_plan_sa(
         sets = []
         vals = [plan_id]
         for i, (k, v) in enumerate(updates.items(), start=2):
-            if k == "limits_json":
-                sets.append(f"limits_json=${i}::jsonb")
+            if k in ("limits_json", "prices_json"):
+                sets.append(f"{k}=${i}::jsonb")
                 vals.append(_json.dumps(v))
             else:
                 sets.append(f"{k}=${i}")

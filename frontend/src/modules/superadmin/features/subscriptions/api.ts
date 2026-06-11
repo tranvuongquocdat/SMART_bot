@@ -6,6 +6,7 @@ export type SASubscriptionRequest = {
   status: string;
   note: string | null;
   amount_paid_vnd: number | null;
+  billing_months: number | null;
   transfer_content: string | null;
   reviewer_note: string | null;
   refund_requested: boolean;

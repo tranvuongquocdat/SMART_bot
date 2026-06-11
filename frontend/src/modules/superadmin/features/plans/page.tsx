@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { plansAdminQuery, createPlan, updatePlan, type SAPlan, type PlanLimits } from './api';
+import { plansAdminQuery, createPlan, updatePlan, type SAPlan, type PlanLimits, type PlanPrices } from './api';
 
 function parseLimits(raw: string | PlanLimits): PlanLimits {
   if (typeof raw === 'string') {
@@ -21,6 +21,22 @@ function parseLimits(raw: string | PlanLimits): PlanLimits {
   }
   return raw;
 }
+
+function parsePrices(raw: string | PlanPrices | undefined): PlanPrices {
+  if (raw == null) return {};
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { return {}; }
+  }
+  return raw;
+}
+
+const BILLING_PERIODS = [
+  { key: '1' as const, label: '1 tháng' },
+  { key: '3' as const, label: '3 tháng' },
+  { key: '12' as const, label: '12 tháng' },
+];
+
+const fmtVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + 'đ';
 
 function LimitField({
   label,
@@ -50,6 +66,7 @@ type FormState = {
   label: string;
   sort_order: string;
   limits: PlanLimits;
+  prices: PlanPrices;
 };
 
 const emptyForm = (): FormState => ({
@@ -57,6 +74,7 @@ const emptyForm = (): FormState => ({
   label: '',
   sort_order: '',
   limits: {},
+  prices: {},
 });
 
 function fromPlan(plan: SAPlan): FormState {
@@ -65,6 +83,7 @@ function fromPlan(plan: SAPlan): FormState {
     label: plan.label,
     sort_order: String(plan.sort_order),
     limits: parseLimits(plan.limits_json),
+    prices: parsePrices(plan.prices_json),
   };
 }
 
@@ -86,10 +105,14 @@ function PlanModal({
     mutationFn: () => {
       const limits = form.limits;
       const sort_order = form.sort_order ? Number(form.sort_order) : undefined;
+      // Chu kỳ bỏ trống = không bán chu kỳ đó — loại khỏi prices_json.
+      const prices: PlanPrices = Object.fromEntries(
+        Object.entries(form.prices).filter(([, v]) => v != null)
+      );
       if (isEdit) {
-        return updatePlan(plan!.id, { label: form.label, limits_json: limits, sort_order });
+        return updatePlan(plan!.id, { label: form.label, limits_json: limits, prices_json: prices, sort_order });
       }
-      return createPlan({ name: form.name, label: form.label, limits_json: limits, sort_order });
+      return createPlan({ name: form.name, label: form.label, limits_json: limits, prices_json: prices, sort_order });
     },
     onSuccess: () => {
       toast.success(isEdit ? 'Đã cập nhật gói' : 'Đã tạo gói');
@@ -150,6 +173,35 @@ function PlanModal({
               <LimitField label="Chi phí USD/ngày" value={form.limits.cost_cap_usd_daily} onChange={setLimit('cost_cap_usd_daily')} />
             </div>
           </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              Giá bán (VND / chu kỳ — để trống nếu không bán)
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {BILLING_PERIODS.map((p) => (
+                <div key={p.key} className="space-y-1">
+                  <Label className="text-xs">{p.label}</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    placeholder="—"
+                    value={form.prices[p.key] ?? ''}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        prices: {
+                          ...f.prices,
+                          [p.key]: e.target.value === '' ? null : Number(e.target.value),
+                        },
+                      }))
+                    }
+                    className="h-8 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
@@ -194,6 +246,10 @@ export default function SAPlansPage() {
         <div className="divide-y divide-border rounded-xl border">
           {plans.map((plan) => {
             const limits = parseLimits(plan.limits_json);
+            const prices = parsePrices(plan.prices_json);
+            const priceParts = BILLING_PERIODS.filter((p) => prices[p.key] != null).map(
+              (p) => `${fmtVnd(prices[p.key]!)}/${p.label.replace(' tháng', 'th')}`
+            );
             return (
               <div key={plan.id} className="flex items-center gap-3 px-4 py-4">
                 <div className="flex-1 min-w-0">
@@ -211,6 +267,9 @@ export default function SAPlansPage() {
                       limits.max_active_channels != null ? `${limits.max_active_channels} kênh` : '∞ kênh',
                       limits.duration_days != null ? `${limits.duration_days}d` : null,
                     ].filter(Boolean).join(' · ')}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {priceParts.length > 0 ? priceParts.join(' · ') : 'Chưa đặt giá'}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">

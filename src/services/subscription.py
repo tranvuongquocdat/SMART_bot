@@ -112,13 +112,29 @@ async def check_over_limit(pool: Any, boss_id: int) -> OverLimitItems:
     )
 
 
+def _add_months(dt: datetime, months: int) -> datetime:
+    """Cộng tháng dương lịch, kẹp ngày cuối tháng (31/1 + 1 tháng = 28/2)."""
+    import calendar
+
+    month_index = dt.month - 1 + months
+    year = dt.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(dt.day, calendar.monthrange(year, month)[1])
+    return dt.replace(year=year, month=month, day=day)
+
+
 async def apply_plan_to_user(
     pool: Any,
     boss_id: int,
     plan_id: int,
     overrides: dict,
+    billing_months: int | None = None,
 ) -> None:
-    """Apply an approved plan to a boss user atomically."""
+    """Apply an approved plan to a boss user atomically.
+
+    billing_months (1/3/12) thắng duration_days; duration_days giữ cho trial
+    và các request cũ chưa có chu kỳ.
+    """
     async with pool.acquire() as c:
         async with c.transaction():
             plan = await c.fetchrow(
@@ -127,9 +143,14 @@ async def apply_plan_to_user(
             if not plan:
                 raise ValueError(f"Plan {plan_id} not found")
 
-            merged = {**dict(plan["limits_json"]), **overrides}
+            limits = plan["limits_json"]
+            if isinstance(limits, str):
+                limits = json.loads(limits)
+            merged = {**dict(limits), **overrides}
             expiry = None
-            if merged.get("duration_days") is not None:
+            if billing_months is not None:
+                expiry = _add_months(datetime.now(timezone.utc), int(billing_months))
+            elif merged.get("duration_days") is not None:
                 expiry = datetime.now(timezone.utc) + timedelta(
                     days=int(merged["duration_days"])
                 )

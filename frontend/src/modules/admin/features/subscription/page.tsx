@@ -21,6 +21,7 @@ import {
   requestsQuery,
   limitsQuery,
   cancelRequest,
+  type BillingPeriod,
   type Plan,
   type SubscriptionRequest,
 } from './api';
@@ -133,6 +134,7 @@ export default function SubscriptionPage() {
   const { data: limits } = useQuery(limitsQuery());
 
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
+  const [period, setPeriod] = useState<BillingPeriod>('1');
   const [cancelTarget, setCancelTarget] = useState<SubscriptionRequest | null>(null);
   const [warnDismissed, setWarnDismissed] = useState(false);
 
@@ -198,11 +200,35 @@ export default function SubscriptionPage() {
       {plans.length > 0 && (
         <div ref={plansRef}>
           <PageSection>
-            <h2 className="text-sm font-semibold mb-3">Chọn gói</h2>
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold">Chọn gói</h2>
+              <div className="inline-flex rounded-lg border p-0.5 bg-muted/40">
+                {(
+                  [
+                    { key: '1', label: '1 tháng' },
+                    { key: '3', label: '3 tháng' },
+                    { key: '12', label: '12 tháng' },
+                  ] as { key: BillingPeriod; label: string }[]
+                ).map((p) => (
+                  <button
+                    key={p.key}
+                    onClick={() => setPeriod(p.key)}
+                    className={`px-3 py-1 text-xs rounded-md transition-colors ${
+                      period === p.key
+                        ? 'bg-background shadow-sm font-medium'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                ))}
+              </div>
+            </div>
             <PlanCards
               plans={plans}
               current={sub}
               hasPending={hasPending}
+              period={period}
               onSelect={setSelectedPlan}
             />
           </PageSection>
@@ -244,6 +270,7 @@ export default function SubscriptionPage() {
 
       <RequestModal
         plan={selectedPlan}
+        period={period}
         open={!!selectedPlan}
         onClose={() => setSelectedPlan(null)}
       />

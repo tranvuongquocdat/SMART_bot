@@ -282,3 +282,78 @@ def test_payment_info_generates_transfer_content(client, logged_in_boss, clean_d
 def test_payment_info_unknown_plan(client, logged_in_boss):
     r = client.get("/api/v1/admin/subscription/payment-info?plan_id=999999")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Billing periods (1/3/12 tháng)
+# ---------------------------------------------------------------------------
+
+
+def test_plans_include_prices(client, logged_in_boss):
+    r = client.get("/api/v1/admin/subscription/plans")
+    assert r.status_code == 200
+    starter = next(p for p in r.json() if p["name"] == "starter")
+    assert starter["prices"]["1"] == 199000
+    assert starter["prices"]["3"] == 549000
+    assert starter["prices"]["12"] == 1990000
+
+
+def test_create_request_with_billing_months(client, logged_in_boss, clean_db):
+    starter_id = _get_plan_id(clean_db, "starter")
+    proof = io.BytesIO(b"fake image data")
+    r = client.post(
+        "/api/v1/admin/subscription/requests",
+        data={
+            "plan_id": starter_id,
+            "amount_paid_vnd": 549000,
+            "transfer_content": "SMART STARTER 3m",
+            "billing_months": 3,
+        },
+        files={"payment_proof": ("proof.jpg", proof, "image/jpeg")},
+        headers=_csrf_headers(client),
+    )
+    assert r.status_code == 201, r.text
+
+    reqs = client.get("/api/v1/admin/subscription/requests").json()
+    assert reqs[0]["billing_months"] == 3
+
+
+def test_create_request_unsupported_period(client, logged_in_boss, clean_db):
+    starter_id = _get_plan_id(clean_db, "starter")
+    proof = io.BytesIO(b"fake")
+    r = client.post(
+        "/api/v1/admin/subscription/requests",
+        data={
+            "plan_id": starter_id,
+            "amount_paid_vnd": 1,
+            "transfer_content": "X",
+            "billing_months": 6,
+        },
+        files={"payment_proof": ("p.jpg", proof, "image/jpeg")},
+        headers=_csrf_headers(client),
+    )
+    assert r.status_code == 422
+
+
+def test_apply_plan_billing_months_sets_expiry(clean_db, logged_in_boss):
+    from datetime import datetime, timezone
+
+    from src.services.subscription import apply_plan_to_user
+
+    async def _():
+        plan_id = None
+        async with clean_db.acquire() as c:
+            plan_id = await c.fetchval("SELECT id FROM plans WHERE name='starter'")
+        await apply_plan_to_user(
+            clean_db, logged_in_boss.boss_id, plan_id, {}, billing_months=3
+        )
+        async with clean_db.acquire() as c:
+            return await c.fetchval(
+                "SELECT subscription_expiry FROM users WHERE id=$1",
+                logged_in_boss.boss_id,
+            )
+
+    expiry = asyncio.get_event_loop().run_until_complete(_())
+    days = (expiry - datetime.now(timezone.utc)).days
+    # 3 tháng dương lịch — không phải 30 ngày của duration_days.
+    assert 88 <= days <= 93

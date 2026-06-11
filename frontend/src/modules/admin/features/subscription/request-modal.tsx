@@ -13,7 +13,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { submitRequest, paymentInfoQuery } from './api';
-import type { Plan } from './api';
+import type { BillingPeriod, Plan } from './api';
+
+const fmtVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + 'đ';
 
 function CopyRow({ label, value }: { label: string; value: string }) {
   return (
@@ -40,15 +42,19 @@ function CopyRow({ label, value }: { label: string; value: string }) {
 
 export function RequestModal({
   plan,
+  period,
   open,
   onClose,
 }: {
   plan: Plan | null;
+  period: BillingPeriod;
   open: boolean;
   onClose: () => void;
 }) {
   const qc = useQueryClient();
   const [amount, setAmount] = useState('');
+
+  const expectedPrice = plan?.prices?.[period] ?? null;
   const [customContent, setCustomContent] = useState('');
   const [note, setNote] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -63,7 +69,8 @@ export function RequestModal({
       if (!plan) return;
       const fd = new FormData();
       fd.append('plan_id', String(plan.id));
-      fd.append('amount_paid_vnd', amount);
+      fd.append('billing_months', period);
+      fd.append('amount_paid_vnd', amount || (expectedPrice != null ? String(expectedPrice) : ''));
       fd.append(
         'transfer_content',
         customContent.trim() || payInfo?.transfer_content || ''
@@ -86,15 +93,26 @@ export function RequestModal({
   });
 
   const canSubmit =
-    amount && payInfo?.transfer_content && fileRef.current?.files?.length && !mut.isPending;
+    (amount || expectedPrice != null) &&
+    payInfo?.transfer_content &&
+    fileRef.current?.files?.length &&
+    !mut.isPending;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Đăng ký gói {plan?.label}</DialogTitle>
+          <DialogTitle>
+            Đăng ký gói {plan?.label} — {period} tháng
+          </DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          {expectedPrice != null && (
+            <p className="text-sm -mt-1">
+              Số tiền cần chuyển:{' '}
+              <span className="font-semibold tabular-nums">{fmtVnd(expectedPrice)}</span>
+            </p>
+          )}
           {/* Thông tin chuyển khoản — gen sẵn, khách chỉ copy */}
           <div className="rounded-lg border divide-y bg-card">
             {payInfo?.bank_account_number && (
@@ -120,7 +138,7 @@ export function RequestModal({
               type="number"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              placeholder="490000"
+              placeholder={expectedPrice != null ? String(expectedPrice) : '490000'}
             />
           </div>
           <div className="space-y-1.5">
