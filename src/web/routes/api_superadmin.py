@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.repositories.base import BossContext
@@ -676,13 +676,14 @@ async def delete_boss(
 
 # ---------------------------------------------------------------------------
 # GET /bot-accounts/:id/messages — recent messages for a bot account
-# Note: No dedicated per-account messages table exists yet; returns empty list.
+# Messages map to accounts qua bot_account_assignments (boss_id, provider) —
+# tin nhắn cũ trước khi đổi acc sẽ tính cho acc hiện tại (chấp nhận cho v1).
 # ---------------------------------------------------------------------------
 
 @router.get("/bot-accounts/{account_id}/messages")
 async def list_bot_account_messages(
     account_id: int,
-    limit: int = 50,
+    limit: int = Query(50, le=200),
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> list[dict]:
@@ -690,9 +691,106 @@ async def list_bot_account_messages(
         existing = await c.fetchrow("SELECT id FROM bot_accounts WHERE id = $1", account_id)
         if not existing:
             raise HTTPException(status_code=404, detail="bot account not found")
-        # No per-account messages table exists yet; return empty list.
-        # TODO(SP3+): query chat_messages or inbound_events filtered by bot_account_id.
-    return []
+        rows = await c.fetch(
+            """
+            SELECT m.id, m.boss_id, u.email AS boss_email,
+                   m.chat_id, m.chat_type, m.sender_name, m.text, m.ts
+            FROM messages m
+            JOIN bot_account_assignments baa
+              ON baa.boss_id = m.boss_id AND baa.provider = m.provider
+            JOIN users u ON u.id = m.boss_id
+            WHERE baa.bot_account_id = $1
+            ORDER BY m.ts DESC
+            LIMIT $2
+            """,
+            account_id,
+            limit,
+        )
+    return [
+        {
+            "id": r["id"],
+            "boss_id": r["boss_id"],
+            "boss_email": r["boss_email"],
+            "chat_id": r["chat_id"],
+            "chat_type": r["chat_type"],
+            "sender_name": r["sender_name"],
+            "text": r["text"],
+            "ts": r["ts"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# GET /usage — platform-wide token usage analytics
+# ---------------------------------------------------------------------------
+
+@router.get("/usage")
+async def platform_usage(
+    range: str = Query("30d", pattern=r"^\d+d$"),
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    days = max(1, min(int(range.rstrip("d")), 365))
+    async with db.acquire() as c:
+        totals = await c.fetchrow(
+            """
+            SELECT COALESCE(SUM(tokens_in), 0)::bigint              AS tokens_in,
+                   COALESCE(SUM(tokens_out), 0)::bigint             AS tokens_out,
+                   COALESCE(SUM(tokens_in + tokens_out), 0)::bigint AS tokens,
+                   COUNT(*)::bigint                                 AS calls,
+                   COALESCE(SUM(cost_usd), 0.0)::float              AS cost_usd
+            FROM token_usage
+            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
+            """,
+            str(days),
+        )
+        daily = await c.fetch(
+            """
+            SELECT DATE(called_at AT TIME ZONE 'UTC') AS day,
+                   SUM(tokens_in + tokens_out)::bigint AS tokens,
+                   COUNT(*)::bigint                    AS calls,
+                   SUM(cost_usd)::float                AS cost_usd
+            FROM token_usage
+            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
+            GROUP BY day ORDER BY day DESC
+            """,
+            str(days),
+        )
+        by_boss = await c.fetch(
+            """
+            SELECT t.boss_id, u.email, u.name,
+                   SUM(t.tokens_in + t.tokens_out)::bigint AS tokens,
+                   COUNT(*)::bigint                        AS calls,
+                   SUM(t.cost_usd)::float                  AS cost_usd
+            FROM token_usage t
+            JOIN users u ON u.id = t.boss_id
+            WHERE t.called_at > NOW() - ($1 || ' days')::INTERVAL
+            GROUP BY t.boss_id, u.email, u.name
+            ORDER BY SUM(t.cost_usd) DESC
+            LIMIT 50
+            """,
+            str(days),
+        )
+        by_feature = await c.fetch(
+            """
+            SELECT feature,
+                   SUM(tokens_in + tokens_out)::bigint AS tokens,
+                   COUNT(*)::bigint                    AS calls,
+                   SUM(cost_usd)::float                AS cost_usd
+            FROM token_usage
+            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
+            GROUP BY feature ORDER BY SUM(cost_usd) DESC
+            """,
+            str(days),
+        )
+    return {
+        "range_days": days,
+        "totals": dict(totals),
+        "daily": [{**dict(r), "day": str(r["day"])} for r in daily],
+        "by_boss": [dict(r) for r in by_boss],
+        "by_feature": [dict(r) for r in by_feature],
+    }
 
 
 # ===========================================================================

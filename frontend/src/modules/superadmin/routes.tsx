@@ -2,7 +2,6 @@ import type { QueryClient } from '@tanstack/react-query';
 import type { RouteObject } from 'react-router-dom';
 import { requireRole } from '@/lib/rbac';
 import SuperadminLayout from './layout';
-import ComingSoon from '@/components/coming-soon';
 import RootError from '@/components/root-error';
 
 export function superadminRoutes(qc: QueryClient): RouteObject {
@@ -30,7 +29,7 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
       { path: 'agent-triggers', lazy: async () => ({ Component: (await import('./features/agent-triggers/page')).default }), handle: { breadcrumb: 'Agent triggers' } },
       { path: 'audit', lazy: async () => ({ Component: (await import('./features/audit-log/page')).default }), handle: { breadcrumb: 'Audit log' } },
       { path: 'retrieval-pipelines', lazy: async () => ({ Component: (await import('./features/retrieval-pipelines/page')).default }), handle: { breadcrumb: 'Retrieval pipelines' } },
-      { path: 'usage', element: <ComingSoon feature="Usage" />, handle: { breadcrumb: 'Sử dụng' } },
+      { path: 'usage', lazy: async () => ({ Component: (await import('./features/usage/page')).default }), handle: { breadcrumb: 'Sử dụng' } },
       { path: 'subscriptions', lazy: async () => ({ Component: (await import('./features/subscriptions/page')).default }), handle: { breadcrumb: 'Yêu cầu đăng ký' } },
       { path: 'plans', lazy: async () => ({ Component: (await import('./features/plans/page')).default }), handle: { breadcrumb: 'Gói dịch vụ' } },
     ],
