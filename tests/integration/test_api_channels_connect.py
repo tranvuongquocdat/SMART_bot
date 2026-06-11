@@ -100,3 +100,53 @@ def test_connect_respects_channel_limit(client, logged_in_boss, clean_db):
     r = client.post("/api/v1/admin/channels/web/connect", headers=_csrf(client))
     assert r.status_code == 400
     assert "limit" in r.json()["detail"].lower() or "giới hạn" in r.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Zalo QR login (boss tự kết nối acc phụ)
+# ---------------------------------------------------------------------------
+
+
+def test_zalo_qr_login_no_csrf(client, logged_in_boss):
+    r = client.post("/api/v1/admin/channels/zalo/qr-login", json={})
+    assert r.status_code == 403
+
+
+def test_zalo_qr_login_status_unknown_id(client, logged_in_boss):
+    r = client.get("/api/v1/admin/channels/zalo/qr-login/deadbeef")
+    assert r.status_code == 404
+
+
+def test_zalo_qr_login_blocked_when_already_connected(client, logged_in_boss, clean_db):
+    import asyncio
+
+    async def _seed():
+        async with clean_db.acquire() as c:
+            acc_id = await c.fetchval(
+                """
+                INSERT INTO bot_accounts
+                  (provider, provider_user_id, display_name, account_kind,
+                   ownership, owner_boss_id, status, max_assigned_bosses)
+                VALUES ('zalo', 'z-test-1', 'Acc phụ', 'personal',
+                        'boss_owned', $1, 'active', 1)
+                RETURNING id
+                """,
+                logged_in_boss.boss_id,
+            )
+            await c.execute(
+                """
+                INSERT INTO bot_account_assignments
+                  (boss_id, provider, bot_account_id, assignment_kind, status)
+                VALUES ($1, 'zalo', $2, 'boss_owned', 'active')
+                """,
+                logged_in_boss.boss_id,
+                acc_id,
+            )
+
+    asyncio.get_event_loop().run_until_complete(_seed())
+    r = client.post(
+        "/api/v1/admin/channels/zalo/qr-login",
+        json={},
+        headers=_csrf(client),
+    )
+    assert r.status_code == 409

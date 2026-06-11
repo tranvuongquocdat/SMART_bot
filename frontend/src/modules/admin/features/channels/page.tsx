@@ -23,6 +23,7 @@ import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { channelsQuery, connectChannel, disconnectChannel } from './api';
 import type { Channel } from './api';
+import { ZaloQrDialog } from './zalo-qr-dialog';
 
 const PROVIDERS = ['zalo', 'telegram', 'lark'] as const;
 
@@ -109,8 +110,14 @@ function ChannelCard({ channel }: { channel: Channel }) {
 export default function ChannelsPage() {
   const { data: channels } = useSuspenseQuery(channelsQuery());
   const qc = useQueryClient();
+  const [zaloQrOpen, setZaloQrOpen] = useState(false);
 
   async function handleConnect(provider: string) {
+    // Zalo: boss tự đăng nhập acc phụ qua QR thay vì cấp acc từ pool.
+    if (provider === 'zalo') {
+      setZaloQrOpen(true);
+      return;
+    }
     try {
       const result = await connectChannel(provider);
       await qc.invalidateQueries({ queryKey: ['admin', 'channels'] });
@@ -158,6 +165,8 @@ export default function ChannelsPage() {
           </div>
         )}
       </PageSection>
+
+      <ZaloQrDialog open={zaloQrOpen} onClose={() => setZaloQrOpen(false)} />
     </PageWrap>
   );
 }

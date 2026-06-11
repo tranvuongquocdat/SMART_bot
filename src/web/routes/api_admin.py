@@ -1718,6 +1718,78 @@ async def connect_channel(
     return {"provider": provider, "status": "active", "display_name": display_name}
 
 
+# ---------------------------------------------------------------------------
+# Zalo: boss tự kết nối acc phụ qua QR
+#   POST /channels/zalo/qr-login        → mở phiên login, trả login_id
+#   GET  /channels/zalo/qr-login/{id}   → poll trạng thái + ảnh QR
+# ---------------------------------------------------------------------------
+
+
+async def _check_channel_slot(db, ctx, provider: str) -> None:
+    """Chặn connect khi đã có kênh này hoặc vượt limit gói (dùng chung)."""
+    from src.services.subscription import get_effective_limits
+
+    async with db.acquire() as c:
+        existing = await c.fetchval(
+            """
+            SELECT status FROM bot_account_assignments
+            WHERE boss_id=$1 AND provider=$2 AND status IN ('active', 'pending_accept')
+            """,
+            ctx.boss_id,
+            provider,
+        )
+        if existing:
+            raise HTTPException(409, "Kênh này đã được kết nối")
+        limits = await get_effective_limits(db, ctx.boss_id)
+        if limits.max_active_channels is not None:
+            active = await c.fetchval(
+                """
+                SELECT COUNT(*) FROM bot_account_assignments
+                WHERE boss_id=$1 AND status='active' AND provider <> 'web'
+                """,
+                ctx.boss_id,
+            )
+            if active >= limits.max_active_channels:
+                raise HTTPException(
+                    400,
+                    f"Đã đạt giới hạn {limits.max_active_channels} kênh của gói hiện tại",
+                )
+
+
+@router.post("/channels/zalo/qr-login", dependencies=[Depends(verify_json_csrf)])
+async def zalo_qr_login_start(
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Mở phiên QR login để boss quét bằng acc Zalo phụ (acc nghe ngóng)."""
+    await _check_channel_slot(db, ctx, "zalo")
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    if manager is None:
+        raise HTTPException(503, "Zalo QR login chưa sẵn sàng")
+    sess = await manager.start(ctx.boss_id)
+    return {"login_id": sess.login_id, "status": sess.status}
+
+
+@router.get("/channels/zalo/qr-login/{login_id}")
+async def zalo_qr_login_status(
+    login_id: str,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+) -> dict:
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    sess = manager.get(ctx.boss_id, login_id) if manager else None
+    if sess is None:
+        raise HTTPException(404, "Phiên đăng nhập không tồn tại")
+    return {
+        "status": sess.status,
+        "qr_image_b64": sess.qr_image_b64 if sess.status == "qr" else None,
+        "display_name": sess.display_name,
+        "error": sess.error,
+        "bot_account_id": sess.bot_account_id,
+    }
+
+
 @router.delete("/channels/{provider}", dependencies=[Depends(verify_json_csrf)])
 async def disconnect_channel(
     provider: str,

@@ -104,6 +104,14 @@ async def lifespan(app: FastAPI):
     _log.getLogger(__name__).info("channels loaded: %s", loaded_channels)
     await boot_inbound_for_all(app.state.channel_registry, _admin_repo)
 
+    from src.services.zalo_qr_login import ZaloQrLoginManager
+
+    app.state.zalo_qr_login = ZaloQrLoginManager(
+        app.state.db_pool,
+        app.state.bus,
+        lambda: {a.provider: a for a in app.state.channel_registry.adapters()},
+    )
+
     # Plugins — scan plugins/ and import each plugin's tools module so
     # any @tool decorators register before the dispatcher is hit.
     loaded = load_plugins()

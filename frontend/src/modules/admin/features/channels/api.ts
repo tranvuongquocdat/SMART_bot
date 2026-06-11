@@ -35,3 +35,20 @@ export const disconnectChannel = (provider: string) =>
     `/api/v1/admin/channels/${encodeURIComponent(provider)}`,
     { method: 'DELETE' },
   );
+
+export type ZaloQrStatus = {
+  status: 'starting' | 'qr' | 'scanned' | 'success' | 'error';
+  qr_image_b64: string | null;
+  display_name: string | null;
+  error: string | null;
+  bot_account_id: number | null;
+};
+
+export const startZaloQrLogin = () =>
+  api<{ login_id: string; status: string }>('/api/v1/admin/channels/zalo/qr-login', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+
+export const zaloQrLoginStatus = (loginId: string) =>
+  api<ZaloQrStatus>(`/api/v1/admin/channels/zalo/qr-login/${loginId}`);
