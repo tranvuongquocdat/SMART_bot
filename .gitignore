@@ -38,3 +38,4 @@ src/web/static/app/
 
 # git worktrees
 .worktrees/
+uploads/
