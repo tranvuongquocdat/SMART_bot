@@ -134,6 +134,7 @@ export default function SubscriptionPage() {
 
   const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
   const [cancelTarget, setCancelTarget] = useState<SubscriptionRequest | null>(null);
+  const [warnDismissed, setWarnDismissed] = useState(false);
 
   const hasPending = requests.some((r) => r.status === 'pending');
   const pendingRequest = requests.find((r) => r.status === 'pending');
@@ -146,19 +147,20 @@ export default function SubscriptionPage() {
 
   return (
     <PageWrap className="max-w-[860px]">
-      {limits?.over_limit.any_over && (
-        <ResolutionScreen
-          limits={limits}
-          onGoToUpgrade={() =>
-            plansRef.current?.scrollIntoView({ behavior: 'smooth' })
-          }
-        />
-      )}
-
       <PageHeader
         title="Gói cước"
         subtitle="Quản lý gói dịch vụ và giới hạn sử dụng."
       />
+
+      {limits?.over_limit.any_over && !warnDismissed && (
+        <ResolutionScreen
+          limits={limits}
+          onGoToUpgrade={() =>
+            plansRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }
+          onDismiss={() => setWarnDismissed(true)}
+        />
+      )}
 
       <PageSection className="rounded-[12px] bg-card-grad surface-section overflow-hidden">
         <div className="flex items-center gap-3 p-4 border-b border-border">

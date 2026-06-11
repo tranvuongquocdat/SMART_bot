@@ -1,8 +1,9 @@
 import { useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Wrench } from 'lucide-react';
+import { Wrench, Zap } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
-import { toolsQuery, toggleTool } from './api';
+import { toolsQuery, toggleTool, enableAllTools } from './api';
 
 export default function ToolsPage() {
   const { data: tools } = useSuspenseQuery(toolsQuery());
@@ -19,6 +20,21 @@ export default function ToolsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const enableAllMut = useMutation({
+    mutationFn: enableAllTools,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'tools'] });
+      if (data.limit !== null && data.active < data.total) {
+        toast.info(
+          `Đã bật ${data.active}/${data.total} tool — gói hiện tại giới hạn ${data.limit} tool.`
+        );
+      } else {
+        toast.success(`Đã bật toàn bộ ${data.active} tool.`);
+      }
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const active = tools.filter((t) => t.active);
   const inactive = tools.filter((t) => !t.active);
 
@@ -27,6 +43,19 @@ export default function ToolsPage() {
       <PageHeader
         title="Tools"
         subtitle={`${active.length} / ${tools.length} tool đang bật.`}
+        actions={
+          inactive.length > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={enableAllMut.isPending}
+              onClick={() => enableAllMut.mutate()}
+            >
+              <Zap className="mr-1.5 h-3.5 w-3.5" />
+              {enableAllMut.isPending ? 'Đang bật…' : 'Bật tất cả'}
+            </Button>
+          ) : undefined
+        }
       />
 
       {[

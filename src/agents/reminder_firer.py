@@ -62,11 +62,22 @@ class ReminderFirer:
                     rid,
                 )
 
+        # Reminder không gắn chat (tạo từ web admin) → nhắc vào DM web của
+        # boss, hiện ngay trên bong bóng Trợ lý / trang chat admin.
+        provider = row["provider"]
+        chat_id = row["chat_id"]
+        if not chat_id:
+            from src.services.web_identity import get_or_create_boss_web_identity
+
+            uid = await get_or_create_boss_web_identity(ctx.db, ctx.boss.id)
+            provider = "web"
+            chat_id = f"dm:{uid}"
+
         try:
             await ctx.outbound_service.send(
                 boss_id=ctx.boss.id,
-                provider=row["provider"] or "zalo",
-                chat_id=row["chat_id"],
+                provider=provider or "zalo",
+                chat_id=chat_id,
                 content=f"Nhắc anh: {row['text']}",
                 trigger="scheduled",
             )

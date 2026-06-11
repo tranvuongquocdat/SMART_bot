@@ -118,3 +118,46 @@ def test_toggle_respects_plan_limit(client, logged_in_boss, clean_db):
     )
     assert r.status_code == 400
     assert "limit" in r.json()["detail"].lower()
+
+
+def test_enable_all_tools(client, logged_in_boss, clean_db):
+    """Enable-all turns on every registry tool when plan is unlimited."""
+    async def _clear():
+        async with clean_db.acquire() as c:
+            await c.execute(
+                "DELETE FROM boss_active_tools WHERE boss_id=$1",
+                logged_in_boss.boss_id,
+            )
+
+    asyncio.get_event_loop().run_until_complete(_clear())
+    r = client.post("/api/v1/admin/tools/enable-all", headers=_csrf_headers(client))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["enabled"] == body["total"]
+    assert body["active"] == body["total"]
+
+
+def test_enable_all_tools_respects_limit(client, logged_in_boss, clean_db):
+    """Enable-all caps at the plan's max_active_tools."""
+    async def _setup():
+        async with clean_db.acquire() as c:
+            pid = await c.fetchval(
+                "INSERT INTO plans (name,label,limits_json) VALUES "
+                "('tiny-all','Tiny','{\"max_active_tools\": 3}'::jsonb) "
+                "ON CONFLICT (name) DO UPDATE SET limits_json=EXCLUDED.limits_json RETURNING id"
+            )
+            await c.execute(
+                "UPDATE users SET plan_id=$2 WHERE id=$1",
+                logged_in_boss.boss_id, pid,
+            )
+            await c.execute(
+                "DELETE FROM boss_active_tools WHERE boss_id=$1",
+                logged_in_boss.boss_id,
+            )
+
+    asyncio.get_event_loop().run_until_complete(_setup())
+    r = client.post("/api/v1/admin/tools/enable-all", headers=_csrf_headers(client))
+    assert r.status_code == 200
+    body = r.json()
+    assert body["active"] == 3
+    assert body["limit"] == 3

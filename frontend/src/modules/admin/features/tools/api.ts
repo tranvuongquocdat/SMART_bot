@@ -18,6 +18,25 @@ function csrfToken(): string {
   return m ? decodeURIComponent(m[1]) : '';
 }
 
+export type EnableAllResult = {
+  enabled: number;
+  active: number;
+  total: number;
+  limit: number | null;
+};
+
+export async function enableAllTools(): Promise<EnableAllResult> {
+  const res = await fetch('/api/v1/admin/tools/enable-all', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrfToken() },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? 'Thao tác thất bại');
+  }
+  return res.json();
+}
+
 export async function toggleTool(name: string): Promise<{ name: string; active: boolean }> {
   const res = await fetch(`/api/v1/admin/tools/${encodeURIComponent(name)}/toggle`, {
     method: 'PATCH',

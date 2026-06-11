@@ -1961,41 +1961,9 @@ async def toggle_tool(
 
 
 async def _boss_web_identity(db: asyncpg.Pool, ctx: BossContext) -> str:
-    """Find-or-create web channel identity của boss cho admin chat.
+    from src.services.web_identity import get_or_create_boss_web_identity
 
-    Normalizer resolve boss của DM qua account_links, nên phải đảm bảo
-    cả web_users lẫn account_links cùng tồn tại.
-    """
-    async with db.acquire() as c:
-        uid = await c.fetchval(
-            """
-            SELECT id FROM web_users
-            WHERE boss_user_id=$1 AND is_boss
-            ORDER BY created_at LIMIT 1
-            """,
-            ctx.boss_id,
-        )
-        if uid is None:
-            name = await c.fetchval(
-                "SELECT COALESCE(name, email) FROM users WHERE id=$1", ctx.boss_id
-            )
-            from src.channels.web.state_repo import WebUsersRepo
-
-            uid = await WebUsersRepo(db).create(
-                name=name or f"Boss {ctx.boss_id}",
-                is_boss=True,
-                boss_user_id=ctx.boss_id,
-            )
-        await c.execute(
-            """
-            INSERT INTO account_links (boss_id, provider, provider_user_id)
-            VALUES ($1, 'web', $2)
-            ON CONFLICT (provider, provider_user_id) DO NOTHING
-            """,
-            ctx.boss_id,
-            uid,
-        )
-    return uid
+    return await get_or_create_boss_web_identity(db, ctx.boss_id)
 
 
 @router.get("/chat/messages")
@@ -2108,3 +2076,38 @@ async def chat_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/tools/enable-all", dependencies=[Depends(verify_json_csrf)])
+async def enable_all_tools(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Bật toàn bộ tools trong một lần bấm, cắt theo max_active_tools của gói."""
+    from src.tools import registry as _reg
+
+    lim = await get_effective_limits(db, ctx.boss_id)
+    names = list(_reg._REGISTRY.keys())
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+        )
+        active = {r["tool_name"] for r in rows}
+        to_add = [n for n in names if n not in active]
+        if lim.max_active_tools is not None:
+            slots = max(0, lim.max_active_tools - len(active))
+            to_add = to_add[:slots]
+        if to_add:
+            await c.executemany(
+                """
+                INSERT INTO boss_active_tools (boss_id, tool_name)
+                VALUES ($1, $2) ON CONFLICT DO NOTHING
+                """,
+                [(ctx.boss_id, n) for n in to_add],
+            )
+    return {
+        "enabled": len(to_add),
+        "active": len(active) + len(to_add),
+        "total": len(names),
+        "limit": lim.max_active_tools,
+    }
