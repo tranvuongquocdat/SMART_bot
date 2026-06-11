@@ -64,7 +64,7 @@ export default function DashboardPage() {
 
   return (
     <motion.div
-      className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1140px] mx-auto space-y-5"
+      className="px-10 py-8 max-md:px-4 max-md:py-6 max-w-[1280px] mx-auto space-y-6"
       variants={staggerContainer(0.08)}
       initial="hidden"
       animate="show"
@@ -76,7 +76,7 @@ export default function DashboardPage() {
         <p className="text-muted-foreground mt-1 text-[12.5px]">Tổng quan workspace · 30 ngày qua</p>
       </motion.header>
 
-      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-3" variants={staggerContainer(0.06)}>
+      <motion.div className="grid grid-cols-2 md:grid-cols-4 gap-4" variants={staggerContainer(0.06)}>
         <StatCard label="Tin nhắn" value={data.stats_30d.messages} previous={data.stats_prev_30d.messages} />
         <StatCard label="Việc cần làm" value={data.stats_30d.tasks} previous={data.stats_prev_30d.tasks} />
         <StatCard label="Nhắc nhở" value={data.stats_30d.reminders} previous={data.stats_prev_30d.reminders} />

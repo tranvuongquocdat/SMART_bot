@@ -17,6 +17,7 @@ export function adminRoutes(qc: QueryClient): RouteObject {
       { index: true, lazy: async () => ({ Component: (await import('./features/dashboard/page')).default }) },
       { path: 'dashboard', lazy: async () => ({ Component: (await import('./features/dashboard/page')).default }), handle: { breadcrumb: 'Tổng quan' } },
       { path: 'chat', lazy: async () => ({ Component: (await import('./features/chat/page')).default }), handle: { breadcrumb: 'Trợ lý' } },
+      { path: 'ai', lazy: async () => ({ Component: (await import('./features/ai/page')).default }), handle: { breadcrumb: 'Models AI' } },
       {
         path: 'groups',
         handle: { breadcrumb: 'Nhóm' },

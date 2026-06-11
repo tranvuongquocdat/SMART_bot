@@ -49,7 +49,7 @@ export default function ChatPage() {
   });
 
   return (
-    <PageWrap className="max-w-[1100px]">
+    <PageWrap className="max-w-[1280px]">
       <PageHeader
         title="Trợ lý"
         subtitle="Chat trực tiếp với thư ký ảo — giao việc, hỏi note, đặt lịch nhắc."
@@ -60,7 +60,7 @@ export default function ChatPage() {
           </Button>
         }
       />
-      <div className="grid grid-cols-[260px_1fr] gap-4 items-start max-md:grid-cols-1">
+      <div className="grid grid-cols-[280px_1fr] gap-5 items-start max-md:grid-cols-1">
         {/* Sidebar hội thoại */}
         <div className="rounded-xl border divide-y overflow-hidden">
           {conversations.map((c) => (
@@ -111,7 +111,7 @@ export default function ChatPage() {
         <ChatPanel
           key={activeId ?? 'none'}
           conversationId={activeId}
-          className="h-[calc(100vh-230px)] min-h-[420px]"
+          className="h-[calc(100vh-210px)] min-h-[480px]"
         />
       </div>
     </PageWrap>

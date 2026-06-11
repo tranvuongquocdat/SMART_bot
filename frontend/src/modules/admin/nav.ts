@@ -1,4 +1,4 @@
-import { LayoutDashboard, MessageCircle, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings, BarChart3, CreditCard, Wrench, Plug2 } from 'lucide-react';
+import { LayoutDashboard, MessageCircle, Cpu, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings, BarChart3, CreditCard, Wrench, Plug2 } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 export const adminNav: NavSection[] = [
@@ -7,6 +7,7 @@ export const adminNav: NavSection[] = [
     items: [
       { label: 'Tổng quan', href: '/app/admin/dashboard', icon: LayoutDashboard },
       { label: 'Trợ lý', href: '/app/admin/chat', icon: MessageCircle },
+      { label: 'Models AI', href: '/app/admin/ai', icon: Cpu },
       { label: 'Nhóm', href: '/app/admin/groups', icon: Users },
       { label: 'Nhắc nhở', href: '/app/admin/reminders', icon: Bell },
       { label: 'Dự án', href: '/app/admin/projects', icon: FolderKanban },

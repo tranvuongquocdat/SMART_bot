@@ -198,7 +198,7 @@ export function ChatPanel({
 
   return (
     <div className={`flex flex-col rounded-xl border bg-background/50 ${className}`}>
-      <div className="flex-1 overflow-y-auto p-4 space-y-3">
+      <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {messages.length === 0 && !awaitingReply ? (
           <p className="text-sm text-muted-foreground text-center mt-10">
             Chưa có tin nhắn. Hãy bắt đầu trò chuyện với trợ lý của bạn.

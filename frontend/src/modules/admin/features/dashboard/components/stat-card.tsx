@@ -39,20 +39,9 @@ export function StatCard({ label, value, previous }: Props) {
 
   return (
     <motion.div variants={fadeUp}>
-      <Card variant="stat" className="px-4 pt-[14px] pb-3">
+      <Card variant="stat" className="px-5 pt-4 pb-[14px]">
         {/* accent strip top */}
         <div className="absolute left-0 right-0 top-0 h-[2px] bg-accent-gradient opacity-90" />
-        {/* glow corner */}
-        <div
-          className="absolute pointer-events-none"
-          style={{
-            right: '-10px',
-            bottom: '-10px',
-            width: '180px',
-            height: '110px',
-            background: 'radial-gradient(circle at center, hsl(var(--primary) / 0.16), transparent 65%)',
-          }}
-        />
         <div className="text-[10px] uppercase tracking-[0.07em] text-[hsl(var(--dim))] font-medium">
           {label}
         </div>
