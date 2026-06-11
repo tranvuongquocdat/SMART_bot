@@ -31,6 +31,8 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
       { path: 'audit', lazy: async () => ({ Component: (await import('./features/audit-log/page')).default }), handle: { breadcrumb: 'Audit log' } },
       { path: 'retrieval-pipelines', lazy: async () => ({ Component: (await import('./features/retrieval-pipelines/page')).default }), handle: { breadcrumb: 'Retrieval pipelines' } },
       { path: 'usage', element: <ComingSoon feature="Usage" />, handle: { breadcrumb: 'Sử dụng' } },
+      { path: 'subscriptions', lazy: async () => ({ Component: (await import('./features/subscriptions/page')).default }), handle: { breadcrumb: 'Yêu cầu đăng ký' } },
+      { path: 'plans', lazy: async () => ({ Component: (await import('./features/plans/page')).default }), handle: { breadcrumb: 'Gói dịch vụ' } },
     ],
   };
 }
