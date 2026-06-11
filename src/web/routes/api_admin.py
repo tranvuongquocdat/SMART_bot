@@ -1950,3 +1950,161 @@ async def toggle_tool(
             name,
         )
         return {"name": name, "active": True}
+
+
+# ===========================================================================
+# Chat — sếp chat với bot ngay trong web admin (đi qua web channel)
+#   GET  /api/v1/admin/chat/messages
+#   POST /api/v1/admin/chat/send
+#   GET  /api/v1/admin/chat/stream   (SSE)
+# ===========================================================================
+
+
+async def _boss_web_identity(db: asyncpg.Pool, ctx: BossContext) -> str:
+    """Find-or-create web channel identity của boss cho admin chat.
+
+    Normalizer resolve boss của DM qua account_links, nên phải đảm bảo
+    cả web_users lẫn account_links cùng tồn tại.
+    """
+    async with db.acquire() as c:
+        uid = await c.fetchval(
+            """
+            SELECT id FROM web_users
+            WHERE boss_user_id=$1 AND is_boss
+            ORDER BY created_at LIMIT 1
+            """,
+            ctx.boss_id,
+        )
+        if uid is None:
+            name = await c.fetchval(
+                "SELECT COALESCE(name, email) FROM users WHERE id=$1", ctx.boss_id
+            )
+            from src.channels.web.state_repo import WebUsersRepo
+
+            uid = await WebUsersRepo(db).create(
+                name=name or f"Boss {ctx.boss_id}",
+                is_boss=True,
+                boss_user_id=ctx.boss_id,
+            )
+        await c.execute(
+            """
+            INSERT INTO account_links (boss_id, provider, provider_user_id)
+            VALUES ($1, 'web', $2)
+            ON CONFLICT (provider, provider_user_id) DO NOTHING
+            """,
+            ctx.boss_id,
+            uid,
+        )
+    return uid
+
+
+@router.get("/chat/messages")
+async def chat_messages(
+    limit: int = Query(50, le=200),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    uid = await _boss_web_identity(db, ctx)
+    chat_id = f"dm:{uid}"
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT * FROM (
+              SELECT 'in'::text AS kind, m.id, m.sender_name, m.text, m.ts
+              FROM messages m
+              WHERE m.provider='web' AND m.chat_id=$1
+              UNION ALL
+              SELECT 'out'::text AS kind, o.id, 'Bot' AS sender_name, o.content AS text, o.sent_at AS ts
+              FROM outbound_messages o
+              WHERE o.provider='web' AND o.chat_id=$1
+            ) merged
+            ORDER BY ts DESC
+            LIMIT $2
+            """,
+            chat_id,
+            limit,
+        )
+    return [
+        {
+            "kind": r["kind"],
+            "id": r["id"],
+            "sender_name": r["sender_name"],
+            "text": r["text"],
+            "ts": r["ts"].isoformat(),
+        }
+        for r in reversed(rows)
+    ]
+
+
+@router.post("/chat/send", dependencies=[Depends(verify_json_csrf)])
+async def chat_send(
+    payload: dict,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    import uuid as _uuid
+
+    text = (payload.get("text") or "").strip()
+    if not text:
+        raise HTTPException(400, "text required")
+    uid = await _boss_web_identity(db, ctx)
+    async with db.acquire() as c:
+        sender_name = await c.fetchval("SELECT name FROM web_users WHERE id=$1", uid)
+    await request.app.state.bus.publish(
+        "inbound.raw.web",
+        {
+            "web_user_id": uid,
+            "chat_id": f"dm:{uid}",
+            "chat_type": "dm",
+            "text": text,
+            "mention_bot": False,
+            "provider_msg_id": f"adm-{_uuid.uuid4().hex[:10]}",
+            "sender_name": sender_name,
+        },
+    )
+    return {"ok": True}
+
+
+@router.get("/chat/stream")
+async def chat_stream(
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+):
+    """SSE: đẩy event bot trả lời về cho admin chat (reuse sse_hub của web channel)."""
+    import asyncio as _asyncio
+
+    from fastapi.responses import StreamingResponse
+
+    registry = getattr(request.app.state, "channel_registry", None)
+    adapter = registry.get("web") if registry is not None else None
+    if adapter is None:
+        raise HTTPException(503, "web channel not loaded")
+
+    uid = await _boss_web_identity(db, ctx)
+    client = adapter.sse_hub.attach(uid)
+
+    async def gen():
+        try:
+            yield b": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await _asyncio.wait_for(client.queue.get(), timeout=15.0)
+                    yield f"data: {json.dumps(event)}\n\n".encode()
+                except _asyncio.TimeoutError:
+                    yield b": heartbeat\n\n"
+        finally:
+            adapter.sse_hub.detach(client)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
