@@ -1,13 +1,10 @@
 import { useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { Users, MoreHorizontal } from 'lucide-react';
+import { Users, Trash2 } from 'lucide-react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from '@/components/ui/dialog';
@@ -34,7 +31,6 @@ function ChannelChip({ channel }: { channel: string }) {
 export default function GroupsListPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<GroupListItem | null>(null);
-  const navigate = useNavigate();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery(groupsListQuery());
   const [searchParams, setSearchParams] = useSearchParams();
@@ -157,27 +153,32 @@ export default function GroupsListPage() {
       ),
     },
     {
-      id: 'actions',
+      id: 'detail',
       header: '',
       cell: ({ row }) => (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => navigate(`/app/admin/groups/${row.original.id}`)}>
-              Mở chi tiết
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              className="text-destructive focus:text-destructive"
-              onClick={() => setDeleteTarget(row.original)}
-            >
-              Xoá nhóm
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs"
+          onClick={() => selectGroup(row.original.id)}
+        >
+          Chi tiết
+        </Button>
+      ),
+    },
+    {
+      id: 'delete',
+      header: '',
+      cell: ({ row }) => (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+          onClick={() => setDeleteTarget(row.original)}
+          aria-label="Xoá nhóm"
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
       ),
     },
   ];
@@ -218,13 +219,7 @@ export default function GroupsListPage() {
         {isLoading ? (
           <Skeleton className="h-48 w-full rounded-[12px]" />
         ) : (
-          <div
-            className={
-              selectedId
-                ? 'grid grid-cols-[minmax(340px,5fr)_7fr] gap-5 items-start max-lg:grid-cols-1'
-                : ''
-            }
-          >
+          <>
             <DataTable
               columns={columns}
               data={data ?? []}
@@ -240,7 +235,7 @@ export default function GroupsListPage() {
             {selectedId && (
               <GroupPanel id={selectedId} onClose={() => selectGroup(null)} />
             )}
-          </div>
+          </>
         )}
       </PageSection>
 
