@@ -32,6 +32,7 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
       { path: 'usage', lazy: async () => ({ Component: (await import('./features/usage/page')).default }), handle: { breadcrumb: 'Sử dụng' } },
       { path: 'subscriptions', lazy: async () => ({ Component: (await import('./features/subscriptions/page')).default }), handle: { breadcrumb: 'Yêu cầu đăng ký' } },
       { path: 'plans', lazy: async () => ({ Component: (await import('./features/plans/page')).default }), handle: { breadcrumb: 'Gói dịch vụ' } },
+      { path: 'mcp-catalog', lazy: async () => ({ Component: (await import('./features/mcp-catalog/page')).default }), handle: { breadcrumb: 'MCP Catalog' } },
     ],
   };
 }

@@ -37,6 +37,7 @@ export function adminRoutes(qc: QueryClient): RouteObject {
       { path: 'usage', lazy: async () => ({ Component: (await import('./features/usage/page')).default }), handle: { breadcrumb: 'Sử dụng' } },
       { path: 'subscription', lazy: async () => ({ Component: (await import('./features/subscription/page')).default }), handle: { breadcrumb: 'Gói cước' } },
       { path: 'tools', lazy: async () => ({ Component: (await import('./features/tools/page')).default }), handle: { breadcrumb: 'Tools' } },
+      { path: 'integrations', lazy: async () => ({ Component: (await import('./features/integrations/page')).default }), handle: { breadcrumb: 'Tích hợp' } },
       { path: 'settings', lazy: async () => ({ Component: (await import('./features/settings/page')).default }), handle: { breadcrumb: 'Cài đặt' } },
     ],
   };
