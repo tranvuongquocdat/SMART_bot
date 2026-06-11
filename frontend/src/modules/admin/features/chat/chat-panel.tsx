@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Paperclip, SendHorizontal, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -15,71 +15,45 @@ import {
 
 const REPLY_TIMEOUT_MS = 90_000;
 
-type Bubble = {
-  key: string;
-  fromBot: boolean;
-  text: string;
-  mediaKind: string | null;
-  mediaUrl: string | null;
-  ts: string;
-  isError?: boolean;
-};
-
-function toBubble(m: ChatMessage): Bubble {
-  return {
-    key: `r-${m.kind}-${m.id}`,
-    fromBot: m.kind === 'out',
-    text: m.text ?? '',
-    mediaKind: m.media_kind,
-    mediaUrl: m.media_url,
-    ts: m.ts,
-  };
-}
-
-function MessageBubble({ b }: { b: Bubble }) {
-  const time = new Date(b.ts).toLocaleTimeString('vi-VN', {
+function MessageBubble({ m }: { m: ChatMessage }) {
+  const fromBot = m.kind === 'out';
+  const time = new Date(m.ts).toLocaleTimeString('vi-VN', {
     hour: '2-digit',
     minute: '2-digit',
   });
   return (
-    <div className={`flex ${b.fromBot ? 'justify-start' : 'justify-end'}`}>
+    <div className={`flex ${fromBot ? 'justify-start' : 'justify-end'}`}>
       <div
         className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap break-words ${
-          b.isError
-            ? 'bg-destructive/10 border border-destructive/30 text-destructive rounded-bl-sm'
-            : b.fromBot
-              ? 'bg-card border text-foreground rounded-bl-sm'
-              : 'bg-primary text-primary-foreground rounded-br-sm'
+          fromBot
+            ? 'bg-card border text-foreground rounded-bl-sm'
+            : 'bg-primary text-primary-foreground rounded-br-sm'
         }`}
       >
-        {b.mediaUrl && b.mediaKind === 'image' && (
+        {m.media_url && m.media_kind === 'image' && (
           <img
-            src={b.mediaUrl}
+            src={m.media_url}
             alt="đính kèm"
             className="rounded-lg mb-2 max-h-56 object-contain"
           />
         )}
-        {b.mediaUrl && b.mediaKind !== 'image' && (
+        {m.media_url && m.media_kind !== 'image' && m.media_kind !== 'text' && (
           <a
-            href={b.mediaUrl}
+            href={m.media_url}
             target="_blank"
             rel="noreferrer"
             className={`inline-flex items-center gap-1.5 mb-1.5 text-xs underline ${
-              b.fromBot ? 'text-primary' : 'text-primary-foreground'
+              fromBot ? 'text-primary' : 'text-primary-foreground'
             }`}
           >
             <Paperclip className="h-3 w-3" />
             Tệp đính kèm
           </a>
         )}
-        {b.text && <p>{b.text}</p>}
+        {m.text && <p>{m.text}</p>}
         <p
           className={`mt-1 text-[10px] ${
-            b.isError
-              ? 'text-destructive/70'
-              : b.fromBot
-                ? 'text-muted-foreground'
-                : 'text-primary-foreground/70'
+            fromBot ? 'text-muted-foreground' : 'text-primary-foreground/70'
           }`}
         >
           {time}
@@ -112,60 +86,56 @@ export function ChatPanel({
   conversationId: string | null;
   className?: string;
 }) {
-  const { data: history } = useQuery(chatMessagesQuery(conversationId));
-  const [live, setLive] = useState<Bubble[]>([]);
+  const qc = useQueryClient();
+  const { data: messages = [] } = useQuery(chatMessagesQuery(conversationId));
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [awaitingReply, setAwaitingReply] = useState(false);
+  const [replyError, setReplyError] = useState<string | null>(null);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
   const [uploading, setUploading] = useState(false);
-  const seenIds = useRef(new Set<string>());
   const bottomRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const invalidateMessages = () =>
+    qc.invalidateQueries({
+      queryKey: ['admin', 'chat', 'messages', conversationId ?? 'default'],
+    });
+
   // Đổi hội thoại → reset state cục bộ
   useEffect(() => {
-    setLive([]);
-    seenIds.current.clear();
     setAwaitingReply(false);
+    setReplyError(null);
     setAttachment(null);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
   }, [conversationId]);
 
+  // SSE chỉ là tín hiệu "có dữ liệu mới" — lịch sử DB là nguồn duy nhất,
+  // tránh hiển thị đôi (echo + refetch cùng một tin).
   useEffect(() => {
     const es = new EventSource(chatStreamUrl(conversationId));
     es.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data) as ChatStreamEvent;
-        if (ev.kind !== 'message' || seenIds.current.has(ev.msg_id)) return;
-        seenIds.current.add(ev.msg_id);
+        if (ev.kind !== 'message') return;
         if (ev.sender_kind === 'bot') {
           setAwaitingReply(false);
+          setReplyError(null);
           if (timeoutRef.current) clearTimeout(timeoutRef.current);
         }
-        setLive((prev) => [
-          ...prev,
-          {
-            key: `s-${ev.msg_id}`,
-            fromBot: ev.sender_kind === 'bot',
-            text: ev.text,
-            mediaKind: null,
-            mediaUrl: null,
-            ts: ev.ts,
-          },
-        ]);
+        invalidateMessages();
       } catch {
         // heartbeat
       }
     };
     return () => es.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversationId]);
-
-  const bubbles = [...(history ?? []).map(toBubble), ...live];
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [bubbles.length, awaitingReply]);
+  }, [messages.length, awaitingReply, replyError]);
 
   async function handlePickFile(f: File) {
     setUploading(true);
@@ -191,22 +161,15 @@ export function ChatPanel({
       });
       setDraft('');
       setAttachment(null);
+      setReplyError(null);
       setAwaitingReply(true);
+      invalidateMessages();
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       timeoutRef.current = setTimeout(() => {
         setAwaitingReply(false);
-        setLive((prev) => [
-          ...prev,
-          {
-            key: `err-${Date.now()}`,
-            fromBot: true,
-            isError: true,
-            text: 'Trợ lý không phản hồi (quá 90 giây). Kiểm tra cấu hình model/API key trong Cài đặt > AI, hoặc thử lại.',
-            mediaKind: null,
-            mediaUrl: null,
-            ts: new Date().toISOString(),
-          },
-        ]);
+        setReplyError(
+          'Trợ lý không phản hồi (quá 90 giây). Kiểm tra cấu hình model/API key trong Cài đặt > AI, hoặc thử lại.'
+        );
       }, REPLY_TIMEOUT_MS);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Không gửi được tin nhắn');
@@ -218,14 +181,21 @@ export function ChatPanel({
   return (
     <div className={`flex flex-col rounded-xl border bg-background/50 ${className}`}>
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
-        {bubbles.length === 0 && !awaitingReply ? (
+        {messages.length === 0 && !awaitingReply ? (
           <p className="text-sm text-muted-foreground text-center mt-10">
             Chưa có tin nhắn. Hãy bắt đầu trò chuyện với trợ lý của bạn.
           </p>
         ) : (
-          bubbles.map((b) => <MessageBubble key={b.key} b={b} />)
+          messages.map((m) => <MessageBubble key={`${m.kind}-${m.id}`} m={m} />)
         )}
         {awaitingReply && <TypingIndicator />}
+        {replyError && (
+          <div className="flex justify-start">
+            <div className="max-w-[75%] rounded-2xl rounded-bl-sm px-4 py-2.5 text-sm bg-destructive/10 border border-destructive/30 text-destructive">
+              {replyError}
+            </div>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 
