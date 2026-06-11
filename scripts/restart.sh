@@ -19,6 +19,22 @@ if [ -n "$PIDS" ]; then
 fi
 
 docker compose -f docker/docker-compose.yml up -d postgres qdrant
+
+# Postgres vừa start cần vài giây phục hồi WAL trước khi nhận kết nối.
+echo -n "waiting for postgres"
+for i in $(seq 1 30); do
+  if PGPASSWORD=smart psql -h localhost -p 5433 -U smart -d smart_bot -tc "SELECT 1" >/dev/null 2>&1; then
+    echo " — ready"
+    break
+  fi
+  echo -n "."
+  sleep 1
+  if [ "$i" = 30 ]; then
+    echo " — postgres not ready after 30s, aborting" >&2
+    exit 1
+  fi
+done
+
 uv run alembic upgrade head
 
 # Build the SPA when missing (or when --build is passed).
