@@ -27,6 +27,7 @@ export type Model = {
   is_platform_default: boolean;
   is_active: boolean;
   notes: string | null;
+  owner_boss_id: number | null;
   created_at: string;
   updated_at: string;
 };

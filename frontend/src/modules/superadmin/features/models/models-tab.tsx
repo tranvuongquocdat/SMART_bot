@@ -352,7 +352,12 @@ export function ModelsTab() {
       accessorKey: 'name',
       cell: ({ row }) => (
         <div>
-          <div className="font-medium tracking-tight">{row.original.name}</div>
+          <div className="font-medium tracking-tight flex items-center gap-1.5">
+            {row.original.name}
+            {row.original.owner_boss_id != null && (
+              <Badge variant="outline" className="text-[10px]">BYO boss #{row.original.owner_boss_id}</Badge>
+            )}
+          </div>
           <div className="text-xs text-muted-foreground font-mono">{row.original.provider}</div>
         </div>
       ),
