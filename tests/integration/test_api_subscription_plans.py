@@ -66,6 +66,25 @@ def test_get_limits_unauthenticated(client):
 
 def test_get_limits_returns_effective(client, logged_in_boss, clean_db):
     _set_boss_plan(clean_db, logged_in_boss.boss_id, "starter")
+
+    # Fixture seeds all registry tools (17) — trim under starter's limit of 10
+    # so the boss is not over-limit in this test.
+    import asyncio as _asyncio
+
+    async def _trim():
+        async with clean_db.acquire() as c:
+            await c.execute(
+                """
+                DELETE FROM boss_active_tools
+                WHERE boss_id=$1 AND tool_name NOT IN (
+                  SELECT tool_name FROM boss_active_tools
+                  WHERE boss_id=$1 ORDER BY tool_name LIMIT 5
+                )
+                """,
+                logged_in_boss.boss_id,
+            )
+
+    _asyncio.get_event_loop().run_until_complete(_trim())
     r = client.get("/api/v1/admin/subscription/limits")
     assert r.status_code == 200
     body = r.json()

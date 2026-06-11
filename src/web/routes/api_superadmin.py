@@ -606,6 +606,10 @@ async def create_boss(
             body.name,
             body.role,
         )
+        if body.role == "boss":
+            from src.services.subscription import provision_new_boss
+
+            await provision_new_boss(c, new_id)
     return {"id": new_id}
 
 

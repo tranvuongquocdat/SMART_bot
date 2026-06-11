@@ -144,6 +144,12 @@ async def test_allowed_tools_includes_enabled_plugin_tools(
             """,
             boss_user["id"],
         )
+        # Allowlist names must also be active per-boss (strict intersect).
+        await c.execute(
+            "INSERT INTO boss_active_tools (boss_id, tool_name) VALUES ($1, 'core_search') "
+            "ON CONFLICT DO NOTHING",
+            boss_user["id"],
+        )
 
     cfg = SimpleNamespace(tools={"core_search"})
     ctx = SimpleNamespace(

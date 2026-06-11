@@ -82,6 +82,20 @@ async def _allowed_tools(cfg, ctx) -> set[str]:
     boss = getattr(ctx, "boss", None)
     if db is None or boss is None:
         return base
+    # Strict intersect with boss's active tools: chỉ chạy tool có row trong
+    # boss_active_tools (mọi đường tạo boss đều seed mặc định — boss 0 rows
+    # nghĩa là đã tắt hết, không phải "chưa cấu hình").
+    try:
+        async with db.acquire() as c:
+            active_rows = await c.fetch(
+                "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", boss.id
+            )
+        base = base & {r["tool_name"] for r in active_rows}
+    except Exception:
+        log.exception("boss_active_tools query failed — skipping filter")
+
+    # Plugin tools cộng SAU intersect: bật/tắt theo boss_integrations
+    # (per-integration), không theo từng tool.
     try:
         async with db.acquire() as c:
             rows = await c.fetch(
@@ -93,27 +107,13 @@ async def _allowed_tools(cfg, ctx) -> set[str]:
             )
     except Exception:
         log.exception("boss_integrations query failed")
-        return base
+        rows = []
     enabled = {r["plugin_id"] for r in rows}
-    if not enabled:
-        return base
-    for tname in _TOOL_REGISTRY:
-        prefix = tname.split("_", 1)[0]
-        if prefix in enabled:
-            base.add(tname)
-
-    # Intersect with boss's explicitly active tools.
-    # Tools not present in boss_active_tools are skipped regardless of the allowlist.
-    try:
-        async with db.acquire() as c:
-            active_rows = await c.fetch(
-                "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", boss.id
-            )
-        boss_active = {r["tool_name"] for r in active_rows}
-        if boss_active:
-            base = base & boss_active
-    except Exception:
-        log.exception("boss_active_tools query failed — skipping filter")
+    if enabled:
+        for tname in _TOOL_REGISTRY:
+            prefix = tname.split("_", 1)[0]
+            if prefix in enabled:
+                base.add(tname)
 
     return base
 

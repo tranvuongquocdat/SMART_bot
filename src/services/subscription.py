@@ -152,3 +152,64 @@ async def apply_plan_to_user(
                 expiry,
                 cap,
             )
+
+
+async def provision_new_boss(db: Any, boss_id: int) -> None:
+    """Khởi tạo mặc định cho boss mới: gán gói trial + seed bộ tools active.
+
+    - Boss chưa có gói → trial (UI hiển thị full tools, limit active theo trial).
+    - Seed tools active cắt theo max_active_tools của gói hiệu lực.
+    - Runtime filter là strict intersect nên boss 0 rows = không tool nào;
+      mọi đường tạo user role=boss đều phải gọi hàm này.
+
+    ``db`` nhận cả pool lẫn connection (đường promotion tạo user trong
+    transaction đang mở).
+    """
+    if hasattr(db, "acquire"):
+        async with db.acquire() as c:
+            await _provision_new_boss_on_conn(c, boss_id)
+    else:
+        await _provision_new_boss_on_conn(db, boss_id)
+
+
+async def _provision_new_boss_on_conn(c: Any, boss_id: int) -> None:
+    from src.tools.registry import _REGISTRY
+
+    await c.execute(
+        """
+        UPDATE users SET plan_id = (SELECT id FROM plans WHERE name = 'trial')
+        WHERE id = $1 AND plan_id IS NULL
+        """,
+        boss_id,
+    )
+    names = list(_REGISTRY.keys())
+    if not names:
+        return
+    row = await c.fetchrow(
+        """
+        SELECT COALESCE(p.limits_json, '{}'::jsonb) AS plan_limits,
+               u.plan_overrides_json
+        FROM users u
+        LEFT JOIN plans p ON p.id = u.plan_id
+        WHERE u.id = $1
+        """,
+        boss_id,
+    )
+    if row:
+        plan_limits = row["plan_limits"]
+        plan_overrides = row["plan_overrides_json"]
+        # asyncpg returns JSONB as str unless a codec is registered
+        if isinstance(plan_limits, str):
+            plan_limits = json.loads(plan_limits)
+        if isinstance(plan_overrides, str):
+            plan_overrides = json.loads(plan_overrides)
+        cap = {**plan_limits, **plan_overrides}.get("max_active_tools")
+        if cap is not None:
+            names = names[: int(cap)]
+    await c.executemany(
+        """
+        INSERT INTO boss_active_tools (boss_id, tool_name)
+        VALUES ($1, $2) ON CONFLICT DO NOTHING
+        """,
+        [(boss_id, n) for n in names],
+    )

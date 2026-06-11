@@ -29,16 +29,12 @@ def test_list_tools_returns_registry(client, logged_in_boss):
 
 
 def test_list_tools_shows_active_state(client, logged_in_boss, clean_db):
-    """Boss has tools active from migration seed; they should show active=True."""
+    """Fixture seeds all registry tools active; the list must reflect that."""
     r = client.get("/api/v1/admin/tools")
     assert r.status_code == 200
-    # Boss was seeded with 0 tools (no boss_active_tools since it's a fresh test user)
-    # So all should be inactive after clean_db truncates boss_active_tools
     body = r.json()
-    active = [t for t in body if t["active"]]
-    inactive = [t for t in body if not t["active"]]
-    # After truncate all are inactive (boss_active_tools cleared by cascade on users truncate)
-    assert len(inactive) > 0
+    assert len(body) > 0
+    assert all(t["active"] for t in body)
 
 
 def test_toggle_tool_no_csrf(client, logged_in_boss):
@@ -46,7 +42,16 @@ def test_toggle_tool_no_csrf(client, logged_in_boss):
     assert r.status_code == 403
 
 
-def test_toggle_tool_activate(client, logged_in_boss):
+def test_toggle_tool_activate(client, logged_in_boss, clean_db):
+    # Fixture seeds current_time active — remove it first so toggle activates.
+    async def _clear():
+        async with clean_db.acquire() as c:
+            await c.execute(
+                "DELETE FROM boss_active_tools WHERE boss_id=$1 AND tool_name='current_time'",
+                logged_in_boss.boss_id,
+            )
+
+    asyncio.get_event_loop().run_until_complete(_clear())
     r = client.patch(
         "/api/v1/admin/tools/current_time/toggle",
         headers=_csrf_headers(client),
@@ -60,7 +65,8 @@ def test_toggle_tool_deactivate(client, logged_in_boss, clean_db):
     async def _seed():
         async with clean_db.acquire() as c:
             await c.execute(
-                "INSERT INTO boss_active_tools (boss_id, tool_name) VALUES ($1, 'current_time')",
+                "INSERT INTO boss_active_tools (boss_id, tool_name) VALUES ($1, 'current_time') "
+                "ON CONFLICT DO NOTHING",
                 logged_in_boss.boss_id,
             )
 
