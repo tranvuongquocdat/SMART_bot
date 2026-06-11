@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Paperclip, SendHorizontal, X } from 'lucide-react';
+import { Paperclip, SendHorizontal, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
   chatMessagesQuery,
   sendChatMessage,
+  cancelChat,
   uploadChatFile,
   chatStreamUrl,
   type Attachment,
@@ -14,6 +15,14 @@ import {
 } from './api';
 
 const REPLY_TIMEOUT_MS = 90_000;
+
+// Tin nhắn vừa gửi, hiển thị ngay trong lúc chờ server lưu xong (optimistic).
+type PendingMessage = {
+  key: string;
+  text: string;
+  attachmentName: string | null;
+  ts: number;
+};
 
 function MessageBubble({ m }: { m: ChatMessage }) {
   const fromBot = m.kind === 'out';
@@ -89,7 +98,7 @@ export function ChatPanel({
   const qc = useQueryClient();
   const { data: messages = [] } = useQuery(chatMessagesQuery(conversationId));
   const [draft, setDraft] = useState('');
-  const [sending, setSending] = useState(false);
+  const [pending, setPending] = useState<PendingMessage[]>([]);
   const [awaitingReply, setAwaitingReply] = useState(false);
   const [replyError, setReplyError] = useState<string | null>(null);
   const [attachment, setAttachment] = useState<Attachment | null>(null);
@@ -109,8 +118,27 @@ export function ChatPanel({
     setAwaitingReply(false);
     setReplyError(null);
     setAttachment(null);
+    setPending([]);
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
   }, [conversationId]);
+
+  // Tin optimistic đã xuất hiện trong lịch sử (server lưu xong) → gỡ bubble tạm.
+  useEffect(() => {
+    if (pending.length === 0) return;
+    setPending((prev) =>
+      prev.filter((p) => {
+        const persisted = messages.some(
+          (m) =>
+            m.kind === 'in' &&
+            Date.parse(m.ts) >= p.ts - 15_000 &&
+            (m.text ?? '').startsWith(p.text)
+        );
+        const stale = Date.now() - p.ts > 60_000;
+        return !persisted && !stale;
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages]);
 
   // SSE chỉ là tín hiệu "có dữ liệu mới" — lịch sử DB là nguồn duy nhất,
   // tránh hiển thị đôi (echo + refetch cùng một tin).
@@ -149,7 +177,7 @@ export function ChatPanel({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length, awaitingReply, replyError]);
+  }, [messages.length, pending.length, awaitingReply, replyError]);
 
   async function handlePickFile(f: File) {
     setUploading(true);
@@ -165,9 +193,18 @@ export function ChatPanel({
 
   async function handleSend() {
     const text = draft.trim();
-    if ((!text && !attachment) || sending) return;
-    setSending(true);
-    // Bật indicator TRƯỚC khi gọi API — reply có thể về trong lúc đang await
+    if (!text && !attachment) return;
+    const sentAttachment = attachment;
+    const key = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+    // Tin rời input ngay — không khóa ô nhập, nhắn liên tục thoải mái,
+    // server xếp hàng xử lý tuần tự.
+    setDraft('');
+    setAttachment(null);
+    setPending((prev) => [
+      ...prev,
+      { key, text, attachmentName: sentAttachment?.name ?? null, ts: Date.now() },
+    ]);
     setReplyError(null);
     setAwaitingReply(true);
     sentAtRef.current = Date.now();
@@ -182,30 +219,54 @@ export function ChatPanel({
       await sendChatMessage({
         text,
         conversation_id: conversationId,
-        attachment,
+        attachment: sentAttachment,
       });
-      setDraft('');
-      setAttachment(null);
       invalidateMessages();
     } catch (e) {
+      // Gửi hỏng → trả lại nội dung vào ô nhập để không mất tin
+      setPending((prev) => prev.filter((p) => p.key !== key));
+      setDraft((d) => d || text);
+      if (sentAttachment) setAttachment((a) => a ?? sentAttachment);
       setAwaitingReply(false);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       toast.error(e instanceof Error ? e.message : 'Không gửi được tin nhắn');
-    } finally {
-      setSending(false);
     }
+  }
+
+  async function handleStop() {
+    try {
+      await cancelChat(conversationId);
+    } catch {
+      // server có thể đã xử lý xong — chỉ cần tắt indicator
+    }
+    setAwaitingReply(false);
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
   }
 
   return (
     <div className={`flex flex-col rounded-xl border bg-background/50 ${className}`}>
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
-        {messages.length === 0 && !awaitingReply ? (
+        {messages.length === 0 && pending.length === 0 && !awaitingReply ? (
           <p className="text-sm text-muted-foreground text-center mt-10">
             Chưa có tin nhắn. Hãy bắt đầu trò chuyện với trợ lý của bạn.
           </p>
         ) : (
           messages.map((m) => <MessageBubble key={`${m.kind}-${m.id}`} m={m} />)
         )}
+        {pending.map((p) => (
+          <div key={p.key} className="flex justify-end">
+            <div className="max-w-[75%] rounded-2xl rounded-br-sm px-4 py-2.5 text-sm whitespace-pre-wrap break-words bg-primary/80 text-primary-foreground">
+              {p.attachmentName && (
+                <span className="inline-flex items-center gap-1.5 mb-1.5 text-xs underline text-primary-foreground">
+                  <Paperclip className="h-3 w-3" />
+                  {p.attachmentName}
+                </span>
+              )}
+              {p.text && <p>{p.text}</p>}
+              <p className="mt-1 text-[10px] text-primary-foreground/70">Đang gửi…</p>
+            </div>
+          </div>
+        ))}
         {awaitingReply && <TypingIndicator />}
         {replyError && (
           <div className="flex justify-start">
@@ -259,13 +320,25 @@ export function ChatPanel({
             }
           }}
         />
-        <Button
-          size="icon"
-          disabled={(!draft.trim() && !attachment) || sending}
-          onClick={handleSend}
-        >
-          <SendHorizontal className="h-4 w-4" />
-        </Button>
+        {awaitingReply && !draft.trim() && !attachment ? (
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={handleStop}
+            aria-label="Dừng trợ lý"
+          >
+            <Square className="h-3.5 w-3.5 fill-current" />
+          </Button>
+        ) : (
+          <Button
+            size="icon"
+            disabled={!draft.trim() && !attachment}
+            onClick={handleSend}
+            aria-label="Gửi"
+          >
+            <SendHorizontal className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   );

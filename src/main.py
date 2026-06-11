@@ -69,6 +69,10 @@ async def lifespan(app: FastAPI):
     app.state.trigger_engine = TriggerEngine(app.state.bus)
     app.state.trigger_engine.attach_all()
 
+    from src.services.chat_runs import ChatRunRegistry
+
+    app.state.chat_runs = ChatRunRegistry()
+
     # H2: Prometheus subscribers — must register AFTER op registry is loaded so
     # we can attach per-op `op.<name>.fire` counters.
     register_metrics(app.state.bus)

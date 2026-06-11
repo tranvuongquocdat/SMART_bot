@@ -2185,7 +2185,14 @@ async def chat_send(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
+    """Lưu tin nhắn ngay (history thấy tức thì) rồi xếp agent run vào hàng đợi
+    theo hội thoại — POST trả về ngay, không chờ agent; nhắn liên tục được
+    xử lý tuần tự; hủy được qua /chat/cancel."""
     import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from src.domain.message import NewMessage
+    from src.repositories.messages import MessagesRepo
 
     text = (payload.get("text") or "").strip()
     attachment = payload.get("attachment") or None
@@ -2203,21 +2210,57 @@ async def chat_send(
         label = attachment.get("name") or media_url
         agent_text = f"{text}\n[Đính kèm {media_kind}: {label}]".strip()
 
-    await request.app.state.bus.publish(
-        "inbound.raw.web",
-        {
-            "web_user_id": uid,
-            "chat_id": f"dm:{uid}",
-            "chat_type": "dm",
-            "text": agent_text,
-            "mention_bot": False,
-            "provider_msg_id": f"adm-{_uuid.uuid4().hex[:10]}",
-            "sender_name": sender_name,
-            "media_kind": media_kind,
-            "media_url": media_url,
-        },
+    chat_id = f"dm:{uid}"
+    repo = MessagesRepo(db, BossContext(boss_id=ctx.boss_id, user_role="boss"))
+    msg_id = await repo.insert(
+        NewMessage(
+            provider="web",
+            chat_id=chat_id,
+            chat_type="dm",
+            provider_msg_id=f"adm-{_uuid.uuid4().hex[:10]}",
+            sender_provider_id=uid,
+            sender_name=sender_name,
+            text=agent_text or None,
+            media_kind=media_kind or "text",
+            media_url=media_url,
+            media_text=None,
+            ts=datetime.now(tz=timezone.utc),
+        )
+    )
+    if msg_id is None:
+        return {"ok": True, "deduped": True}
+
+    request.app.state.chat_runs.submit(
+        f"web:{chat_id}",
+        request.app.state.bus.publish(
+            "message.captured",
+            {
+                "message_id": msg_id,
+                "boss_id": ctx.boss_id,
+                "provider": "web",
+                "chat_id": chat_id,
+                "chat_type": "dm",
+                "mentions_bot": False,
+                "sender_is_boss": True,
+                "text": agent_text,
+                "bot_account_id": None,
+            },
+        ),
     )
     return {"ok": True}
+
+
+@router.post("/chat/cancel", dependencies=[Depends(verify_json_csrf)])
+async def chat_cancel(
+    payload: dict,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Hủy các lượt agent đang chạy/đang chờ của hội thoại."""
+    uid = await _conversation_uid(db, ctx, payload.get("conversation_id"))
+    cancelled = request.app.state.chat_runs.cancel(f"web:dm:{uid}")
+    return {"cancelled": cancelled}
 
 
 @router.get("/chat/stream")

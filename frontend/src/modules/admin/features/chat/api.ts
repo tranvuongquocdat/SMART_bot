@@ -73,6 +73,12 @@ export const sendChatMessage = (body: {
     body: JSON.stringify(body),
   });
 
+export const cancelChat = (conversationId: string | null) =>
+  api<{ cancelled: number }>('/api/v1/admin/chat/cancel', {
+    method: 'POST',
+    body: JSON.stringify({ conversation_id: conversationId }),
+  });
+
 export async function uploadChatFile(file: File): Promise<Attachment> {
   const m = document.cookie.match(/(?:^|;\s*)smart_csrf=([^;]+)/);
   const fd = new FormData();

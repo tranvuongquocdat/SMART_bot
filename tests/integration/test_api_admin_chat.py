@@ -173,3 +173,19 @@ def test_integrations_flow(client, logged_in_boss, clean_db):
     assert client.patch(f"/api/v1/admin/mcp-servers/{sid}/toggle", headers=headers).json()["enabled"] is True
 
     assert client.delete(f"/api/v1/admin/mcp-servers/{sid}", headers=headers).status_code == 204
+
+
+def test_chat_cancel_no_csrf(client, logged_in_boss):
+    r = client.post("/api/v1/admin/chat/cancel", json={})
+    assert r.status_code == 403
+
+
+def test_chat_cancel_idle_conversation(client, logged_in_boss):
+    """Hủy khi không có agent đang chạy → cancelled=0, không lỗi."""
+    r = client.post(
+        "/api/v1/admin/chat/cancel",
+        json={},
+        headers=_csrf(client),
+    )
+    assert r.status_code == 200
+    assert r.json()["cancelled"] == 0
