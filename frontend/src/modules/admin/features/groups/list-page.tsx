@@ -17,7 +17,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { relativeTime } from '@/lib/format';
-import { groupsListQuery, deleteGroup, type GroupListItem } from './api';
+import { ApiError } from '@/lib/api';
+import { groupsListQuery, deleteGroup, toggleGroupActive, type GroupListItem } from './api';
 import { CreateGroupDialog } from './create-dialog';
 
 function ChannelChip({ channel }: { channel: string }) {
@@ -41,6 +42,23 @@ export default function GroupsListPage() {
       setDeleteTarget(null);
     },
     onError: () => toast.error('Xoá thất bại'),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: (id: number) => toggleGroupActive(id),
+    onSuccess: (data) => {
+      qc.setQueryData(['admin', 'groups'], (old: GroupListItem[] | undefined) =>
+        old?.map((g) => (g.id === data.id ? { ...g, is_active: data.is_active } : g)),
+      );
+      toast.success(data.is_active ? 'Đã bật nhóm' : 'Đã tắt nhóm');
+    },
+    onError: (e) => {
+      const detail =
+        e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
+          ? (e.body as { detail: string }).detail
+          : 'Thao tác thất bại';
+      toast.error(detail);
+    },
   });
 
   const columns: ColumnDef<GroupListItem, any>[] = [
@@ -75,6 +93,27 @@ export default function GroupsListPage() {
         <span className="text-muted-foreground text-[12.5px]">
           {relativeTime(getValue() as string | null)}
         </span>
+      ),
+    },
+    {
+      accessorKey: 'is_active',
+      header: 'Hoạt động',
+      cell: ({ row }) => (
+        <button
+          onClick={() => toggleMutation.mutate(row.original.id)}
+          disabled={toggleMutation.isPending && toggleMutation.variables === row.original.id}
+          className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 ${
+            row.original.is_active ? 'bg-primary' : 'bg-input'
+          }`}
+          role="switch"
+          aria-checked={row.original.is_active}
+        >
+          <span
+            className={`pointer-events-none block h-4 w-4 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+              row.original.is_active ? 'translate-x-4' : 'translate-x-0'
+            }`}
+          />
+        </button>
       ),
     },
     {

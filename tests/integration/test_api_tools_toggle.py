@@ -161,3 +161,11 @@ def test_enable_all_tools_respects_limit(client, logged_in_boss, clean_db):
     body = r.json()
     assert body["active"] == 3
     assert body["limit"] == 3
+
+
+def test_disable_all_tools(client, logged_in_boss):
+    r = client.post("/api/v1/admin/tools/disable-all", headers=_csrf_headers(client))
+    assert r.status_code == 200
+    assert r.json()["active"] == 0
+    r2 = client.get("/api/v1/admin/tools")
+    assert all(not t["active"] for t in r2.json())

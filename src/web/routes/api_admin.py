@@ -862,6 +862,7 @@ async def groups_list(
                 SELECT gn.id,
                        COALESCE(gn.group_name, gn.chat_id) AS name,
                        gn.provider                          AS channel,
+                       gn.is_active,
                        gn.updated_at,
                        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
                 FROM group_notes gn
@@ -874,6 +875,7 @@ async def groups_list(
                 SELECT gn.id,
                        COALESCE(gn.group_name, gn.chat_id) AS name,
                        gn.provider                          AS channel,
+                       gn.is_active,
                        gn.updated_at,
                        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
                 FROM group_notes gn
@@ -887,6 +889,7 @@ async def groups_list(
             "id": int(r["id"]),
             "name": r["name"],
             "channel": r["channel"],
+            "is_active": bool(r["is_active"]),
             "members_count": int(r["members_count"]),
             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
         }
@@ -2111,3 +2114,56 @@ async def enable_all_tools(
         "total": len(names),
         "limit": lim.max_active_tools,
     }
+
+
+@router.patch("/groups/{group_id}/toggle-active", dependencies=[Depends(verify_json_csrf)])
+async def toggle_group_active(
+    group_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Bật/tắt nhóm — bật bị chặn khi vượt max_active_groups của gói."""
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT id, is_active FROM group_notes WHERE id=$1 AND boss_id=$2",
+            group_id,
+            ctx.boss_id,
+        )
+        if not row:
+            raise HTTPException(404, "Group not found")
+
+        if row["is_active"]:
+            await c.execute(
+                "UPDATE group_notes SET is_active=FALSE WHERE id=$1", group_id
+            )
+            return {"id": group_id, "is_active": False}
+
+        lim = await get_effective_limits(db, ctx.boss_id)
+        if lim.max_active_groups is not None:
+            count = await c.fetchval(
+                "SELECT COUNT(*) FROM group_notes WHERE boss_id=$1 AND is_active=TRUE",
+                ctx.boss_id,
+            )
+            if count >= lim.max_active_groups:
+                raise HTTPException(
+                    400,
+                    f"Đã đạt giới hạn {lim.max_active_groups} nhóm active của gói hiện tại",
+                )
+        await c.execute(
+            "UPDATE group_notes SET is_active=TRUE WHERE id=$1", group_id
+        )
+        return {"id": group_id, "is_active": True}
+
+
+@router.post("/tools/disable-all", dependencies=[Depends(verify_json_csrf)])
+async def disable_all_tools(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Tắt toàn bộ tools trong một lần bấm."""
+    async with db.acquire() as c:
+        result = await c.execute(
+            "DELETE FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+        )
+    disabled = int(result.split()[-1]) if result else 0
+    return {"disabled": disabled, "active": 0}

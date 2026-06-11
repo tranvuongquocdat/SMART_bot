@@ -6,7 +6,7 @@ export type Group = {
   members_count: number; messages_30d: number; last_active_at: string | null;
 };
 export type GroupListItem = {
-  id: number; name: string; channel: string;
+  id: number; name: string; channel: string; is_active: boolean;
   members_count: number; updated_at: string | null;
 };
 export type Summary = { body: string | null; updated_at: string | null };
@@ -80,3 +80,9 @@ export const peopleSearchQuery = (q: string) => queryOptions({
   queryFn: () => api<PersonResult[]>(`/api/v1/admin/people?q=${encodeURIComponent(q)}`),
   enabled: q.length >= 1,
 });
+
+export const toggleGroupActive = (id: number) =>
+  api<{ id: number; is_active: boolean }>(
+    `/api/v1/admin/groups/${id}/toggle-active`,
+    { method: 'PATCH' },
+  );

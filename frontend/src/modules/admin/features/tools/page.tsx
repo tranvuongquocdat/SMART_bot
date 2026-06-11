@@ -1,9 +1,9 @@
 import { useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Wrench, Zap } from 'lucide-react';
+import { Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
-import { toolsQuery, toggleTool, enableAllTools } from './api';
+import { toolsQuery, toggleTool, enableAllTools, disableAllTools } from './api';
 
 export default function ToolsPage() {
   const { data: tools } = useSuspenseQuery(toolsQuery());
@@ -35,6 +35,15 @@ export default function ToolsPage() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const disableAllMut = useMutation({
+    mutationFn: disableAllTools,
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'tools'] });
+      toast.success(`Đã tắt ${data.disabled} tool.`);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const active = tools.filter((t) => t.active);
   const inactive = tools.filter((t) => !t.active);
 
@@ -44,17 +53,28 @@ export default function ToolsPage() {
         title="Tools"
         subtitle={`${active.length} / ${tools.length} tool đang bật.`}
         actions={
-          inactive.length > 0 ? (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={enableAllMut.isPending}
-              onClick={() => enableAllMut.mutate()}
-            >
-              <Zap className="mr-1.5 h-3.5 w-3.5" />
-              {enableAllMut.isPending ? 'Đang bật…' : 'Bật tất cả'}
-            </Button>
-          ) : undefined
+          <div className="flex gap-2">
+            {active.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={disableAllMut.isPending}
+                onClick={() => disableAllMut.mutate()}
+              >
+                {disableAllMut.isPending ? 'Đang tắt…' : 'Tắt tất cả'}
+              </Button>
+            )}
+            {inactive.length > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={enableAllMut.isPending}
+                onClick={() => enableAllMut.mutate()}
+              >
+                {enableAllMut.isPending ? 'Đang bật…' : 'Bật tất cả'}
+              </Button>
+            )}
+          </div>
         }
       />
 

@@ -37,6 +37,18 @@ export async function enableAllTools(): Promise<EnableAllResult> {
   return res.json();
 }
 
+export async function disableAllTools(): Promise<{ disabled: number; active: number }> {
+  const res = await fetch('/api/v1/admin/tools/disable-all', {
+    method: 'POST',
+    headers: { 'X-CSRF-Token': csrfToken() },
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? 'Thao tác thất bại');
+  }
+  return res.json();
+}
+
 export async function toggleTool(name: string): Promise<{ name: string; active: boolean }> {
   const res = await fetch(`/api/v1/admin/tools/${encodeURIComponent(name)}/toggle`, {
     method: 'PATCH',
