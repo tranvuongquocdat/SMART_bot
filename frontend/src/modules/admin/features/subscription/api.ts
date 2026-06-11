@@ -113,3 +113,17 @@ export async function cancelRequest(
   }
   return res.json();
 }
+
+export type PaymentInfo = {
+  transfer_content: string;
+  bank_account_number: string | null;
+  bank_account_name: string | null;
+  bank_bin: string | null;
+};
+
+export const paymentInfoQuery = (planId: number) =>
+  queryOptions({
+    queryKey: ['admin', 'subscription', 'payment-info', planId],
+    queryFn: () =>
+      api<PaymentInfo>(`/api/v1/admin/subscription/payment-info?plan_id=${planId}`),
+  });

@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     PLATFORM_OPENAI_API_KEY: str = ""
     PLATFORM_GROQ_API_KEY: str = ""
 
+    BANK_ACCOUNT_NUMBER: str = ""
+    BANK_ACCOUNT_NAME: str = ""
+    BANK_BIN: str = ""
+
     DEFAULT_BOSS_COST_CAP_USD_DAILY: float = 5.0
     LOG_RAW_CONTENT: bool = False
     ENABLE_WEB_TEST_CHANNEL: bool = True

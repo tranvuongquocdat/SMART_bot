@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { Users, MoreHorizontal } from 'lucide-react';
@@ -23,6 +23,7 @@ import {
   enableAllGroups, disableAllGroups, type GroupListItem,
 } from './api';
 import { CreateGroupDialog } from './create-dialog';
+import { GroupPanel } from './group-panel';
 
 function ChannelChip({ channel }: { channel: string }) {
   if (channel === 'zalo') return <Badge variant="zalo">{channel}</Badge>;
@@ -36,6 +37,12 @@ export default function GroupsListPage() {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery(groupsListQuery());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedId = searchParams.get('g');
+
+  const selectGroup = (id: number | null) => {
+    setSearchParams(id === null ? {} : { g: String(id) }, { replace: false });
+  };
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteGroup(id),
@@ -94,8 +101,14 @@ export default function GroupsListPage() {
       header: 'Tên nhóm',
       cell: ({ row }) => (
         <button
-          onClick={() => navigate(`/app/admin/groups/${row.original.id}`)}
-          className="font-medium text-left hover:underline text-foreground"
+          onClick={() =>
+            selectGroup(
+              selectedId === String(row.original.id) ? null : row.original.id
+            )
+          }
+          className={`font-medium text-left hover:underline ${
+            selectedId === String(row.original.id) ? 'text-primary' : 'text-foreground'
+          }`}
         >
           {row.original.name}
         </button>
@@ -205,18 +218,29 @@ export default function GroupsListPage() {
         {isLoading ? (
           <Skeleton className="h-48 w-full rounded-[12px]" />
         ) : (
-          <DataTable
-            columns={columns}
-            data={data ?? []}
-            empty={
-              <EmptyState
-                icon={Users}
-                title="Chưa có nhóm"
-                description="Thêm nhóm để bắt đầu theo dõi tin nhắn và tác vụ"
-                action={{ label: '+ Tạo nhóm', onClick: () => setCreateOpen(true) }}
-              />
+          <div
+            className={
+              selectedId
+                ? 'grid grid-cols-[minmax(340px,5fr)_7fr] gap-5 items-start max-lg:grid-cols-1'
+                : ''
             }
-          />
+          >
+            <DataTable
+              columns={columns}
+              data={data ?? []}
+              empty={
+                <EmptyState
+                  icon={Users}
+                  title="Chưa có nhóm"
+                  description="Thêm nhóm để bắt đầu theo dõi tin nhắn và tác vụ"
+                  action={{ label: '+ Tạo nhóm', onClick: () => setCreateOpen(true) }}
+                />
+              }
+            />
+            {selectedId && (
+              <GroupPanel id={selectedId} onClose={() => selectGroup(null)} />
+            )}
+          </div>
         )}
       </PageSection>
 

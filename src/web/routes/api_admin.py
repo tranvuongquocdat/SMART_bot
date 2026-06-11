@@ -2232,3 +2232,26 @@ async def disable_all_groups(
         )
     disabled = int(result.split()[-1]) if result else 0
     return {"disabled": disabled, "active": 0}
+
+
+@router.get("/subscription/payment-info")
+async def subscription_payment_info(
+    plan_id: int = Query(...),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Thông tin chuyển khoản + nội dung gen sẵn để khách copy."""
+    from src.config import settings
+
+    async with db.acquire() as c:
+        plan_name = await c.fetchval(
+            "SELECT name FROM plans WHERE id=$1 AND is_active=TRUE", plan_id
+        )
+    if not plan_name:
+        raise HTTPException(404, "Plan not found")
+    return {
+        "transfer_content": f"SMART {plan_name.upper()} U{ctx.boss_id}",
+        "bank_account_number": settings.BANK_ACCOUNT_NUMBER or None,
+        "bank_account_name": settings.BANK_ACCOUNT_NAME or None,
+        "bank_bin": settings.BANK_BIN or None,
+    }

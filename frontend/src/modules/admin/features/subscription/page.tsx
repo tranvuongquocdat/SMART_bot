@@ -146,7 +146,7 @@ export default function SubscriptionPage() {
     : null;
 
   return (
-    <PageWrap className="max-w-[860px]">
+    <PageWrap className="max-w-[1080px]">
       <PageHeader
         title="Gói cước"
         subtitle="Quản lý gói dịch vụ và giới hạn sử dụng."

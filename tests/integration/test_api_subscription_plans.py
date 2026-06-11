@@ -265,3 +265,20 @@ def test_cancel_already_cancelled(client, logged_in_boss, clean_db):
         headers=_csrf_headers(client),
     )
     assert r.status_code == 400
+
+
+def test_payment_info_generates_transfer_content(client, logged_in_boss, clean_db):
+    async def _get_starter():
+        async with clean_db.acquire() as c:
+            return await c.fetchval("SELECT id FROM plans WHERE name='starter'")
+
+    starter_id = asyncio.get_event_loop().run_until_complete(_get_starter())
+    r = client.get(f"/api/v1/admin/subscription/payment-info?plan_id={starter_id}")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["transfer_content"] == f"SMART STARTER U{logged_in_boss.boss_id}"
+
+
+def test_payment_info_unknown_plan(client, logged_in_boss):
+    r = client.get("/api/v1/admin/subscription/payment-info?plan_id=999999")
+    assert r.status_code == 404
