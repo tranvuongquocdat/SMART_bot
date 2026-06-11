@@ -215,9 +215,14 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
         if not resp.tool_calls:
             return resp.content or ""
 
-        # Append assistant turn with tool_calls (content kept as plain string).
+        # Append assistant turn KÈM tool_calls — thiếu là OpenAI 400
+        # ("messages with role 'tool' must be a response to ... 'tool_calls'").
         msgs.append(
-            ChatMessage(role="assistant", content=resp.content or "")
+            ChatMessage(
+                role="assistant",
+                content=resp.content or "",
+                tool_calls=resp.tool_calls,
+            )
         )
         results = await dispatcher.call_batch(resp.tool_calls, tool_ctx)
         for call_id, r in results:

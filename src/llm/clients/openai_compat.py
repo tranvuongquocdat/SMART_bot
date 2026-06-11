@@ -75,6 +75,20 @@ class OpenAICompatibleClient:
         d: dict = {"role": m.role, "content": m.content}
         if m.role == "tool":
             d["tool_call_id"] = m.tool_call_id
+        if m.role == "assistant" and m.tool_calls:
+            d["tool_calls"] = [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": json.dumps(tc.arguments, ensure_ascii=False),
+                    },
+                }
+                for tc in m.tool_calls
+            ]
+            if not m.content:
+                d["content"] = None
         return d
 
     async def embed(self, texts: list[str], model: str) -> list[list[float]]:

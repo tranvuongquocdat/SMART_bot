@@ -8,6 +8,9 @@ class ChatMessage:
     content: str | list[dict]
     name: str | None = None
     tool_call_id: str | None = None
+    # Lượt assistant có gọi tool phải mang theo tool_calls — OpenAI từ chối
+    # message role=tool nếu lượt assistant trước đó không khai báo chúng.
+    tool_calls: list | None = None
     cache_breakpoint: bool = False
 
 
