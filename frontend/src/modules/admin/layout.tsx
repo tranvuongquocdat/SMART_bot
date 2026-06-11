@@ -4,6 +4,7 @@ import { AppShell } from '@/components/app-shell';
 import { pageTransition } from '@/lib/motion';
 import type { Me } from '@/lib/auth';
 import { adminNav } from './nav';
+import { AssistantBubble } from './features/chat/assistant-bubble';
 
 export default function AdminLayout() {
   const me = useLoaderData() as Me;
@@ -51,6 +52,7 @@ export default function AdminLayout() {
           <Outlet />
         </motion.div>
       </AnimatePresence>
+      <AssistantBubble />
     </AppShell>
   );
 }
