@@ -88,7 +88,10 @@ async def check_over_limit(pool: Any, boss_id: int) -> OverLimitItems:
             boss_id,
         )
         active_channels = await c.fetchval(
-            "SELECT COUNT(*) FROM bot_account_assignments WHERE boss_id=$1 AND status='active'",
+            """
+            SELECT COUNT(*) FROM bot_account_assignments
+            WHERE boss_id=$1 AND status='active' AND provider <> 'web'
+            """,
             boss_id,
         )
         active_mcp = await c.fetchval(

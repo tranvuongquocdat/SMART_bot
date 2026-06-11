@@ -40,4 +40,21 @@ async def get_or_create_boss_web_identity(pool: Any, boss_id: int) -> str:
             boss_id,
             uid,
         )
+        # Outbound web cần bot_account_assignment — thiếu là bot trả lời
+        # thất bại im lặng (kể cả fallback khi LLM lỗi).
+        bot_acc_id = await c.fetchval(
+            "SELECT id FROM bot_accounts WHERE provider='web' AND status='active' LIMIT 1"
+        )
+        if bot_acc_id is not None:
+            await c.execute(
+                """
+                INSERT INTO bot_account_assignments
+                  (boss_id, provider, bot_account_id, assignment_kind, status)
+                VALUES ($1, 'web', $2, 'platform_assigned', 'active')
+                ON CONFLICT (boss_id, provider) DO UPDATE
+                  SET status='active', bot_account_id=EXCLUDED.bot_account_id
+                """,
+                boss_id,
+                bot_acc_id,
+            )
     return uid

@@ -97,8 +97,8 @@ def register(bus: EventBus, pool) -> None:
             sender_provider_id=sender_uid,
             sender_name=sender_name,
             text=text or None,
-            media_kind="text",
-            media_url=None,
+            media_kind=payload.get("media_kind") or "text",
+            media_url=payload.get("media_url"),
             media_text=None,
             ts=datetime.now(tz=timezone.utc),
         )

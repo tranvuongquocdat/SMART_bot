@@ -1562,3 +1562,76 @@ async def update_plan_sa(
             *vals,
         )
     return {"updated": 1}
+
+
+# ---------------------------------------------------------------------------
+# MCP catalog — danh mục integration đã kiểm duyệt
+# ---------------------------------------------------------------------------
+
+
+@router.get("/mcp-catalog")
+async def list_mcp_catalog(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, description, url, icon_url, is_active, created_at FROM mcp_catalog ORDER BY name"
+        )
+    return [{**dict(r), "created_at": r["created_at"].isoformat()} for r in rows]
+
+
+@router.post("/mcp-catalog", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_mcp_catalog(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    name = (payload.get("name") or "").strip()
+    url = (payload.get("url") or "").strip()
+    if not name or not url:
+        raise HTTPException(400, "name and url required")
+    async with db.acquire() as c:
+        new_id = await c.fetchval(
+            """
+            INSERT INTO mcp_catalog (name, description, url, icon_url)
+            VALUES ($1, $2, $3, $4) RETURNING id
+            """,
+            name, payload.get("description"), url, payload.get("icon_url"),
+        )
+    return {"id": new_id, "name": name}
+
+
+@router.patch("/mcp-catalog/{item_id}", dependencies=[Depends(verify_json_csrf)])
+async def update_mcp_catalog(
+    item_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    allowed = {"name", "description", "url", "icon_url", "is_active"}
+    updates = {k: v for k, v in payload.items() if k in allowed}
+    if not updates:
+        raise HTTPException(400, "No valid fields")
+    sets, vals = [], [item_id]
+    for i, (k, v) in enumerate(updates.items(), start=2):
+        sets.append(f"{k}=${i}")
+        vals.append(v)
+    async with db.acquire() as c:
+        await c.execute(f"UPDATE mcp_catalog SET {', '.join(sets)} WHERE id=$1", *vals)
+    return {"updated": 1}
+
+
+@router.delete("/mcp-catalog/{item_id}", status_code=204, dependencies=[Depends(verify_json_csrf)])
+async def delete_mcp_catalog(
+    item_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> None:
+    async with db.acquire() as c:
+        used = await c.fetchval(
+            "SELECT COUNT(*) FROM mcp_servers WHERE catalog_id=$1", item_id
+        )
+        if used:
+            raise HTTPException(400, f"Đang có {used} boss dùng integration này")
+        await c.execute("DELETE FROM mcp_catalog WHERE id=$1", item_id)
