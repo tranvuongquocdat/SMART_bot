@@ -213,3 +213,22 @@ async def _provision_new_boss_on_conn(c: Any, boss_id: int) -> None:
         """,
         [(boss_id, n) for n in names],
     )
+
+
+async def is_group_active(pool: Any, boss_id: int, provider: str, chat_id: str) -> bool:
+    """Nhóm bị tắt (is_active=FALSE) → bot ngừng xử lý tin nhắn nhóm đó.
+
+    Nhóm chưa có row group_notes → coi như active (chưa được theo dõi,
+    không phải bị tắt).
+    """
+    async with pool.acquire() as c:
+        active = await c.fetchval(
+            """
+            SELECT is_active FROM group_notes
+            WHERE boss_id=$1 AND provider=$2 AND chat_id=$3
+            """,
+            boss_id,
+            provider,
+            chat_id,
+        )
+    return True if active is None else bool(active)

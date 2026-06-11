@@ -161,3 +161,27 @@ def test_toggle_group_active_other_boss_404(client, logged_in_boss, seed_group_o
         headers={"X-CSRF-Token": "csrf-group-404"},
     )
     assert r.status_code == 404
+
+
+def test_inactive_group_gates_agent(clean_db, logged_in_boss, seed_group_owned_by_boss):
+    """is_group_active: nhóm tắt → False; nhóm chưa theo dõi → True."""
+    import asyncio
+    from src.services.subscription import is_group_active
+
+    async def _check():
+        async with clean_db.acquire() as c:
+            await c.execute(
+                "UPDATE group_notes SET is_active=FALSE WHERE id=$1",
+                seed_group_owned_by_boss.id,
+            )
+        off = await is_group_active(
+            clean_db, logged_in_boss.boss_id, "zalo", "zalo-group-test-001"
+        )
+        unknown = await is_group_active(
+            clean_db, logged_in_boss.boss_id, "zalo", "zalo-group-never-seen"
+        )
+        return off, unknown
+
+    off, unknown = asyncio.get_event_loop().run_until_complete(_check())
+    assert off is False
+    assert unknown is True

@@ -52,6 +52,13 @@ _QUICK_ACK_THRESHOLD = 60  # chars
 )
 class InGroupResponder:
     async def handle(self, event: dict, ctx: InGroupCtx):
+        from src.services.subscription import is_group_active
+
+        if not await is_group_active(
+            ctx.db, ctx.boss.id, event["provider"], event["chat_id"]
+        ):
+            return  # nhóm đã bị tắt trên web admin
+
         text = event.get("text", "") or ""
 
         # Predict-long heuristic: any tagged message > 60 chars is likely Q&A

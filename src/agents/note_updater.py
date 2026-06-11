@@ -49,6 +49,12 @@ class NoteUpdater:
         chat_id = src.get("chat_id")
         if not provider or not chat_id:
             return
+
+        from src.services.subscription import is_group_active
+
+        if not await is_group_active(ctx.db, ctx.boss.id, provider, chat_id):
+            return  # nhóm đã bị tắt trên web admin
+
         await NoteService(ctx.db, ctx.bus, ctx.llm).update(
             boss_id=ctx.boss.id,
             provider=provider,
