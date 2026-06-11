@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,8 +16,13 @@ class Settings(BaseSettings):
 
     SUPERADMIN_EMAILS: str = ""
 
-    PLATFORM_OPENAI_API_KEY: str = ""
-    PLATFORM_GROQ_API_KEY: str = ""
+    # Chấp nhận cả tên quen thuộc OPENAI_API_KEY / GROQ_API_KEY
+    PLATFORM_OPENAI_API_KEY: str = Field(
+        "", validation_alias=AliasChoices("PLATFORM_OPENAI_API_KEY", "OPENAI_API_KEY")
+    )
+    PLATFORM_GROQ_API_KEY: str = Field(
+        "", validation_alias=AliasChoices("PLATFORM_GROQ_API_KEY", "GROQ_API_KEY")
+    )
 
     BANK_ACCOUNT_NUMBER: str = ""
     BANK_ACCOUNT_NAME: str = ""
@@ -26,6 +31,18 @@ class Settings(BaseSettings):
     DEFAULT_BOSS_COST_CAP_USD_DAILY: float = 5.0
     LOG_RAW_CONTENT: bool = False
     ENABLE_WEB_TEST_CHANNEL: bool = True
+
+    @field_validator(
+        "PLATFORM_OPENAI_API_KEY",
+        "PLATFORM_GROQ_API_KEY",
+        "BANK_ACCOUNT_NUMBER",
+        "BANK_ACCOUNT_NAME",
+        "BANK_BIN",
+        mode="before",
+    )
+    @classmethod
+    def _strip_whitespace(cls, v):
+        return v.strip() if isinstance(v, str) else v
 
     @property
     def superadmin_emails_set(self) -> set[str]:
