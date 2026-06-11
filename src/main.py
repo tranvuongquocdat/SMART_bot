@@ -73,6 +73,10 @@ async def lifespan(app: FastAPI):
     # we can attach per-op `op.<name>.fire` counters.
     register_metrics(app.state.bus)
 
+    # Gom file/link từ tin nhắn nhóm vào group_artifacts (tab Tệp & link).
+    from src.services.artifact_collector import register as register_artifacts
+    register_artifacts(app.state.bus, app.state.db_pool)
+
     # Channel adapters — auto-discovered from src/channels/<provider>/.
     _admin_repo = BotAccountsRepo(app.state.db_pool, _admin_ctx)
     app.state.admin_bot_accounts_repo = _admin_repo

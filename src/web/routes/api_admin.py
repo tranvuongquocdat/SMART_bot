@@ -2255,3 +2255,176 @@ async def subscription_payment_info(
         "bank_account_name": settings.BANK_ACCOUNT_NAME or None,
         "bank_bin": settings.BANK_BIN or None,
     }
+
+
+# ===========================================================================
+# Group note — lõi của nhóm: xem / sửa / refresh / versions / template
+#   GET   /groups/:id/note
+#   PATCH /groups/:id/note            {content}
+#   POST  /groups/:id/note/refresh
+#   GET   /groups/:id/note/versions
+#   POST  /groups/:id/note/versions/:vid/restore
+#   GET   /note-templates             (read-only cho boss chọn)
+#   PATCH /groups/:id/template        {template_id}
+# ===========================================================================
+
+
+@router.get("/groups/{group_id}/note")
+async def get_group_note(
+    group_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            SELECT content, template_id, manually_edited_sections, updated_at
+            FROM group_notes WHERE id=$1
+            """,
+            group_id,
+        )
+    edited = row["manually_edited_sections"]
+    if isinstance(edited, str):
+        edited = json.loads(edited)
+    return {
+        "content": row["content"],
+        "template_id": row["template_id"],
+        "manually_edited_sections": edited,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.patch("/groups/{group_id}/note", dependencies=[Depends(verify_json_csrf)])
+async def edit_group_note_web(
+    group_id: int,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    content = payload.get("content")
+    if content is None:
+        raise HTTPException(400, "content required")
+    await _require_group_owner(group_id, ctx, db)
+    from src.repositories.group_notes import GroupNotesRepo
+
+    repo = GroupNotesRepo(db, ctx)
+    await repo.update_content(group_id, content, emitted_by="boss_web")
+    return {"ok": True}
+
+
+@router.post("/groups/{group_id}/note/refresh", dependencies=[Depends(verify_json_csrf)])
+async def refresh_group_note_web(
+    group_id: int,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT provider, chat_id FROM group_notes WHERE id=$1", group_id
+        )
+    await request.app.state.bus.publish(
+        "op.note_updater.fire",
+        {
+            "reason": "on_demand_web",
+            "boss_id": ctx.boss_id,
+            "source_event": {
+                "boss_id": ctx.boss_id,
+                "provider": row["provider"],
+                "chat_id": row["chat_id"],
+            },
+        },
+    )
+    return {"ok": True, "message": "Bot đang cập nhật note"}
+
+
+@router.get("/groups/{group_id}/note/versions")
+async def list_note_versions(
+    group_id: int,
+    limit: int = Query(20, le=100),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT id, emitted_by, emitted_at, LENGTH(content) AS content_len
+            FROM group_note_versions
+            WHERE group_note_id=$1
+            ORDER BY id DESC LIMIT $2
+            """,
+            group_id,
+            limit,
+        )
+    return [
+        {
+            "id": r["id"],
+            "emitted_by": r["emitted_by"],
+            "emitted_at": r["emitted_at"].isoformat(),
+            "content_len": r["content_len"],
+        }
+        for r in rows
+    ]
+
+
+@router.post(
+    "/groups/{group_id}/note/versions/{version_id}/restore",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def restore_note_version(
+    group_id: int,
+    version_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        content = await c.fetchval(
+            "SELECT content FROM group_note_versions WHERE id=$1 AND group_note_id=$2",
+            version_id,
+            group_id,
+        )
+    if content is None:
+        raise HTTPException(404, "Version not found")
+    from src.repositories.group_notes import GroupNotesRepo
+
+    repo = GroupNotesRepo(db, ctx)
+    await repo.update_content(group_id, content, emitted_by=f"restore_v{version_id}")
+    return {"ok": True}
+
+
+@router.get("/note-templates")
+async def list_note_templates_admin(
+    ctx: BossContext = Depends(require_boss),  # noqa: ARG001
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, description FROM note_templates ORDER BY name"
+        )
+    return [dict(r) for r in rows]
+
+
+@router.patch("/groups/{group_id}/template", dependencies=[Depends(verify_json_csrf)])
+async def set_group_template(
+    group_id: int,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    template_id = payload.get("template_id")
+    async with db.acquire() as c:
+        if template_id is not None:
+            exists = await c.fetchval(
+                "SELECT 1 FROM note_templates WHERE id=$1", template_id
+            )
+            if not exists:
+                raise HTTPException(404, "Template not found")
+        await c.execute(
+            "UPDATE group_notes SET template_id=$2 WHERE id=$1", group_id, template_id
+        )
+    return {"ok": True, "template_id": template_id}
