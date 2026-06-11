@@ -71,5 +71,14 @@ export const patchAiCap = (body: { cost_cap_usd_daily: number }) =>
 export const patchAiKey = (body: { provider: string; api_key?: string; clear?: boolean }) =>
   api('/api/v1/admin/settings/ai/keys', { method: 'PATCH', body: JSON.stringify(body) });
 
+export type TestKeyResult = { ok: boolean; status: string; message: string };
+
+export const testAiKey = (body: { provider: string; api_key: string }) =>
+  api<TestKeyResult>('/api/ai/test-key', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams(body).toString(),
+  });
+
 export const patchGeneral = (body: Partial<Pick<GeneralSettings, 'name' | 'tz' | 'language'>>) =>
   api('/api/v1/admin/settings/general', { method: 'PATCH', body: JSON.stringify(body) });

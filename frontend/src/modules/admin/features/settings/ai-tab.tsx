@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { aiQuery, patchAiSlot, patchAiCap, patchAiKey, type ModelOption, type SlotInfo } from './api';
+import { aiQuery, patchAiSlot, patchAiCap, patchAiKey, testAiKey, type ModelOption, type SlotInfo } from './api';
 
 const SLOT_LABELS: Record<string, string> = {
   smart: 'Smart (suy luận sâu)',
@@ -96,13 +96,22 @@ function KeyRow({
   const [keyVal, setKeyVal] = useState('');
 
   const saveMut = useMutation({
-    mutationFn: () => patchAiKey({ provider, api_key: keyVal }),
+    mutationFn: async () => {
+      const test = await testAiKey({ provider, api_key: keyVal });
+      if (!test.ok) throw new Error(test.message);
+      return patchAiKey({ provider, api_key: keyVal });
+    },
     onSuccess: () => {
       setKeyVal('');
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success(`Đã lưu key ${PROVIDER_LABELS[provider]}.`);
+      toast.success(`Key ${PROVIDER_LABELS[provider]} hợp lệ — đã lưu.`);
     },
-    onError: () => toast.error('Lưu key thất bại.'),
+    onError: (e) =>
+      toast.error(
+        e instanceof Error && e.message && !e.message.startsWith('API ')
+          ? `Không lưu key: ${e.message}`
+          : 'Lưu key thất bại.'
+      ),
   });
 
   const clearMut = useMutation({
@@ -137,7 +146,7 @@ function KeyRow({
         disabled={!keyVal || saveMut.isPending}
         onClick={() => saveMut.mutate()}
       >
-        Lưu
+        {saveMut.isPending ? 'Đang kiểm tra…' : 'Lưu'}
       </Button>
       {present && (
         <Button
