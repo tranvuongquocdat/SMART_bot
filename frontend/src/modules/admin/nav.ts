@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings, BarChart3, CreditCard } from 'lucide-react';
+import { LayoutDashboard, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings, BarChart3, CreditCard, Wrench } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 export const adminNav: NavSection[] = [
@@ -18,6 +18,7 @@ export const adminNav: NavSection[] = [
       { label: 'Kênh kết nối', href: '/app/admin/channels', icon: LinkIcon },
       { label: 'Sử dụng', href: '/app/admin/usage', icon: BarChart3 },
       { label: 'Gói cước', href: '/app/admin/subscription', icon: CreditCard },
+      { label: 'Tools', href: '/app/admin/tools', icon: Wrench },
     ],
   },
   {
