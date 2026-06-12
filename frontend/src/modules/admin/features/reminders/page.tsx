@@ -5,31 +5,24 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { CreateReminderDialog } from './create-dialog';
 import { ReminderRow } from './reminder-row';
 import { remindersQuery } from './api';
 
-const TABS = [
-  { value: 'pending', label: 'Đang chờ' },
-  { value: 'done', label: 'Đã xong' },
-  { value: 'all', label: 'Tất cả' },
-] as const;
-
-type TabValue = (typeof TABS)[number]['value'];
+const TAB_VALUES = ['pending', 'done', 'all'] as const;
+type TabValue = (typeof TAB_VALUES)[number];
 
 function RemindersList({ status }: { status: TabValue }) {
+  const t = useT();
   const { data: reminders } = useSuspenseQuery(remindersQuery(status));
 
   if (reminders.length === 0) {
     return (
       <EmptyState
         icon={Bell}
-        title="Chưa có nhắc lịch nào"
-        description={
-          status === 'pending'
-            ? 'Tạo nhắc lịch mới để không bỏ lỡ việc quan trọng.'
-            : 'Không có nhắc lịch nào khớp với bộ lọc này.'
-        }
+        title={t('rem.empty.title')}
+        description={status === 'pending' ? t('rem.empty.pending') : t('rem.empty.filtered')}
       />
     );
   }
@@ -39,10 +32,10 @@ function RemindersList({ status }: { status: TabValue }) {
       <thead>
         <tr className="text-left text-muted-foreground border-b">
           <th className="p-3 w-10"></th>
-          <th className="p-3">Nội dung</th>
-          <th className="p-3 whitespace-nowrap">Thời gian</th>
-          <th className="p-3">Trạng thái</th>
-          <th className="p-3">Phạm vi</th>
+          <th className="p-3">{t('rem.col.content')}</th>
+          <th className="p-3 whitespace-nowrap">{t('rem.col.time')}</th>
+          <th className="p-3">{t('rem.col.status')}</th>
+          <th className="p-3">{t('rem.col.scope')}</th>
           <th className="p-3 w-12"></th>
         </tr>
       </thead>
@@ -56,18 +49,19 @@ function RemindersList({ status }: { status: TabValue }) {
 }
 
 export default function RemindersPage() {
+  const t = useT();
   const [activeTab, setActiveTab] = useState<TabValue>('pending');
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <PageWrap>
       <PageHeader
-        title="Nhắc nhở"
-        subtitle="Quản lý các nhắc lịch cá nhân và nhóm"
+        title={t('rem.title')}
+        subtitle={t('rem.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1 h-3.5 w-3.5" />
-            Tạo nhắc lịch
+            {t('rem.create')}
           </Button>
         }
       />
@@ -75,9 +69,9 @@ export default function RemindersPage() {
       <PageSection>
         <Tabs value={activeTab} onValueChange={v => setActiveTab(v as TabValue)}>
           <TabsList>
-            {TABS.map(t => (
-              <TabsTrigger key={t.value} value={t.value}>
-                {t.label}
+            {TAB_VALUES.map(v => (
+              <TabsTrigger key={v} value={v}>
+                {t(`rem.tab.${v}`)}
               </TabsTrigger>
             ))}
           </TabsList>
