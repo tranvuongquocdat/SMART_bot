@@ -77,6 +77,20 @@ export const en: Record<string, string> = {
   'due.late': 'Late · {time}',
   'due.tomorrow': 'Tomorrow · {time}',
   'due.inDays': 'in {n}d',
+  'common.cancel': 'Cancel',
+
+  // channels
+  'channels.title': 'Channels',
+  'channels.subtitle': 'Manage connections to Zalo, Telegram, Lark and other platforms.',
+  'channels.empty.title': 'No channels connected',
+  'channels.empty.desc': 'Press a button above to connect Zalo, Telegram or Lark.',
+  'channels.disconnect': 'Disconnect',
+  'channels.disconnectConfirm.title': 'Disconnect channel?',
+  'channels.disconnectConfirm.desc': 'The bot will no longer work on {provider}.',
+  'channels.disconnected': 'Channel disconnected.',
+  'channels.disconnectError': 'Could not disconnect. Try again later.',
+  'channels.connected': 'Connected {name}.',
+  'channels.connectError': 'Could not connect the channel. Try again later.',
 
   // command palette
   'cmd.placeholder': 'Search pages, actions…',

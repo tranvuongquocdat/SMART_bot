@@ -77,6 +77,20 @@ export const vi: Record<string, string> = {
   'due.late': 'Trễ · {time}',
   'due.tomorrow': 'Mai · {time}',
   'due.inDays': '{n}d sau',
+  'common.cancel': 'Hủy',
+
+  // kênh kết nối
+  'channels.title': 'Kênh kết nối',
+  'channels.subtitle': 'Quản lý kết nối với Zalo, Telegram, Lark và các nền tảng khác.',
+  'channels.empty.title': 'Chưa kết nối kênh nào',
+  'channels.empty.desc': 'Nhấn nút bên trên để kết nối Zalo, Telegram hoặc Lark.',
+  'channels.disconnect': 'Ngắt kết nối',
+  'channels.disconnectConfirm.title': 'Ngắt kết nối kênh?',
+  'channels.disconnectConfirm.desc': 'Bot sẽ không còn hoạt động trên {provider} nữa.',
+  'channels.disconnected': 'Đã ngắt kết nối kênh.',
+  'channels.disconnectError': 'Không thể ngắt kết nối. Thử lại sau.',
+  'channels.connected': 'Đã kết nối {name}.',
+  'channels.connectError': 'Không thể kết nối kênh. Thử lại sau.',
 
   // command palette
   'cmd.placeholder': 'Tìm trang, hành động…',

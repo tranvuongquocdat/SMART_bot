@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ApiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { StatusDot } from '@/components/status-dot';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
@@ -28,6 +29,7 @@ import { ZaloQrDialog } from './zalo-qr-dialog';
 const PROVIDERS = ['zalo', 'telegram', 'lark'] as const;
 
 function ChannelCard({ channel }: { channel: Channel }) {
+  const t = useT();
   const qc = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -37,9 +39,9 @@ function ChannelCard({ channel }: { channel: Channel }) {
     try {
       await disconnectChannel(channel.provider);
       await qc.invalidateQueries({ queryKey: ['admin', 'channels'] });
-      toast.success('Đã ngắt kết nối kênh.');
+      toast.success(t('channels.disconnected'));
     } catch {
-      toast.error('Không thể ngắt kết nối. Thử lại sau.');
+      toast.error(t('channels.disconnectError'));
     } finally {
       setDeleting(false);
       setConfirmOpen(false);
@@ -47,7 +49,7 @@ function ChannelCard({ channel }: { channel: Channel }) {
   }
 
   const connectedAt = channel.connected_at
-    ? new Date(channel.connected_at).toLocaleDateString('vi-VN')
+    ? new Date(channel.connected_at).toLocaleDateString()
     : null;
 
   return (
@@ -77,7 +79,7 @@ function ChannelCard({ channel }: { channel: Channel }) {
                 onClick={() => setConfirmOpen(true)}
               >
                 <Unplug className="mr-2 h-4 w-4" />
-                Ngắt kết nối
+                {t('channels.disconnect')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -87,18 +89,19 @@ function ChannelCard({ channel }: { channel: Channel }) {
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Ngắt kết nối kênh?</DialogTitle>
+            <DialogTitle>{t('channels.disconnectConfirm.title')}</DialogTitle>
             <DialogDescription>
-              Bot sẽ không còn hoạt động trên{' '}
-              <span className="font-medium capitalize">{channel.provider}</span> nữa.
+              {t('channels.disconnectConfirm.desc', {
+                provider: channel.provider.charAt(0).toUpperCase() + channel.provider.slice(1),
+              })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" disabled={deleting} onClick={() => setConfirmOpen(false)}>
-              Hủy
+              {t('common.cancel')}
             </Button>
             <Button variant="destructive" onClick={handleDisconnect} disabled={deleting}>
-              Ngắt kết nối
+              {t('channels.disconnect')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -108,6 +111,7 @@ function ChannelCard({ channel }: { channel: Channel }) {
 }
 
 export default function ChannelsPage() {
+  const t = useT();
   const { data: channels } = useSuspenseQuery(channelsQuery());
   const qc = useQueryClient();
   const [zaloQrOpen, setZaloQrOpen] = useState(false);
@@ -122,13 +126,15 @@ export default function ChannelsPage() {
       const result = await connectChannel(provider);
       await qc.invalidateQueries({ queryKey: ['admin', 'channels'] });
       toast.success(
-        `Đã kết nối ${result.provider}${result.display_name ? ` — ${result.display_name}` : ''}.`
+        t('channels.connected', {
+          name: `${result.provider}${result.display_name ? ` — ${result.display_name}` : ''}`,
+        })
       );
     } catch (e) {
       const detail =
         e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
           ? (e.body as { detail: string }).detail
-          : 'Không thể kết nối kênh. Thử lại sau.';
+          : t('channels.connectError');
       toast.error(detail);
     }
   }
@@ -136,8 +142,8 @@ export default function ChannelsPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Kênh kết nối"
-        subtitle="Quản lý kết nối với Zalo, Telegram, Lark và các nền tảng khác."
+        title={t('channels.title')}
+        subtitle={t('channels.subtitle')}
         actions={
           <div className="flex gap-2">
             {PROVIDERS.map(p => (
@@ -154,8 +160,8 @@ export default function ChannelsPage() {
         {channels.length === 0 ? (
           <EmptyState
             icon={Link2}
-            title="Chưa kết nối kênh nào"
-            description="Nhấn nút bên trên để kết nối Zalo, Telegram hoặc Lark."
+            title={t('channels.empty.title')}
+            description={t('channels.empty.desc')}
           />
         ) : (
           <div className="flex flex-col gap-3">
