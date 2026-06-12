@@ -1760,15 +1760,20 @@ async def list_plans(
         )
     result = []
     for r in rows:
+        # asyncpg trả JSONB dạng chuỗi (không đăng ký codec) — phải parse,
+        # không thì frontend nhận string và mọi limit hiển thị "Không giới hạn".
         prices = r["prices_json"]
         if isinstance(prices, str):
             prices = json.loads(prices)
+        limits = r["limits_json"]
+        if isinstance(limits, str):
+            limits = json.loads(limits)
         result.append(
             {
                 "id": r["id"],
                 "name": r["name"],
                 "label": r["label"],
-                "limits": r["limits_json"],
+                "limits": limits or {},
                 "prices": prices or {},
             }
         )

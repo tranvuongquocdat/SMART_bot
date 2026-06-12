@@ -357,3 +357,13 @@ def test_apply_plan_billing_months_sets_expiry(clean_db, logged_in_boss):
     days = (expiry - datetime.now(timezone.utc)).days
     # 3 tháng dương lịch — không phải 30 ngày của duration_days.
     assert 88 <= days <= 93
+
+
+def test_plans_limits_parsed_as_object(client, logged_in_boss):
+    """JSONB phải được parse — trả string làm bảng so sánh hiện 'Không giới hạn' hết."""
+    r = client.get("/api/v1/admin/subscription/plans")
+    starter = next(p for p in r.json() if p["name"] == "starter")
+    assert isinstance(starter["limits"], dict)
+    assert starter["limits"]["max_active_groups"] == 5
+    trial = next(p for p in r.json() if p["name"] == "trial")
+    assert trial["limits"]["duration_days"] == 14
