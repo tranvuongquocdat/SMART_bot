@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { Loader2, Maximize2, Minimize2, QrCode, RefreshCw, Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -13,6 +14,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { StatusDot } from '@/components/status-dot';
+import { drawerBackdrop, drawerPanel, tabFade } from '@/lib/motion';
 import { formatNumber } from '@/lib/format';
 import {
   accountQrLoginStatus,
@@ -441,11 +443,22 @@ export function AccountDrawer({
 
   return (
     <>
-      <div className="fixed inset-0 z-30 bg-black/10" onClick={onClose} />
+      <motion.div
+        className="fixed inset-0 z-30 bg-black/10"
+        onClick={onClose}
+        variants={drawerBackdrop}
+        initial="hidden"
+        animate="show"
+        exit="exit"
+      />
 
-      <aside
+      <motion.aside
         className="fixed inset-y-0 right-0 z-40 bg-background border-l shadow-2xl flex flex-col"
         style={{ width: fullscreen ? '100vw' : width }}
+        variants={drawerPanel}
+        initial="hidden"
+        animate="show"
+        exit="exit"
       >
         {!fullscreen && (
           <div
@@ -510,23 +523,25 @@ export function AccountDrawer({
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5">
-          {detail.isLoading || !detail.data ? (
-            <Skeleton className="h-60 w-full" />
-          ) : tab === 'overview' ? (
-            <OverviewTab d={detail.data} />
-          ) : tab === 'connect' ? (
-            <ConnectTab
-              d={detail.data}
-              onLoggedIn={() => {
-                detail.refetch();
-                refetchAll();
-              }}
-            />
-          ) : (
-            <MessagesTab accountId={accountId} />
-          )}
+          <motion.div key={tab} variants={tabFade} initial="hidden" animate="show">
+            {detail.isLoading || !detail.data ? (
+              <Skeleton className="h-60 w-full" />
+            ) : tab === 'overview' ? (
+              <OverviewTab d={detail.data} />
+            ) : tab === 'connect' ? (
+              <ConnectTab
+                d={detail.data}
+                onLoggedIn={() => {
+                  detail.refetch();
+                  refetchAll();
+                }}
+              />
+            ) : (
+              <MessagesTab accountId={accountId} />
+            )}
+          </motion.div>
         </div>
-      </aside>
+      </motion.aside>
     </>
   );
 }

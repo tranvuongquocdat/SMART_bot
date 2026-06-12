@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -14,6 +15,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { drawerBackdrop, drawerPanel, tabFade } from '@/lib/motion';
 import { plansAdminQuery } from '../plans/api';
 import { proxiesQuery, setBossProxy } from '../proxies/api';
 import {
@@ -367,11 +369,22 @@ export function BossDrawer({ boss, onClose }: { boss: Boss; onClose: () => void 
 
   return (
     <>
-      <div className="fixed inset-0 z-30 bg-black/10" onClick={onClose} />
+      <motion.div
+        className="fixed inset-0 z-30 bg-black/10"
+        onClick={onClose}
+        variants={drawerBackdrop}
+        initial="hidden"
+        animate="show"
+        exit="exit"
+      />
 
-      <aside
+      <motion.aside
         className="fixed inset-y-0 right-0 z-40 bg-background border-l shadow-2xl flex flex-col"
         style={{ width: fullscreen ? '100vw' : width }}
+        variants={drawerPanel}
+        initial="hidden"
+        animate="show"
+        exit="exit"
       >
         {!fullscreen && (
           <div
@@ -432,22 +445,24 @@ export function BossDrawer({ boss, onClose }: { boss: Boss; onClose: () => void 
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5">
-          {tab === 'overview' &&
-            (overview.isLoading || !overview.data ? (
-              <Skeleton className="h-60 w-full" />
-            ) : (
-              <OverviewTab bossId={boss.id} data={overview.data} />
-            ))}
-          {tab === 'subscription' &&
-            (overview.isLoading || !overview.data ? (
-              <Skeleton className="h-60 w-full" />
-            ) : (
-              <SubscriptionTab key={boss.id} bossId={boss.id} data={overview.data} />
-            ))}
-          {tab === 'ai' && <BossAiTab bossId={boss.id} />}
-          {tab === 'chat' && <BossChatTab bossId={boss.id} />}
+          <motion.div key={tab} variants={tabFade} initial="hidden" animate="show" className="h-full min-h-0">
+            {tab === 'overview' &&
+              (overview.isLoading || !overview.data ? (
+                <Skeleton className="h-60 w-full" />
+              ) : (
+                <OverviewTab bossId={boss.id} data={overview.data} />
+              ))}
+            {tab === 'subscription' &&
+              (overview.isLoading || !overview.data ? (
+                <Skeleton className="h-60 w-full" />
+              ) : (
+                <SubscriptionTab key={boss.id} bossId={boss.id} data={overview.data} />
+              ))}
+            {tab === 'ai' && <BossAiTab bossId={boss.id} />}
+            {tab === 'chat' && <BossChatTab bossId={boss.id} />}
+          </motion.div>
         </div>
-      </aside>
+      </motion.aside>
     </>
   );
 }

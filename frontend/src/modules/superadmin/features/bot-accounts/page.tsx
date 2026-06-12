@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, MoreHorizontal } from 'lucide-react';
 import { toast } from 'sonner';
@@ -283,14 +284,16 @@ export default function BotAccountsPage() {
       <EditDialog account={editTarget} onOpenChange={v => !v && setEditTarget(null)} />
       <MessagesDialog account={msgsTarget} onClose={() => setMsgsTarget(null)} />
       <DeleteDialog account={deleteTarget} onClose={() => setDeleteTarget(null)} />
-      {drawer && (
-        <AccountDrawer
-          key={`${drawer.id}-${drawer.tab}`}
-          accountId={drawer.id}
-          initialTab={drawer.tab}
-          onClose={() => setDrawer(null)}
-        />
-      )}
+      <AnimatePresence>
+        {drawer && (
+          <AccountDrawer
+            key={`${drawer.id}-${drawer.tab}`}
+            accountId={drawer.id}
+            initialTab={drawer.tab}
+            onClose={() => setDrawer(null)}
+          />
+        )}
+      </AnimatePresence>
     </PageWrap>
   );
 }

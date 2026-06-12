@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, MoreHorizontal, UserCog } from 'lucide-react';
 import { toast } from 'sonner';
@@ -253,9 +254,15 @@ export default function BossesPage() {
       <CreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <EditDialog boss={editTarget} onOpenChange={v => !v && setEditTarget(null)} />
       <DeleteDialog boss={deleteTarget} onClose={() => setDeleteTarget(null)} />
-      {detailTarget && (
-        <BossDrawer boss={detailTarget} onClose={() => setDetailTarget(null)} />
-      )}
+      <AnimatePresence>
+        {detailTarget && (
+          <BossDrawer
+            key={detailTarget.id}
+            boss={detailTarget}
+            onClose={() => setDetailTarget(null)}
+          />
+        )}
+      </AnimatePresence>
     </PageWrap>
   );
 }

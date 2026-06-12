@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { marked } from 'marked';
 import {
   Check, FileText, History, Link2, Maximize2, Pencil,
@@ -16,6 +17,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { drawerBackdrop, drawerPanel, tabFade } from '@/lib/motion';
 import { relativeTime } from '@/lib/format';
 import { TimelineCard } from './timeline-card';
 import { patchActionItem } from '../action-items/api';
@@ -288,11 +290,22 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
   return (
     <>
       {/* Lớp mờ nhẹ phía sau, bấm ra ngoài để đóng */}
-      <div className="fixed inset-0 z-30 bg-black/10" onClick={onClose} />
+      <motion.div
+        className="fixed inset-0 z-30 bg-black/10"
+        onClick={onClose}
+        variants={drawerBackdrop}
+        initial="hidden"
+        animate="show"
+        exit="exit"
+      />
 
-      <aside
+      <motion.aside
         className="fixed inset-y-0 right-0 z-40 bg-background border-l shadow-2xl flex flex-col"
         style={{ width }}
+        variants={drawerPanel}
+        initial="hidden"
+        animate="show"
+        exit="exit"
       >
         {/* Drag handle */}
         <div
@@ -358,6 +371,7 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto p-5 min-h-0">
+          <motion.div key={tab} variants={tabFade} initial="hidden" animate="show">
           {tab === 'note' && <NoteTab id={id} />}
 
           {tab === 'timeline' && (
@@ -468,8 +482,9 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
                 ))}
               </div>
             ))}
+          </motion.div>
         </div>
-      </aside>
+      </motion.aside>
     </>
   );
 }
