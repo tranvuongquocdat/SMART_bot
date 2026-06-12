@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
@@ -30,9 +31,9 @@ import {
 } from './api';
 
 const SLOT_LABELS: Record<string, string> = {
-  smart: 'Smart (suy luận sâu)',
-  fast: 'Fast (phản hồi nhanh)',
-  vision: 'Vision (đọc ảnh)',
+  smart: 'aitab.slot.smart',
+  fast: 'aitab.slot.fast',
+  vision: 'aitab.slot.vision',
 };
 
 const PROVIDERS = ['openai', 'groq', 'gemini'] as const;
@@ -55,6 +56,7 @@ function SlotCard({
   onSave: (modelId: number | null) => void;
   saving: boolean;
 }) {
+  const t = useT();
   const [selected, setSelected] = useState<string>(currentModelId?.toString() ?? '');
 
   useEffect(() => {
@@ -71,7 +73,7 @@ function SlotCard({
 
   return (
     <div className="rounded-lg border bg-card p-4 space-y-3">
-      <p className="text-sm font-semibold">{SLOT_LABELS[slot.slot]}</p>
+      <p className="text-sm font-semibold">{t(SLOT_LABELS[slot.slot])}</p>
       <Select
         value={selected || 'default'}
         onValueChange={(v) => setSelected(v === 'default' ? '' : v)}
@@ -80,9 +82,9 @@ function SlotCard({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="default">— mặc định nền tảng —</SelectItem>
+          <SelectItem value="default">{t('aitab.platformDefault')}</SelectItem>
           <SelectGroup>
-            <SelectLabel>Model được cấp</SelectLabel>
+            <SelectLabel>{t('aitab.grantedModels')}</SelectLabel>
             {platformModels.map((m) => (
               <SelectItem key={m.id} value={m.id.toString()}>
                 {m.provider} / {m.name}
@@ -91,7 +93,7 @@ function SlotCard({
           </SelectGroup>
           {ownModels.length > 0 && (
             <SelectGroup>
-              <SelectLabel>Model của bạn</SelectLabel>
+              <SelectLabel>{t('aitab.yourModels')}</SelectLabel>
               {ownModels.map((m) => (
                 <SelectItem key={m.id} value={m.id.toString()}>
                   {m.provider} / {m.name}
@@ -107,7 +109,7 @@ function SlotCard({
           disabled={saving}
           onClick={() => onSave(selected ? parseInt(selected, 10) : null)}
         >
-          {saving ? 'Đang lưu…' : 'Lưu slot'}
+          {saving ? t('common.saving') : t('aitab.saveSlot')}
         </Button>
       )}
     </div>
@@ -123,6 +125,7 @@ function KeyRow({
   present: boolean;
   last4?: string;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [keyVal, setKeyVal] = useState('');
 
@@ -135,13 +138,13 @@ function KeyRow({
     onSuccess: () => {
       setKeyVal('');
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success(`Key ${PROVIDER_LABELS[provider]} hợp lệ — đã lưu.`);
+      toast.success(t('aitab.keySaved', { provider: PROVIDER_LABELS[provider] }));
     },
     onError: (e) =>
       toast.error(
         e instanceof Error && e.message && !e.message.startsWith('API ')
-          ? `Không lưu key: ${e.message}`
-          : 'Lưu key thất bại.'
+          ? t('aitab.keySaveErrorMsg', { msg: e.message })
+          : t('aitab.keySaveError')
       ),
   });
 
@@ -149,13 +152,13 @@ function KeyRow({
     mutationFn: () => patchAiKey({ provider, clear: true }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success(`Đã xoá key ${PROVIDER_LABELS[provider]}.`);
+      toast.success(t('aitab.keyDeleted', { provider: PROVIDER_LABELS[provider] }));
     },
-    onError: () => toast.error('Xoá key thất bại.'),
+    onError: () => toast.error(t('aitab.keyDeleteError')),
   });
 
   const placeholder = present
-    ? `(đã có key — nhập để thay, **** ${last4 ?? ''})`
+    ? t('aitab.keyHasPlaceholder', { last4: last4 ?? '' })
     : provider === 'openai' ? 'sk-…' : provider === 'groq' ? 'gsk_…' : 'AI…';
 
   return (
@@ -177,7 +180,7 @@ function KeyRow({
         disabled={!keyVal || saveMut.isPending}
         onClick={() => saveMut.mutate()}
       >
-        {saveMut.isPending ? 'Đang kiểm tra…' : 'Lưu'}
+        {saveMut.isPending ? t('aitab.checking') : t('common.save')}
       </Button>
       {present && (
         <Button
@@ -187,7 +190,7 @@ function KeyRow({
           disabled={clearMut.isPending}
           onClick={() => clearMut.mutate()}
         >
-          Xoá
+          {t('common.delete')}
         </Button>
       )}
     </div>
@@ -201,6 +204,7 @@ function OwnModelsSection({
   models: ModelOption[];
   keysPresent: Record<string, boolean>;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const ownModels = models.filter((m) => m.is_own);
 
@@ -218,14 +222,14 @@ function OwnModelsSection({
     try {
       const res = await listProviderModels(provider);
       if (!res.ok) {
-        toast.error(res.message ?? 'Không tải được danh sách model.');
+        toast.error(res.message ?? t('aitab.loadModelsError'));
         setAvailable([]);
       } else {
         setAvailable(res.models);
-        if (res.models.length === 0) toast.info('Provider không trả về model nào.');
+        if (res.models.length === 0) toast.info(t('aitab.noProviderModels'));
       }
     } catch {
-      toast.error('Không tải được danh sách model.');
+      toast.error(t('aitab.loadModelsError'));
     } finally {
       setLoadingList(false);
     }
@@ -236,14 +240,14 @@ function OwnModelsSection({
     onSuccess: () => {
       setName('');
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success('Đã thêm model của bạn.');
+      toast.success(t('aitab.modelAdded'));
     },
     onError: (e) => {
       const detail =
         e instanceof ApiError && e.body && typeof e.body === 'object'
           ? (e.body as { detail?: string }).detail
           : undefined;
-      toast.error(detail ?? 'Thêm model thất bại.');
+      toast.error(detail ?? t('aitab.modelAddError'));
     },
   });
 
@@ -251,18 +255,15 @@ function OwnModelsSection({
     mutationFn: (id: number) => deleteOwnModel(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success('Đã xoá model.');
+      toast.success(t('aitab.modelDeleted'));
     },
-    onError: () => toast.error('Xoá model thất bại.'),
+    onError: () => toast.error(t('aitab.modelDeleteError')),
   });
 
   return (
     <section>
-      <h2 className="text-sm font-semibold mb-1">Model của bạn</h2>
-      <p className="text-xs text-muted-foreground mb-3">
-        Thêm model bất kỳ của provider, chạy bằng API key của bạn. Cần lưu key provider tương ứng
-        trước.
-      </p>
+      <h2 className="text-sm font-semibold mb-1">{t('aitab.yourModels')}</h2>
+      <p className="text-xs text-muted-foreground mb-3">{t('aitab.yourModelsDesc')}</p>
 
       {ownModels.length > 0 && (
         <ul className="mb-4 space-y-2">
@@ -284,7 +285,7 @@ function OwnModelsSection({
                 disabled={delMut.isPending}
                 onClick={() => delMut.mutate(m.id)}
               >
-                Xoá
+                {t('common.delete')}
               </Button>
             </li>
           ))}
@@ -321,7 +322,7 @@ function OwnModelsSection({
               {available.length > 0 ? (
                 <Select value={name || undefined} onValueChange={setName}>
                   <SelectTrigger className="h-8 text-sm flex-1">
-                    <SelectValue placeholder="Chọn model…" />
+                    <SelectValue placeholder={t('aitab.chooseModel')} />
                   </SelectTrigger>
                   <SelectContent className="max-h-72">
                     {available.map((m) => (
@@ -346,14 +347,14 @@ function OwnModelsSection({
                 disabled={loadingList}
                 onClick={loadModels}
               >
-                {loadingList ? 'Đang tải…' : 'Tải danh sách'}
+                {loadingList ? t('common.loading') : t('aitab.loadList')}
               </Button>
             </div>
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-4">
           <div className="space-y-1.5">
-            <Label className="text-xs">Dùng cho slot</Label>
+            <Label className="text-xs">{t('aitab.useForSlot')}</Label>
             <Select value={tier} onValueChange={setTier}>
               <SelectTrigger className="h-8 text-sm w-44">
                 <SelectValue />
@@ -367,7 +368,7 @@ function OwnModelsSection({
           </div>
           <label className="flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
             <Checkbox checked={vision} onCheckedChange={(v) => setVision(v === true)} />
-            Hỗ trợ đọc ảnh (vision)
+            {t('aitab.visionSupport')}
           </label>
           <Button
             size="sm"
@@ -375,12 +376,12 @@ function OwnModelsSection({
             disabled={!name.trim() || addMut.isPending || !hasKey}
             onClick={() => addMut.mutate()}
           >
-            {addMut.isPending ? 'Đang thêm…' : 'Thêm model'}
+            {addMut.isPending ? t('aitab.adding') : t('aitab.addModel')}
           </Button>
         </div>
         {!hasKey && (
           <p className="text-xs text-amber-600 dark:text-amber-500">
-            Bạn cần lưu API key {PROVIDER_LABELS[provider]} ở mục trên trước khi thêm model riêng.
+            {t('aitab.needKey', { provider: PROVIDER_LABELS[provider] })}
           </p>
         )}
       </div>
@@ -389,6 +390,7 @@ function OwnModelsSection({
 }
 
 export default function AiTab() {
+  const t = useT();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery(aiQuery);
 
@@ -403,28 +405,28 @@ export default function AiTab() {
       patchAiSlot({ slot, model_id }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success('Đã lưu model slot.');
+      toast.success(t('aitab.slotSaved'));
     },
-    onError: () => toast.error('Lưu slot thất bại.'),
+    onError: () => toast.error(t('aitab.slotSaveError')),
   });
 
   const capMut = useMutation({
     mutationFn: () => patchAiCap({ cost_cap_usd_daily: parseFloat(cap) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success('Đã lưu cost cap.');
+      toast.success(t('aitab.capSaved'));
     },
-    onError: () => toast.error('Lưu cost cap thất bại.'),
+    onError: () => toast.error(t('aitab.capSaveError')),
   });
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Đang tải…</p>;
+  if (isLoading) return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>;
   if (!data) return null;
 
   return (
     <div className="space-y-6 max-w-2xl">
       {/* Model slots */}
       <section>
-        <h2 className="text-sm font-semibold mb-3">Model slots</h2>
+        <h2 className="text-sm font-semibold mb-3">{t('aitab.modelSlots')}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {data.slots.map((slot) => (
             <SlotCard
@@ -441,7 +443,7 @@ export default function AiTab() {
 
       {/* Cost cap */}
       <section className="space-y-2 max-w-xs">
-        <Label htmlFor="cost-cap">Cost cap (USD / ngày)</Label>
+        <Label htmlFor="cost-cap">{t('aitab.costCap')}</Label>
         <div className="flex gap-2">
           <Input
             id="cost-cap"
@@ -457,17 +459,15 @@ export default function AiTab() {
             disabled={capMut.isPending}
             onClick={() => capMut.mutate()}
           >
-            {capMut.isPending ? 'Đang lưu…' : 'Lưu'}
+            {capMut.isPending ? t('common.saving') : t('common.save')}
           </Button>
         </div>
       </section>
 
       {/* BYO API keys */}
       <section>
-        <h2 className="text-sm font-semibold mb-1">API key của bạn (BYO)</h2>
-        <p className="text-xs text-muted-foreground mb-3">
-          Nhập key để dùng quota của bạn thay vì quota nền tảng. Key được mã hoá (Fernet) trước khi lưu DB.
-        </p>
+        <h2 className="text-sm font-semibold mb-1">{t('aitab.byoTitle')}</h2>
+        <p className="text-xs text-muted-foreground mb-3">{t('aitab.byoDesc')}</p>
         <div className="space-y-3">
           {PROVIDERS.map((prov) => {
             const info = data.keys[prov] ?? { present: false };
