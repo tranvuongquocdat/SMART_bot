@@ -6,6 +6,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Kbd } from '@/components/ui/kbd';
 import { ThemeToggle } from './theme-toggle';
 import { UserMenu } from './user-menu';
+import { NotificationBell } from './notification-bell';
 import { CommandPalette } from './command-palette';
 import type { Me } from '@/lib/auth';
 import { cn } from '@/lib/utils';
@@ -134,8 +135,6 @@ export function AppShell({
             </div>
           ))}
         </nav>
-
-        <UserMenu me={me} collapsed={collapsed} />
       </motion.aside>
 
       <main>
@@ -162,6 +161,8 @@ export function AppShell({
               <Kbd className="max-sm:hidden">⌘K</Kbd>
             </button>
             <ThemeToggle />
+            <NotificationBell />
+            <UserMenu me={me} placement="topbar" />
           </div>
         </div>
 

@@ -1453,6 +1453,42 @@ async def delete_agent_trigger(
 
 
 # ---------------------------------------------------------------------------
+# Announcements — broadcast thông báo tới mọi user (vd phiên bản mới)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/announcements")
+async def list_announcements(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    from src.services import notifications
+
+    return await notifications.list_broadcasts(db)
+
+
+@router.post("/announcements", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_announcement(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import notifications
+
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(422, "title required")
+    new_id = await notifications.broadcast(
+        db,
+        kind=payload.get("kind") or "announcement",
+        title=title,
+        body=(payload.get("body") or "").strip() or None,
+        link=(payload.get("link") or "").strip() or None,
+    )
+    return {"id": new_id}
+
+
+# ---------------------------------------------------------------------------
 # GET /audit-log  — paginated read-only (cursor-based on created_at)
 # ---------------------------------------------------------------------------
 
@@ -1719,6 +1755,19 @@ async def approve_subscription_request(
             "UPDATE subscription_requests SET status='approved', reviewed_at=NOW() WHERE id=$1",
             req_id,
         )
+        plan_label = await c.fetchval(
+            "SELECT label FROM plans WHERE id=$1", req["plan_id"]
+        )
+    from src.services import notifications
+
+    await notifications.notify_boss(
+        db,
+        req["boss_id"],
+        kind="subscription",
+        title="Đăng ký gói đã được duyệt",
+        body=f"Gói {plan_label or ''} của bạn đã được kích hoạt.".strip(),
+        link="/app/admin/subscription",
+    )
     return {"status": "approved", "request_id": req_id}
 
 
@@ -1734,7 +1783,7 @@ async def reject_subscription_request(
 ) -> dict:
     async with db.acquire() as c:
         req = await c.fetchrow(
-            "SELECT status FROM subscription_requests WHERE id=$1", req_id
+            "SELECT boss_id, status FROM subscription_requests WHERE id=$1", req_id
         )
         if not req or req["status"] != "pending":
             raise HTTPException(400, "Request not pending or not found")
@@ -1747,6 +1796,17 @@ async def reject_subscription_request(
             req_id,
             payload.get("reviewer_note", ""),
         )
+    from src.services import notifications
+
+    note = (payload.get("reviewer_note") or "").strip()
+    await notifications.notify_boss(
+        db,
+        req["boss_id"],
+        kind="subscription",
+        title="Yêu cầu đăng ký bị từ chối",
+        body=note or "Vui lòng kiểm tra lại thông tin thanh toán và gửi lại.",
+        link="/app/admin/subscription",
+    )
     return {"status": "rejected", "request_id": req_id}
 
 

@@ -300,10 +300,11 @@ export function ChatPanel({
         />
         <Button
           size="icon"
-          variant="ghost"
+          variant="outline"
           disabled={uploading}
           onClick={() => fileRef.current?.click()}
-          aria-label="Đính kèm tệp"
+          aria-label="Đính kèm ảnh hoặc tệp"
+          title="Đính kèm ảnh hoặc tệp"
         >
           <Paperclip className={`h-4 w-4 ${uploading ? 'animate-pulse' : ''}`} />
         </Button>
