@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/lib/i18n';
 import { createGroup, groupsListQuery } from './api';
 
 const CHANNELS = [
@@ -30,6 +31,7 @@ export function CreateGroupDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState('');
   const [channel, setChannel] = useState('zalo');
   const qc = useQueryClient();
@@ -38,12 +40,12 @@ export function CreateGroupDialog({
     mutationFn: () => createGroup({ name: name.trim(), channel }),
     onSuccess: () => {
       qc.invalidateQueries(groupsListQuery());
-      toast.success('Đã tạo nhóm');
+      toast.success(t('grp.created'));
       setName('');
       setChannel('zalo');
       onOpenChange(false);
     },
-    onError: () => toast.error('Tạo nhóm thất bại'),
+    onError: () => toast.error(t('grp.createError')),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -56,21 +58,21 @@ export function CreateGroupDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Tạo nhóm mới</DialogTitle>
+          <DialogTitle>{t('grp.dialog.title')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="group-name">Tên nhóm</Label>
+            <Label htmlFor="group-name">{t('grp.field.name')}</Label>
             <Input
               id="group-name"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="VD: Nhóm Kinh doanh Q3"
+              placeholder={t('grp.field.namePlaceholder')}
               autoFocus
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="group-channel">Kênh</Label>
+            <Label htmlFor="group-channel">{t('grp.field.channel')}</Label>
             <Select value={channel} onValueChange={setChannel}>
               <SelectTrigger id="group-channel">
                 <SelectValue />
@@ -86,10 +88,10 @@ export function CreateGroupDialog({
           </div>
           <DialogFooter className="mt-2">
             <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>
-              Huỷ
+              {t('common.cancel')}
             </Button>
             <Button type="submit" disabled={!name.trim() || mutation.isPending}>
-              {mutation.isPending ? 'Đang tạo…' : 'Tạo nhóm'}
+              {mutation.isPending ? t('grp.creating') : t('grp.create')}
             </Button>
           </DialogFooter>
         </form>

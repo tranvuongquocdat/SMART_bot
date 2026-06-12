@@ -16,6 +16,7 @@ import { Badge } from '@/components/ui/badge';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { relativeTime } from '@/lib/format';
 import { ApiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import {
   groupsListQuery, deleteGroup, toggleGroupActive,
   enableAllGroups, disableAllGroups, type GroupListItem,
@@ -30,6 +31,7 @@ function ChannelChip({ channel }: { channel: string }) {
 }
 
 export default function GroupsListPage() {
+  const t = useT();
   const [createOpen, setCreateOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<GroupListItem | null>(null);
   const qc = useQueryClient();
@@ -45,10 +47,10 @@ export default function GroupsListPage() {
     mutationFn: (id: number) => deleteGroup(id),
     onSuccess: () => {
       qc.invalidateQueries(groupsListQuery());
-      toast.success('Đã xoá nhóm');
+      toast.success(t('grp.deleted'));
       setDeleteTarget(null);
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('common.deleteError')),
   });
 
   const enableAllMut = useMutation({
@@ -57,22 +59,22 @@ export default function GroupsListPage() {
       qc.invalidateQueries(groupsListQuery());
       if (data.limit !== null && data.active < data.total) {
         toast.info(
-          `Đã bật ${data.active}/${data.total} nhóm — gói hiện tại giới hạn ${data.limit} nhóm.`
+          t('grp.enabledCapped', { active: data.active, total: data.total, limit: data.limit })
         );
       } else {
-        toast.success(`Đã bật toàn bộ ${data.active} nhóm.`);
+        toast.success(t('grp.enabledAll', { active: data.active }));
       }
     },
-    onError: () => toast.error('Thao tác thất bại'),
+    onError: () => toast.error(t('common.actionFailed')),
   });
 
   const disableAllMut = useMutation({
     mutationFn: disableAllGroups,
     onSuccess: (data) => {
       qc.invalidateQueries(groupsListQuery());
-      toast.success(`Đã tắt ${data.disabled} nhóm.`);
+      toast.success(t('grp.disabledN', { n: data.disabled }));
     },
-    onError: () => toast.error('Thao tác thất bại'),
+    onError: () => toast.error(t('common.actionFailed')),
   });
 
   const toggleMutation = useMutation({
@@ -81,13 +83,13 @@ export default function GroupsListPage() {
       qc.setQueryData(['admin', 'groups'], (old: GroupListItem[] | undefined) =>
         old?.map((g) => (g.id === data.id ? { ...g, is_active: data.is_active } : g)),
       );
-      toast.success(data.is_active ? 'Đã bật nhóm' : 'Đã tắt nhóm');
+      toast.success(data.is_active ? t('grp.toggleOn') : t('grp.toggleOff'));
     },
     onError: (e) => {
       const detail =
         e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
           ? (e.body as { detail: string }).detail
-          : 'Thao tác thất bại';
+          : t('common.actionFailed');
       toast.error(detail);
     },
   });
@@ -95,7 +97,7 @@ export default function GroupsListPage() {
   const columns: ColumnDef<GroupListItem, any>[] = [
     {
       accessorKey: 'name',
-      header: 'Tên nhóm',
+      header: t('grp.col.name'),
       cell: ({ row }) => (
         <button
           onClick={() =>
@@ -113,19 +115,19 @@ export default function GroupsListPage() {
     },
     {
       accessorKey: 'channel',
-      header: 'Kênh',
+      header: t('grp.col.channel'),
       cell: ({ getValue }) => <ChannelChip channel={getValue() as string} />,
     },
     {
       accessorKey: 'members_count',
-      header: 'Thành viên',
+      header: t('grp.col.members'),
       cell: ({ getValue }) => (
         <span className="tabular-nums">{getValue() as number}</span>
       ),
     },
     {
       accessorKey: 'updated_at',
-      header: 'Cập nhật',
+      header: t('grp.col.updated'),
       cell: ({ getValue }) => (
         <span className="text-muted-foreground text-[12.5px]">
           {relativeTime(getValue() as string | null)}
@@ -134,7 +136,7 @@ export default function GroupsListPage() {
     },
     {
       accessorKey: 'is_active',
-      header: 'Hoạt động',
+      header: t('grp.col.active'),
       cell: ({ row }) => (
         <button
           onClick={() => toggleMutation.mutate(row.original.id)}
@@ -163,7 +165,7 @@ export default function GroupsListPage() {
           className="h-7 text-xs"
           onClick={() => selectGroup(row.original.id)}
         >
-          Chi tiết
+          {t('grp.detail')}
         </Button>
       ),
     },
@@ -176,7 +178,7 @@ export default function GroupsListPage() {
           size="sm"
           className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
           onClick={() => setDeleteTarget(row.original)}
-          aria-label="Xoá nhóm"
+          aria-label={t('grp.deleteAria')}
         >
           <Trash2 className="h-4 w-4" />
         </Button>
@@ -187,8 +189,8 @@ export default function GroupsListPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Nhóm"
-        subtitle="Quản lý các nhóm chat và thành viên"
+        title={t('grp.title')}
+        subtitle={t('grp.subtitle')}
         actions={
           <div className="flex gap-2">
             {(data ?? []).some((g) => g.is_active) && (
@@ -198,7 +200,7 @@ export default function GroupsListPage() {
                 disabled={disableAllMut.isPending}
                 onClick={() => disableAllMut.mutate()}
               >
-                {disableAllMut.isPending ? 'Đang tắt…' : 'Tắt tất cả'}
+                {disableAllMut.isPending ? t('grp.disabling') : t('grp.disableAll')}
               </Button>
             )}
             {(data ?? []).some((g) => !g.is_active) && (
@@ -208,10 +210,10 @@ export default function GroupsListPage() {
                 disabled={enableAllMut.isPending}
                 onClick={() => enableAllMut.mutate()}
               >
-                {enableAllMut.isPending ? 'Đang bật…' : 'Bật tất cả'}
+                {enableAllMut.isPending ? t('grp.enabling') : t('grp.enableAll')}
               </Button>
             )}
-            <Button size="sm" onClick={() => setCreateOpen(true)}>+ Tạo nhóm</Button>
+            <Button size="sm" onClick={() => setCreateOpen(true)}>+ {t('grp.create')}</Button>
           </div>
         }
       />
@@ -227,9 +229,9 @@ export default function GroupsListPage() {
               empty={
                 <EmptyState
                   icon={Users}
-                  title="Chưa có nhóm"
-                  description="Thêm nhóm để bắt đầu theo dõi tin nhắn và tác vụ"
-                  action={{ label: '+ Tạo nhóm', onClick: () => setCreateOpen(true) }}
+                  title={t('grp.empty.title')}
+                  description={t('grp.empty.desc')}
+                  action={{ label: `+ ${t('grp.create')}`, onClick: () => setCreateOpen(true) }}
                 />
               }
             />
@@ -248,19 +250,19 @@ export default function GroupsListPage() {
       <Dialog open={!!deleteTarget} onOpenChange={v => { if (!v) setDeleteTarget(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Xoá nhóm?</DialogTitle>
+            <DialogTitle>{t('grp.deleteConfirm.title')}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Nhóm <strong>{deleteTarget?.name}</strong> sẽ bị xoá vĩnh viễn. Không thể hoàn tác.
+            {t('grp.deleteConfirm.desc', { name: deleteTarget?.name ?? '' })}
           </p>
           <DialogFooter className="mt-4">
-            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>Huỷ</Button>
+            <Button variant="ghost" onClick={() => setDeleteTarget(null)}>{t('common.cancel')}</Button>
             <Button
               variant="destructive"
               disabled={deleteMutation.isPending}
               onClick={() => deleteTarget && deleteMutation.mutate(deleteTarget.id)}
             >
-              {deleteMutation.isPending ? 'Đang xoá…' : 'Xoá'}
+              {deleteMutation.isPending ? t('common.deleting') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
