@@ -19,6 +19,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton';
 import { drawerBackdrop, drawerPanel, tabFade } from '@/lib/motion';
 import { relativeTime } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { TimelineCard } from './timeline-card';
 import { patchActionItem } from '../action-items/api';
 import {
@@ -38,18 +39,19 @@ function ChannelChip({ channel }: { channel: string }) {
 }
 
 const TABS = [
-  { key: 'note', label: 'Note' },
-  { key: 'timeline', label: 'Thời gian' },
-  { key: 'tasks', label: 'Tác vụ' },
-  { key: 'decisions', label: 'Quyết định' },
-  { key: 'members', label: 'Thành viên' },
-  { key: 'files', label: 'Tệp & link' },
+  { key: 'note', label: 'grp.tab.note' },
+  { key: 'timeline', label: 'grp.tab.timeline' },
+  { key: 'tasks', label: 'grp.tab.tasks' },
+  { key: 'decisions', label: 'grp.tab.decisions' },
+  { key: 'members', label: 'grp.tab.members' },
+  { key: 'files', label: 'grp.tab.files' },
 ] as const;
 type TabKey = (typeof TABS)[number]['key'];
 
 // ---------------------------------------------------------------- Note tab
 
 function NoteTab({ id }: { id: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const note = useQuery(noteQuery(id));
   const versions = useQuery(noteVersionsQuery(id));
@@ -67,36 +69,36 @@ function NoteTab({ id }: { id: string }) {
     onSuccess: () => {
       setEditing(false);
       invalidate();
-      toast.success('Đã lưu note');
+      toast.success(t('grp.note.saved'));
     },
-    onError: () => toast.error('Lưu note thất bại'),
+    onError: () => toast.error(t('grp.note.saveError')),
   });
 
   const refreshMut = useMutation({
     mutationFn: () => refreshNote(id),
     onSuccess: () => {
-      toast.success('Bot đang cập nhật note — sẽ hiện trong giây lát');
+      toast.success(t('grp.note.refreshing'));
       setTimeout(invalidate, 6000);
     },
-    onError: () => toast.error('Không gửi được yêu cầu cập nhật'),
+    onError: () => toast.error(t('grp.note.refreshError')),
   });
 
   const restoreMut = useMutation({
     mutationFn: (vid: number) => restoreNoteVersion(id, vid),
     onSuccess: () => {
       invalidate();
-      toast.success('Đã khôi phục phiên bản');
+      toast.success(t('grp.note.restored'));
     },
-    onError: () => toast.error('Khôi phục thất bại'),
+    onError: () => toast.error(t('grp.note.restoreError')),
   });
 
   const templateMut = useMutation({
     mutationFn: (tid: number | null) => setGroupTemplate(id, tid),
     onSuccess: () => {
       invalidate();
-      toast.success('Đã đổi template — note sẽ theo cấu trúc mới ở lần cập nhật tới');
+      toast.success(t('grp.note.tmplChanged'));
     },
-    onError: () => toast.error('Đổi template thất bại'),
+    onError: () => toast.error(t('grp.note.tmplError')),
   });
 
   if (note.isLoading) return <Skeleton className="h-40 w-full" />;
@@ -117,7 +119,7 @@ function NoteTab({ id }: { id: string }) {
               }}
             >
               <Pencil className="h-3.5 w-3.5 mr-1.5" />
-              Sửa
+              {t('grp.note.edit')}
             </Button>
             <Button
               size="sm"
@@ -126,18 +128,18 @@ function NoteTab({ id }: { id: string }) {
               onClick={() => refreshMut.mutate()}
             >
               <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${refreshMut.isPending ? 'animate-spin' : ''}`} />
-              Cập nhật ngay
+              {t('grp.note.refreshNow')}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button size="sm" variant="outline">
                   <History className="h-3.5 w-3.5 mr-1.5" />
-                  Lịch sử
+                  {t('grp.note.history')}
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" className="max-h-72 overflow-y-auto">
                 {(versions.data ?? []).length === 0 && (
-                  <DropdownMenuItem disabled>Chưa có phiên bản nào</DropdownMenuItem>
+                  <DropdownMenuItem disabled>{t('grp.note.noVersions')}</DropdownMenuItem>
                 )}
                 {(versions.data ?? []).map((v) => (
                   <DropdownMenuItem key={v.id} onClick={() => restoreMut.mutate(v.id)}>
@@ -158,7 +160,7 @@ function NoteTab({ id }: { id: string }) {
                   <SelectValue placeholder="Template" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">— template mặc định —</SelectItem>
+                  <SelectItem value="none">{t('grp.note.defaultTemplate')}</SelectItem>
                   {(templates.data ?? []).map((t) => (
                     <SelectItem key={t.id} value={t.id.toString()}>
                       {t.name}
@@ -172,10 +174,10 @@ function NoteTab({ id }: { id: string }) {
           <>
             <Button size="sm" disabled={saveMut.isPending} onClick={() => saveMut.mutate()}>
               <Check className="h-3.5 w-3.5 mr-1.5" />
-              {saveMut.isPending ? 'Đang lưu…' : 'Lưu'}
+              {saveMut.isPending ? t('common.saving') : t('common.save')}
             </Button>
             <Button size="sm" variant="outline" onClick={() => setEditing(false)}>
-              Huỷ
+              {t('common.cancel')}
             </Button>
           </>
         )}
@@ -183,7 +185,7 @@ function NoteTab({ id }: { id: string }) {
 
       {note.data.updated_at && !editing && (
         <p className="text-[11px] text-muted-foreground">
-          Bot cập nhật {relativeTime(note.data.updated_at)}
+          {t('grp.note.botUpdated', { time: relativeTime(note.data.updated_at) })}
         </p>
       )}
 
@@ -202,7 +204,7 @@ function NoteTab({ id }: { id: string }) {
       ) : (
         <div className="rounded-lg border bg-card p-8 text-center text-sm text-muted-foreground">
           <FileText className="h-6 w-6 mx-auto mb-2 opacity-50" />
-          Chưa có note. Bot sẽ tự tạo khi nhóm có tin nhắn, hoặc bấm "Cập nhật ngay".
+          {t('grp.note.empty')}
         </div>
       )}
     </div>
@@ -212,14 +214,15 @@ function NoteTab({ id }: { id: string }) {
 // ------------------------------------------------------------- Items tabs
 
 function TaskRow({ item, groupId }: { item: Item; groupId: string }) {
+  const t = useT();
   const qc = useQueryClient();
   const mut = useMutation({
     mutationFn: () => patchActionItem(item.id, { done: true }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin', 'group', groupId, 'items'] });
-      toast.success('Đã đánh dấu xong');
+      toast.success(t('grp.item.markedDone'));
     },
-    onError: () => toast.error('Thao tác thất bại'),
+    onError: () => toast.error(t('common.actionFailed')),
   });
   return (
     <div className="flex items-start gap-2.5 py-2.5 px-3.5 bg-card rounded-lg border">
@@ -227,13 +230,13 @@ function TaskRow({ item, groupId }: { item: Item; groupId: string }) {
         className="h-4 w-4 rounded border-[1.5px] border-[hsl(var(--border-strong))] mt-0.5 shrink-0 hover:bg-primary/20 transition-colors"
         onClick={() => mut.mutate()}
         disabled={mut.isPending}
-        aria-label="Đánh dấu xong"
+        aria-label={t('grp.item.markDone')}
       />
       <div className="flex-1 min-w-0">
         <p className="text-[13.5px]">{item.text}</p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          {item.assignee ?? 'Chưa giao'}
-          {item.due_at && ` · hạn ${relativeTime(item.due_at)}`}
+          {item.assignee ?? t('grp.item.unassigned')}
+          {item.due_at && ` · ${t('grp.item.due', { time: relativeTime(item.due_at) })}`}
         </p>
       </div>
     </div>
@@ -243,6 +246,7 @@ function TaskRow({ item, groupId }: { item: Item; groupId: string }) {
 // ---------------------------------------------------------------- Panel
 
 export function GroupPanel({ id, onClose }: { id: string; onClose: () => void }) {
+  const t = useT();
   const navigate = useNavigate();
   const group = useQuery(groupQuery(id));
   const items = useQuery(itemsQuery(id));
@@ -335,15 +339,15 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
             <button
               className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
               onClick={() => navigate(`/app/admin/groups/${id}`)}
-              aria-label="Mở toàn màn hình"
-              title="Mở toàn màn hình"
+              aria-label={t('grp.panel.fullscreen')}
+              title={t('grp.panel.fullscreen')}
             >
               <Maximize2 className="h-4 w-4" />
             </button>
             <button
               className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
               onClick={onClose}
-              aria-label="Đóng panel"
+              aria-label={t('grp.panel.close')}
             >
               <X className="h-4 w-4" />
             </button>
@@ -352,19 +356,19 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
 
         {/* Tabs */}
         <div className="flex gap-1 px-5 pt-3 border-b shrink-0 overflow-x-auto">
-          {TABS.map((t) => (
+          {TABS.map((tabItem) => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
+              key={tabItem.key}
+              onClick={() => setTab(tabItem.key)}
               className={`px-3 py-2 text-[13px] whitespace-nowrap border-b-2 -mb-px transition-colors ${
-                tab === t.key
+                tab === tabItem.key
                   ? 'border-primary text-foreground font-medium'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              {t.label}
-              {t.key === 'tasks' && tasks.length > 0 && ` (${tasks.length})`}
-              {t.key === 'decisions' && decisions.length > 0 && ` (${decisions.length})`}
+              {t(tabItem.label)}
+              {tabItem.key === 'tasks' && tasks.length > 0 && ` (${tasks.length})`}
+              {tabItem.key === 'decisions' && decisions.length > 0 && ` (${decisions.length})`}
             </button>
           ))}
         </div>
@@ -379,10 +383,10 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
               {stats.data && (
                 <div className="grid grid-cols-4 divide-x rounded-lg border text-center">
                   {[
-                    { label: 'Tin nhắn', value: stats.data.messages },
-                    { label: 'Tác vụ', value: stats.data.tasks },
-                    { label: 'Nhắc lịch', value: stats.data.reminders },
-                    { label: 'Quyết định', value: stats.data.decisions },
+                    { label: t('grp.stats.messages'), value: stats.data.messages },
+                    { label: t('grp.stats.tasks'), value: stats.data.tasks },
+                    { label: t('grp.stats.reminders'), value: stats.data.reminders },
+                    { label: t('grp.stats.decisions'), value: stats.data.decisions },
                   ].map((s) => (
                     <div key={s.label} className="py-2">
                       <p className="text-sm font-semibold tabular-nums">{s.value}</p>
@@ -398,7 +402,7 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
           {tab === 'tasks' &&
             (tasks.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-10">
-                Hôm nay chưa có tác vụ nào được trích xuất.
+                {t('grp.empty.tasks')}
               </p>
             ) : (
               <div className="space-y-2">
@@ -411,7 +415,7 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
           {tab === 'decisions' &&
             (decisions.length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-10">
-                Chưa có quyết định nào được ghi nhận hôm nay.
+                {t('grp.empty.decisions')}
               </p>
             ) : (
               <div className="space-y-2">
@@ -429,7 +433,7 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
           {tab === 'members' &&
             ((members.data ?? []).length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-10">
-                Chưa ghi nhận thành viên nào.
+                {t('grp.empty.members')}
               </p>
             ) : (
               <div className="divide-y rounded-lg border">
@@ -455,7 +459,7 @@ export function GroupPanel({ id, onClose }: { id: string; onClose: () => void })
           {tab === 'files' &&
             ((files.data ?? []).length === 0 ? (
               <p className="text-sm text-muted-foreground text-center py-10">
-                Chưa có tệp hoặc link nào được chia sẻ trong nhóm.
+                {t('grp.empty.files')}
               </p>
             ) : (
               <div className="divide-y rounded-lg border">
