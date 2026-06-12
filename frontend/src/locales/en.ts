@@ -134,6 +134,23 @@ export const en: Record<string, string> = {
   'rem.created': 'Reminder created',
   'rem.createError': 'Failed to create reminder',
   'common.creating': 'Creating...',
+  'common.loadingShort': 'Loading...',
+
+  // action items
+  'ai.title': 'Action items',
+  'ai.subtitle': 'All action items across every group',
+  'ai.empty.title': 'No action items',
+  'ai.empty.desc': 'No action items match this filter.',
+  'ai.col.content': 'Content',
+  'ai.col.group': 'Group',
+  'ai.col.assignee': 'Assignee',
+  'ai.col.due': 'Due',
+  'ai.col.status': 'Status',
+  'ai.status.done': 'Done',
+  'ai.status.doing': 'In progress',
+  'ai.filter.allStatus': 'All',
+  'ai.filter.allGroups': 'All groups',
+  'ai.filter.allProjects': 'All projects',
 
   // command palette
   'cmd.placeholder': 'Search pages, actions…',

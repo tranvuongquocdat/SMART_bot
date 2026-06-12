@@ -6,14 +6,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/lib/i18n';
 import { groupsListQuery } from '../groups/api';
 import { projectsQuery } from '../projects/api';
 import type { ActionItemFilters } from './api';
 
 const STATUS_OPTIONS = [
-  { value: null, label: 'Tất cả' },
-  { value: false, label: 'Đang làm' },
-  { value: true, label: 'Đã xong' },
+  { value: null, key: 'ai.filter.allStatus' },
+  { value: false, key: 'ai.status.doing' },
+  { value: true, key: 'ai.status.done' },
 ] as const;
 
 type StatusOption = (typeof STATUS_OPTIONS)[number]['value'];
@@ -25,6 +26,7 @@ export function ActionItemFiltersBar({
   filters: ActionItemFilters;
   onChange: (f: ActionItemFilters) => void;
 }) {
+  const t = useT();
   const { data: groups } = useSuspenseQuery(groupsListQuery());
   const { data: projects } = useSuspenseQuery(projectsQuery());
 
@@ -38,10 +40,10 @@ export function ActionItemFiltersBar({
         }
       >
         <SelectTrigger className="w-auto min-w-[150px]">
-          <SelectValue placeholder="Tất cả nhóm" />
+          <SelectValue placeholder={t('ai.filter.allGroups')} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">Tất cả nhóm</SelectItem>
+          <SelectItem value="all">{t('ai.filter.allGroups')}</SelectItem>
           {groups.map(g => (
             <SelectItem key={g.id} value={String(g.id)}>
               {g.name}
@@ -58,10 +60,10 @@ export function ActionItemFiltersBar({
         }
       >
         <SelectTrigger className="w-auto min-w-[150px]">
-          <SelectValue placeholder="Tất cả dự án" />
+          <SelectValue placeholder={t('ai.filter.allProjects')} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">Tất cả dự án</SelectItem>
+          <SelectItem value="all">{t('ai.filter.allProjects')}</SelectItem>
           {projects.map(p => (
             <SelectItem key={p.id} value={String(p.id)}>
               {p.name}
@@ -84,7 +86,7 @@ export function ActionItemFiltersBar({
                 : 'bg-transparent hover:bg-muted',
             ].join(' ')}
           >
-            {opt.label}
+            {t(opt.key)}
           </button>
         ))}
       </div>

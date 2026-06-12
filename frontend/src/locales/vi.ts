@@ -134,6 +134,23 @@ export const vi: Record<string, string> = {
   'rem.created': 'Đã tạo nhắc lịch',
   'rem.createError': 'Tạo nhắc lịch thất bại',
   'common.creating': 'Đang tạo...',
+  'common.loadingShort': 'Đang tải...',
+
+  // việc cần làm
+  'ai.title': 'Việc cần làm',
+  'ai.subtitle': 'Tổng hợp việc cần làm từ tất cả các nhóm',
+  'ai.empty.title': 'Không có việc nào',
+  'ai.empty.desc': 'Không có việc cần làm khớp với bộ lọc này.',
+  'ai.col.content': 'Nội dung',
+  'ai.col.group': 'Nhóm',
+  'ai.col.assignee': 'Giao cho',
+  'ai.col.due': 'Hạn',
+  'ai.col.status': 'Trạng thái',
+  'ai.status.done': 'Đã xong',
+  'ai.status.doing': 'Đang làm',
+  'ai.filter.allStatus': 'Tất cả',
+  'ai.filter.allGroups': 'Tất cả nhóm',
+  'ai.filter.allProjects': 'Tất cả dự án',
 
   // command palette
   'cmd.placeholder': 'Tìm trang, hành động…',
