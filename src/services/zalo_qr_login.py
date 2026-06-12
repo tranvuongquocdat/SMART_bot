@@ -40,6 +40,7 @@ class LoginSession:
     error: str | None = None
     bot_account_id: int | None = None
     proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
+    stderr_tail: list[str] = field(default_factory=list, repr=False)
 
 
 class ZaloQrLoginManager:
@@ -81,16 +82,31 @@ class ZaloQrLoginManager:
         self._sessions[sess.login_id] = sess
         self._by_owner[sess.owner_key] = sess.login_id
 
-        proc = await asyncio.create_subprocess_exec(
-            "node",
-            str(QR_LOGIN_SCRIPT),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(BRIDGE_DIR),
-        )
+        # Preflight: thiếu node_modules là lỗi hay gặp nhất — báo thẳng thay vì
+        # "kết thúc bất thường".
+        if not (BRIDGE_DIR / "node_modules" / "zca-js").exists():
+            sess.status = "error"
+            sess.error = (
+                "Bridge Zalo chưa cài dependencies — chạy `npm install` trong "
+                "src/channels/zalo/bridge rồi thử lại"
+            )
+            return sess
+
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "node",
+                str(QR_LOGIN_SCRIPT),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(BRIDGE_DIR),
+            )
+        except FileNotFoundError:
+            sess.status = "error"
+            sess.error = "Không tìm thấy `node` trên server — cần cài Node.js"
+            return sess
         sess.proc = proc
         asyncio.create_task(self._read_events(sess, proc))
-        asyncio.create_task(self._drain_stderr(proc))
+        asyncio.create_task(self._drain_stderr(sess, proc))
         return sess
 
     def get(self, boss_id: int, login_id: str) -> LoginSession | None:
@@ -114,13 +130,16 @@ class ZaloQrLoginManager:
             except ProcessLookupError:
                 pass
 
-    async def _drain_stderr(self, proc) -> None:
+    async def _drain_stderr(self, sess: LoginSession, proc) -> None:
         assert proc.stderr is not None
         while True:
             line = await proc.stderr.readline()
             if not line:
                 break
-            log.info("zalo.qr_login: %s", line.decode(errors="replace").rstrip())
+            text = line.decode(errors="replace").rstrip()
+            log.info("zalo.qr_login: %s", text)
+            sess.stderr_tail.append(text)
+            del sess.stderr_tail[:-5]  # giữ 5 dòng cuối cho thông báo lỗi
 
     async def _read_events(self, sess: LoginSession, proc) -> None:
         assert proc.stdout is not None
@@ -155,7 +174,12 @@ class ZaloQrLoginManager:
             await proc.wait()
             if sess.status not in ("success", "error"):
                 sess.status = "error"
-                sess.error = sess.error or "Phiên đăng nhập kết thúc bất thường"
+                detail = sess.stderr_tail[-1] if sess.stderr_tail else None
+                sess.error = sess.error or (
+                    f"Phiên đăng nhập kết thúc bất thường: {detail}"
+                    if detail
+                    else "Phiên đăng nhập kết thúc bất thường"
+                )
 
     async def _provision(self, sess: LoginSession, data: dict) -> None:
         if sess.target_account_id is not None:
