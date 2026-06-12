@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Pencil } from 'lucide-react';
 import { toast } from 'sonner';
@@ -98,6 +98,12 @@ function PlanModal({
 }) {
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(plan ? fromPlan(plan) : emptyForm());
+
+  // Modal mount sẵn từ lúc page load (plan=null) — phải nạp lại form theo gói
+  // đang sửa mỗi lần mở, không thì các field trống dù ngoài list có giá trị.
+  useEffect(() => {
+    if (open) setForm(plan ? fromPlan(plan) : emptyForm());
+  }, [open, plan]);
 
   const isEdit = !!plan;
 
