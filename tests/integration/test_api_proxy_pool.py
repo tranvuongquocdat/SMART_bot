@@ -137,3 +137,66 @@ def test_overview_shows_assigned_proxy(client, logged_in_superadmin, clean_db):
     ov = client.get(f"/api/v1/superadmin/bosses/{b}/overview").json()
     assert ov["proxy"]["id"] == pid
     assert ov["proxy"]["label"] == "ov"
+
+
+# ---------------------------------------------------------------------------
+# Ràng buộc: mỗi boss chỉ 1 bot account boss_owned / nền tảng (DB index)
+# ---------------------------------------------------------------------------
+
+
+def test_one_boss_owned_account_per_provider(clean_db):
+    import asyncpg as _pg
+
+    b = _seed_boss(clean_db, "oneacc@test.local")
+
+    async def _():
+        async with clean_db.acquire() as c:
+            await c.execute(
+                """
+                INSERT INTO bot_accounts
+                  (provider, provider_user_id, display_name, account_kind,
+                   ownership, owner_boss_id, status)
+                VALUES ('zalo','z-a','A','personal','boss_owned',$1,'active')
+                """,
+                b,
+            )
+            # Acc Zalo thứ 2 cho cùng boss → vi phạm partial unique index
+            try:
+                await c.execute(
+                    """
+                    INSERT INTO bot_accounts
+                      (provider, provider_user_id, display_name, account_kind,
+                       ownership, owner_boss_id, status)
+                    VALUES ('zalo','z-b','B','personal','boss_owned',$1,'active')
+                    """,
+                    b,
+                )
+                return "inserted"
+            except _pg.UniqueViolationError:
+                return "blocked"
+
+    assert _run(_()) == "blocked"
+
+
+def test_different_provider_same_boss_ok(clean_db):
+    b = _seed_boss(clean_db, "multiplat@test.local")
+
+    async def _():
+        async with clean_db.acquire() as c:
+            await c.execute(
+                """
+                INSERT INTO bot_accounts
+                  (provider, provider_user_id, display_name, account_kind,
+                   ownership, owner_boss_id, status)
+                VALUES ('zalo','mz-1','Z','personal','boss_owned',$1,'active'),
+                       ('messenger','mm-1','M','personal','boss_owned',$1,'active'),
+                       ('telegram','mt-1','T','personal','boss_owned',$1,'active')
+                """,
+                b,
+            )
+            return await c.fetchval(
+                "SELECT COUNT(*) FROM bot_accounts WHERE owner_boss_id=$1", b
+            )
+
+    # 3 nền tảng khác nhau cho cùng boss → OK
+    assert _run(_()) == 3

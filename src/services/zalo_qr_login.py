@@ -314,22 +314,51 @@ class ZaloQrLoginManager:
         blob = encrypt_credentials(creds)
 
         async with self.pool.acquire() as c:
-            # Acc phụ này đã từng kết nối (re-login) → cập nhật session cũ.
-            bot_account_id = await c.fetchval(
+            # Mỗi boss chỉ 1 acc Zalo. Acc Zalo này đã thuộc row khác (boss khác
+            # / pool) → chặn trùng (unique provider+uid).
+            conflict = await c.fetchval(
                 """
-                UPDATE bot_accounts
-                   SET credentials_blob_enc=$3, status='active',
-                       display_name=$4, updated_at=NOW()
-                 WHERE provider='zalo' AND ownership='boss_owned'
-                   AND owner_boss_id=$1 AND provider_user_id=$2
-                RETURNING id
+                SELECT id FROM bot_accounts
+                WHERE provider='zalo' AND provider_user_id=$1
+                  AND NOT (ownership='boss_owned' AND owner_boss_id=$2)
+                """,
+                own_id,
+                sess.boss_id,
+            )
+            if conflict:
+                raise RuntimeError(
+                    f"Tài khoản Zalo này đã được dùng ở nơi khác (#{conflict}) — không thể kết nối trùng"
+                )
+
+            # Boss đã có acc Zalo khác uid → chặn. Phải gỡ acc cũ trước (1 acc/nền tảng).
+            existing = await c.fetchrow(
+                """
+                SELECT id, provider_user_id FROM bot_accounts
+                WHERE provider='zalo' AND ownership='boss_owned' AND owner_boss_id=$1
                 """,
                 sess.boss_id,
-                own_id,
-                blob,
-                display_name,
             )
-            if bot_account_id is None:
+            if existing and existing["provider_user_id"] != own_id:
+                raise RuntimeError(
+                    "Bạn đã kết nối một tài khoản Zalo khác. Gỡ tài khoản cũ trong "
+                    "trang Kênh kết nối trước khi kết nối tài khoản mới."
+                )
+
+            if existing is not None:
+                # Re-login cùng acc → cập nhật session.
+                bot_account_id = existing["id"]
+                await c.execute(
+                    """
+                    UPDATE bot_accounts
+                       SET credentials_blob_enc=$2, status='active',
+                           status_reason=NULL, display_name=$3, updated_at=NOW()
+                     WHERE id=$1
+                    """,
+                    bot_account_id,
+                    blob,
+                    display_name,
+                )
+            else:
                 bot_account_id = await c.fetchval(
                     """
                     INSERT INTO bot_accounts

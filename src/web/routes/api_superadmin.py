@@ -459,20 +459,25 @@ async def create_bot_account(
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> dict:
-    async with db.acquire() as c:
-        new_id = await c.fetchval(
-            """
-            INSERT INTO bot_accounts
-              (provider, provider_user_id, display_name, account_kind, ownership, status)
-            VALUES ($1, $2, $3, $4, $5, 'active')
-            RETURNING id
-            """,
-            body.provider,
-            body.handle,
-            body.label,
-            body.account_kind,
-            body.ownership,
-        )
+    try:
+        async with db.acquire() as c:
+            new_id = await c.fetchval(
+                """
+                INSERT INTO bot_accounts
+                  (provider, provider_user_id, display_name, account_kind, ownership, status)
+                VALUES ($1, $2, $3, $4, $5, 'active')
+                RETURNING id
+                """,
+                body.provider,
+                body.handle,
+                body.label,
+                body.account_kind,
+                body.ownership,
+            )
+    except asyncpg.UniqueViolationError as e:
+        if "uq_boss_owned_one_per_provider" in str(e):
+            raise HTTPException(409, "Boss này đã có một bot account cho nền tảng đó")
+        raise HTTPException(409, "Tài khoản (provider + handle) đã tồn tại")
     return {"id": new_id}
 
 
