@@ -3,9 +3,11 @@ import { Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { toolsQuery, toggleTool, enableAllTools, disableAllTools } from './api';
 
 export default function ToolsPage() {
+  const t = useT();
   const { data: tools } = useSuspenseQuery(toolsQuery());
   const qc = useQueryClient();
 
@@ -13,9 +15,9 @@ export default function ToolsPage() {
     mutationFn: (name: string) => toggleTool(name),
     onSuccess: (data) => {
       qc.setQueryData(['admin', 'tools'], (old: typeof tools) =>
-        old?.map((t) => (t.name === data.name ? { ...t, active: data.active } : t)),
+        old?.map((tl) => (tl.name === data.name ? { ...tl, active: data.active } : tl)),
       );
-      toast.success(data.active ? 'Đã bật tool' : 'Đã tắt tool');
+      toast.success(data.active ? t('tools.enabled') : t('tools.disabled'));
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -26,10 +28,10 @@ export default function ToolsPage() {
       qc.invalidateQueries({ queryKey: ['admin', 'tools'] });
       if (data.limit !== null && data.active < data.total) {
         toast.info(
-          `Đã bật ${data.active}/${data.total} tool — gói hiện tại giới hạn ${data.limit} tool.`
+          t('tools.enabledCapped', { active: data.active, total: data.total, limit: data.limit })
         );
       } else {
-        toast.success(`Đã bật toàn bộ ${data.active} tool.`);
+        toast.success(t('tools.enabledAll', { active: data.active }));
       }
     },
     onError: (e: Error) => toast.error(e.message),
@@ -39,7 +41,7 @@ export default function ToolsPage() {
     mutationFn: disableAllTools,
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['admin', 'tools'] });
-      toast.success(`Đã tắt ${data.disabled} tool.`);
+      toast.success(t('tools.disabledN', { n: data.disabled }));
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -50,8 +52,8 @@ export default function ToolsPage() {
   return (
     <PageWrap className="max-w-[720px]">
       <PageHeader
-        title="Tools"
-        subtitle={`${active.length} / ${tools.length} tool đang bật.`}
+        title={t('tools.title')}
+        subtitle={t('tools.subtitle', { active: active.length, total: tools.length })}
         actions={
           <div className="flex gap-2">
             {active.length > 0 && (
@@ -61,7 +63,7 @@ export default function ToolsPage() {
                 disabled={disableAllMut.isPending}
                 onClick={() => disableAllMut.mutate()}
               >
-                {disableAllMut.isPending ? 'Đang tắt…' : 'Tắt tất cả'}
+                {disableAllMut.isPending ? t('tools.disabling') : t('tools.disableAll')}
               </Button>
             )}
             {inactive.length > 0 && (
@@ -71,7 +73,7 @@ export default function ToolsPage() {
                 disabled={enableAllMut.isPending}
                 onClick={() => enableAllMut.mutate()}
               >
-                {enableAllMut.isPending ? 'Đang bật…' : 'Bật tất cả'}
+                {enableAllMut.isPending ? t('tools.enabling') : t('tools.enableAll')}
               </Button>
             )}
           </div>
@@ -79,8 +81,8 @@ export default function ToolsPage() {
       />
 
       {[
-        { label: 'Đang bật', items: active },
-        { label: 'Đã tắt', items: inactive },
+        { label: t('tools.section.active'), items: active },
+        { label: t('tools.section.inactive'), items: inactive },
       ].map(({ label, items }) =>
         items.length === 0 ? null : (
           <PageSection key={label}>

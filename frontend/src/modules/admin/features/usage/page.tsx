@@ -4,15 +4,11 @@ import { BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { usageQuery } from './api';
 
-const RANGES = [
-  { value: '7d', label: '7 ngày' },
-  { value: '30d', label: '30 ngày' },
-  { value: '90d', label: '90 ngày' },
-] as const;
-
-type RangeValue = (typeof RANGES)[number]['value'];
+const RANGE_VALUES = ['7d', '30d', '90d'] as const;
+type RangeValue = (typeof RANGE_VALUES)[number];
 
 function fmt(n: number, decimals = 4) {
   return n.toLocaleString('vi-VN', {
@@ -31,14 +27,15 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 }
 
 function UsageContent({ range }: { range: RangeValue }) {
+  const t = useT();
   const { data } = useSuspenseQuery(usageQuery(range));
 
   if (data.totals.messages === 0) {
     return (
       <EmptyState
         icon={BarChart3}
-        title="Chưa có dữ liệu sử dụng"
-        description={`Không có hoạt động nào trong ${data.range_days} ngày qua.`}
+        title={t('usage.empty.title')}
+        description={t('usage.empty.desc', { n: data.range_days })}
       />
     );
   }
@@ -47,12 +44,12 @@ function UsageContent({ range }: { range: RangeValue }) {
     <div className="flex flex-col gap-6">
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <SummaryCard label="Tin nhắn" value={data.totals.messages.toLocaleString('vi-VN')} />
-        <SummaryCard label="Tokens" value={data.totals.tokens.toLocaleString('vi-VN')} />
-        <SummaryCard label="Chi phí (USD)" value={`$${fmt(data.totals.cost_usd)}`} />
+        <SummaryCard label={t('usage.card.messages')} value={data.totals.messages.toLocaleString()} />
+        <SummaryCard label={t('usage.card.tokens')} value={data.totals.tokens.toLocaleString()} />
+        <SummaryCard label={t('usage.card.cost')} value={`$${fmt(data.totals.cost_usd)}`} />
         <SummaryCard
-          label="Tokens TB / ngày"
-          value={Math.round(data.totals.tokens / data.range_days).toLocaleString('vi-VN')}
+          label={t('usage.card.avgTokens')}
+          value={Math.round(data.totals.tokens / data.range_days).toLocaleString()}
         />
       </div>
 
@@ -61,12 +58,12 @@ function UsageContent({ range }: { range: RangeValue }) {
         <table className="w-full text-sm">
           <thead>
             <tr className="text-left text-muted-foreground border-b">
-              <th className="p-3">Ngày</th>
-              <th className="p-3 text-right">Tin nhắn</th>
-              <th className="p-3 text-right">Tokens (in)</th>
-              <th className="p-3 text-right">Tokens (out)</th>
-              <th className="p-3 text-right">Tổng tokens</th>
-              <th className="p-3 text-right">Chi phí (USD)</th>
+              <th className="p-3">{t('usage.col.date')}</th>
+              <th className="p-3 text-right">{t('usage.col.messages')}</th>
+              <th className="p-3 text-right">{t('usage.col.tokensIn')}</th>
+              <th className="p-3 text-right">{t('usage.col.tokensOut')}</th>
+              <th className="p-3 text-right">{t('usage.col.tokensTotal')}</th>
+              <th className="p-3 text-right">{t('usage.col.cost')}</th>
             </tr>
           </thead>
           <tbody>
@@ -94,24 +91,25 @@ function UsageContent({ range }: { range: RangeValue }) {
 }
 
 export default function UsagePage() {
+  const t = useT();
   const [range, setRange] = useState<RangeValue>('30d');
 
   return (
     <PageWrap>
       <PageHeader
-        title="Sử dụng"
-        subtitle="Thống kê tokens và chi phí AI theo ngày."
+        title={t('usage.title')}
+        subtitle={t('usage.subtitle')}
         actions={
           <div className="flex gap-1 rounded-md border border-border p-1 bg-[hsl(var(--muted))]">
-            {RANGES.map(r => (
+            {RANGE_VALUES.map(rv => (
               <Button
-                key={r.value}
-                variant={range === r.value ? 'default' : 'ghost'}
+                key={rv}
+                variant={range === rv ? 'default' : 'ghost'}
                 size="sm"
                 className="h-7 text-xs px-3"
-                onClick={() => setRange(r.value)}
+                onClick={() => setRange(rv)}
               >
-                {r.label}
+                {t(`usage.range.${rv}`)}
               </Button>
             ))}
           </div>
