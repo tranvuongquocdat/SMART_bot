@@ -99,6 +99,18 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
             boss_id,
         )
 
+    def _caps(raw) -> list[str]:
+        # asyncpg trả JSONB dạng chuỗi — list('["vision"]') sẽ tách thành ký tự
+        # khiến dropdown Vision không bao giờ match model nào.
+        if not raw:
+            return []
+        if isinstance(raw, str):
+            try:
+                return list(json.loads(raw))
+            except Exception:
+                return []
+        return list(raw)
+
     return {
         "slots": [
             {"slot": slot, "model_id": boss[col]} for slot, col in SLOT_COLUMNS.items()
@@ -110,7 +122,7 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
                 "name": m["name"],
                 "provider": m["provider"],
                 "tier": m["tier"],
-                "capabilities": list(m["capabilities"]) if m["capabilities"] else [],
+                "capabilities": _caps(m["capabilities"]),
                 "cost_per_1m_input_usd": float(m["cost_per_1m_input_usd"] or 0),
                 "cost_per_1m_output_usd": float(m["cost_per_1m_output_usd"] or 0),
                 "is_platform_default": bool(m["is_platform_default"]),

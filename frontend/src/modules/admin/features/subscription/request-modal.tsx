@@ -53,6 +53,8 @@ export function RequestModal({
 }) {
   const qc = useQueryClient();
   const [amount, setAmount] = useState('');
+  // File input là ref — cần state riêng để nút Gửi re-render khi chọn tệp
+  const [hasFile, setHasFile] = useState(false);
 
   const expectedPrice = plan?.prices?.[period] ?? null;
   const [customContent, setCustomContent] = useState('');
@@ -86,6 +88,7 @@ export function RequestModal({
       setAmount('');
       setCustomContent('');
       setNote('');
+      setHasFile(false);
       if (fileRef.current) fileRef.current.value = '';
       onClose();
     },
@@ -93,10 +96,7 @@ export function RequestModal({
   });
 
   const canSubmit =
-    (amount || expectedPrice != null) &&
-    payInfo?.transfer_content &&
-    fileRef.current?.files?.length &&
-    !mut.isPending;
+    (amount || expectedPrice != null) && payInfo?.transfer_content && hasFile && !mut.isPending;
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -143,7 +143,12 @@ export function RequestModal({
           </div>
           <div className="space-y-1.5">
             <Label>Minh chứng chuyển khoản</Label>
-            <Input ref={fileRef} type="file" accept=".jpg,.jpeg,.png,.pdf" />
+            <Input
+              ref={fileRef}
+              type="file"
+              accept=".jpg,.jpeg,.png,.pdf"
+              onChange={(e) => setHasFile((e.target.files?.length ?? 0) > 0)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label>

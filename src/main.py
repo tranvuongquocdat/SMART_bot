@@ -47,7 +47,10 @@ async def lifespan(app: FastAPI):
     configure_logging()
     app.state.db_pool = await create_pool()
     app.state.qdrant = create_qdrant()
-    app.state.bus = InMemoryEventBus()
+    # Bus timeout phải LỚN HƠN timeout_s dài nhất của các op (note_updater=120s)
+    # — mặc định 10s từng giết agent chạy dài giữa chừng (tool chain, fetch_url).
+    # Giới hạn thật per-op do dispatcher enforce theo cfg.timeout_s.
+    app.state.bus = InMemoryEventBus(handler_timeout_s=180.0)
     app.state.rate_limiter = InMemoryRateLimiter()
     app.state.model_registry = ModelRegistry(app.state.db_pool, app.state.bus)
     _admin_ctx = BossContext(boss_id=0, user_role="superadmin")

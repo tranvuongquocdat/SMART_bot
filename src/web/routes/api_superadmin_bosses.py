@@ -409,7 +409,7 @@ async def boss_conversations(
               UNION ALL
               SELECT provider, chat_id, 'unknown' AS chat_type, sent_at AS ts,
                      NULL AS sender_name
-              FROM outbound_messages WHERE boss_id=$1
+              FROM outbound_messages WHERE boss_id=$1 AND status <> 'failed'
             ),
             agg AS (
               SELECT provider, chat_id,
