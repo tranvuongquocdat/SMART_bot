@@ -1,5 +1,43 @@
 // Từ điển tiếng Việt — khóa phẳng "namespace.key". vi là ngôn ngữ gốc/fallback.
 export const vi: Record<string, string> = {
+  // điều hướng — nhóm
+  'nav.section.workspace': 'Workspace',
+  'nav.section.account': 'Tài khoản',
+  'nav.section.settings': 'Cài đặt',
+  'nav.section.aiAgent': 'AI & Agent',
+  'nav.section.operations': 'Vận hành',
+  'nav.section.business': 'Kinh doanh',
+  'nav.section.monitoring': 'Giám sát',
+  // điều hướng — admin
+  'nav.admin.dashboard': 'Tổng quan',
+  'nav.admin.chat': 'Trợ lý',
+  'nav.admin.models': 'Models AI',
+  'nav.admin.groups': 'Nhóm',
+  'nav.admin.reminders': 'Nhắc nhở',
+  'nav.admin.projects': 'Dự án',
+  'nav.admin.actionItems': 'Việc cần làm',
+  'nav.admin.channels': 'Kênh kết nối',
+  'nav.admin.usage': 'Sử dụng',
+  'nav.admin.subscription': 'Gói cước',
+  'nav.admin.tools': 'Tools',
+  'nav.admin.integrations': 'Tích hợp',
+  'nav.admin.settings': 'Cài đặt',
+  // điều hướng — superadmin
+  'nav.sa.models': 'Models AI',
+  'nav.sa.prompts': 'Prompts',
+  'nav.sa.agentTriggers': 'Agent triggers',
+  'nav.sa.retrieval': 'Retrieval pipelines',
+  'nav.sa.noteTemplates': 'Note templates',
+  'nav.sa.botAccounts': 'Tài khoản bot',
+  'nav.sa.bosses': 'Boss',
+  'nav.sa.proxies': 'Proxy',
+  'nav.sa.mcpCatalog': 'MCP Catalog',
+  'nav.sa.plans': 'Gói dịch vụ',
+  'nav.sa.subscriptions': 'Yêu cầu đăng ký',
+  'nav.sa.announcements': 'Thông báo',
+  'nav.sa.usage': 'Sử dụng',
+  'nav.sa.audit': 'Audit log',
+
   // chung
   'common.save': 'Lưu',
   'common.saving': 'Đang lưu…',
@@ -7,6 +45,14 @@ export const vi: Record<string, string> = {
   'common.saved': 'Đã lưu',
   'common.saveError': 'Lưu thất bại.',
   'common.language': 'Ngôn ngữ',
+  'common.search': 'Tìm kiếm',
+
+  // command palette
+  'cmd.placeholder': 'Tìm trang, hành động…',
+  'cmd.empty': 'Không tìm thấy.',
+  'cmd.actions': 'Hành động',
+  'cmd.toggleTheme': 'Đổi chế độ sáng/tối',
+  'cmd.logout': 'Đăng xuất',
 
   // trang Cài đặt
   'settings.title': 'Cài đặt',

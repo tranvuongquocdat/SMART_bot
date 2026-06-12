@@ -1,39 +1,40 @@
 import { Cpu, Bot, UserCog, FileText, BarChart3, Code2, BookTemplate, Zap, GitBranch, CreditCard, Package, Plug2, Network, Megaphone } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
+// label = khóa i18n (app-shell + command-palette render qua t()).
 export const superadminNav: NavSection[] = [
   {
-    label: 'AI & Agent',
+    label: 'nav.section.aiAgent',
     items: [
-      { label: 'Models AI', href: '/app/superadmin/models', icon: Cpu },
-      { label: 'Prompts', href: '/app/superadmin/prompts', icon: Code2 },
-      { label: 'Agent triggers', href: '/app/superadmin/agent-triggers', icon: Zap },
-      { label: 'Retrieval pipelines', href: '/app/superadmin/retrieval-pipelines', icon: GitBranch },
-      { label: 'Note templates', href: '/app/superadmin/note-templates', icon: BookTemplate },
+      { label: 'nav.sa.models', href: '/app/superadmin/models', icon: Cpu },
+      { label: 'nav.sa.prompts', href: '/app/superadmin/prompts', icon: Code2 },
+      { label: 'nav.sa.agentTriggers', href: '/app/superadmin/agent-triggers', icon: Zap },
+      { label: 'nav.sa.retrieval', href: '/app/superadmin/retrieval-pipelines', icon: GitBranch },
+      { label: 'nav.sa.noteTemplates', href: '/app/superadmin/note-templates', icon: BookTemplate },
     ],
   },
   {
-    label: 'Vận hành',
+    label: 'nav.section.operations',
     items: [
-      { label: 'Tài khoản bot', href: '/app/superadmin/bot-accounts', icon: Bot },
-      { label: 'Boss', href: '/app/superadmin/bosses', icon: UserCog },
-      { label: 'Proxy', href: '/app/superadmin/proxies', icon: Network },
-      { label: 'MCP Catalog', href: '/app/superadmin/mcp-catalog', icon: Plug2 },
+      { label: 'nav.sa.botAccounts', href: '/app/superadmin/bot-accounts', icon: Bot },
+      { label: 'nav.sa.bosses', href: '/app/superadmin/bosses', icon: UserCog },
+      { label: 'nav.sa.proxies', href: '/app/superadmin/proxies', icon: Network },
+      { label: 'nav.sa.mcpCatalog', href: '/app/superadmin/mcp-catalog', icon: Plug2 },
     ],
   },
   {
-    label: 'Kinh doanh',
+    label: 'nav.section.business',
     items: [
-      { label: 'Gói dịch vụ', href: '/app/superadmin/plans', icon: Package },
-      { label: 'Yêu cầu đăng ký', href: '/app/superadmin/subscriptions', icon: CreditCard },
+      { label: 'nav.sa.plans', href: '/app/superadmin/plans', icon: Package },
+      { label: 'nav.sa.subscriptions', href: '/app/superadmin/subscriptions', icon: CreditCard },
     ],
   },
   {
-    label: 'Giám sát',
+    label: 'nav.section.monitoring',
     items: [
-      { label: 'Thông báo', href: '/app/superadmin/announcements', icon: Megaphone },
-      { label: 'Sử dụng', href: '/app/superadmin/usage', icon: BarChart3 },
-      { label: 'Audit log', href: '/app/superadmin/audit', icon: FileText },
+      { label: 'nav.sa.announcements', href: '/app/superadmin/announcements', icon: Megaphone },
+      { label: 'nav.sa.usage', href: '/app/superadmin/usage', icon: BarChart3 },
+      { label: 'nav.sa.audit', href: '/app/superadmin/audit', icon: FileText },
     ],
   },
 ];
