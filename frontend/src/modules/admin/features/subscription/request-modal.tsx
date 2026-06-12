@@ -12,12 +12,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useT } from '@/lib/i18n';
 import { submitRequest, paymentInfoQuery } from './api';
 import type { BillingPeriod, Plan } from './api';
 
 const fmtVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + 'đ';
 
-function CopyRow({ label, value }: { label: string; value: string }) {
+function CopyRow({ label, value, t }: { label: string; value: string; t: (k: string, v?: Record<string, string | number>) => string }) {
   return (
     <div className="flex items-center justify-between gap-2 px-3 py-2">
       <div className="min-w-0">
@@ -30,11 +31,11 @@ function CopyRow({ label, value }: { label: string; value: string }) {
         className="h-7 px-2 text-xs shrink-0"
         onClick={() => {
           navigator.clipboard.writeText(value);
-          toast.success(`Đã sao chép ${label.toLowerCase()}`);
+          toast.success(t('sub.req.copied', { label: label.toLowerCase() }));
         }}
       >
         <Copy className="h-3.5 w-3.5 mr-1" />
-        Sao chép
+        {t('sub.req.copy')}
       </Button>
     </div>
   );
@@ -51,6 +52,7 @@ export function RequestModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [amount, setAmount] = useState('');
   // File input là ref — cần state riêng để nút Gửi re-render khi chọn tệp
@@ -83,7 +85,7 @@ export function RequestModal({
       return submitRequest(fd);
     },
     onSuccess: () => {
-      toast.success('Đã gửi yêu cầu đăng ký — đang chờ superadmin duyệt');
+      toast.success(t('sub.req.success'));
       qc.invalidateQueries({ queryKey: ['admin', 'subscription'] });
       setAmount('');
       setCustomContent('');
@@ -102,38 +104,34 @@ export function RequestModal({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>
-            Đăng ký gói {plan?.label} — {period} tháng
-          </DialogTitle>
+          <DialogTitle>{t('sub.req.title', { plan: plan?.label ?? '', n: period })}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           {expectedPrice != null && (
             <p className="text-sm -mt-1">
-              Số tiền cần chuyển:{' '}
+              {t('sub.req.amountNeeded')}{' '}
               <span className="font-semibold tabular-nums">{fmtVnd(expectedPrice)}</span>
             </p>
           )}
           {/* Thông tin chuyển khoản — gen sẵn, khách chỉ copy */}
           <div className="rounded-lg border divide-y bg-card">
             {payInfo?.bank_account_number && (
-              <CopyRow label="Số tài khoản" value={payInfo.bank_account_number} />
+              <CopyRow label={t('sub.req.bankNumber')} value={payInfo.bank_account_number} t={t} />
             )}
             {payInfo?.bank_account_name && (
               <div className="px-3 py-2">
-                <p className="text-[11px] text-muted-foreground">Chủ tài khoản</p>
+                <p className="text-[11px] text-muted-foreground">{t('sub.req.bankName')}</p>
                 <p className="text-sm font-medium">{payInfo.bank_account_name}</p>
               </div>
             )}
             {payInfo?.transfer_content && (
-              <CopyRow label="Nội dung chuyển khoản" value={payInfo.transfer_content} />
+              <CopyRow label={t('sub.req.transferContent')} value={payInfo.transfer_content} t={t} />
             )}
           </div>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Chuyển khoản đúng nội dung trên để được duyệt nhanh.
-          </p>
+          <p className="text-xs text-muted-foreground -mt-2">{t('sub.req.hint')}</p>
 
           <div className="space-y-1.5">
-            <Label>Số tiền chuyển khoản (VND)</Label>
+            <Label>{t('sub.req.amount')}</Label>
             <Input
               type="number"
               value={amount}
@@ -142,7 +140,7 @@ export function RequestModal({
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Minh chứng chuyển khoản</Label>
+            <Label>{t('sub.req.proof')}</Label>
             <Input
               ref={fileRef}
               type="file"
@@ -152,9 +150,9 @@ export function RequestModal({
           </div>
           <div className="space-y-1.5">
             <Label>
-              Nội dung đã chuyển{' '}
+              {t('sub.req.customContent')}{' '}
               <span className="text-muted-foreground text-xs">
-                (chỉ điền nếu lỡ chuyển khác nội dung trên)
+                {t('sub.req.customContentHint')}
               </span>
             </Label>
             <Input
@@ -165,8 +163,8 @@ export function RequestModal({
           </div>
           <div className="space-y-1.5">
             <Label>
-              Ghi chú{' '}
-              <span className="text-muted-foreground text-xs">(tuỳ chọn)</span>
+              {t('sub.req.note')}{' '}
+              <span className="text-muted-foreground text-xs">{t('sub.req.noteHint')}</span>
             </Label>
             <Textarea
               value={note}
@@ -177,10 +175,10 @@ export function RequestModal({
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
-            Huỷ
+            {t('common.cancel')}
           </Button>
           <Button onClick={() => mut.mutate()} disabled={!canSubmit}>
-            {mut.isPending ? 'Đang gửi...' : 'Gửi yêu cầu'}
+            {mut.isPending ? t('sub.req.submitting') : t('sub.req.submit')}
           </Button>
         </div>
       </DialogContent>

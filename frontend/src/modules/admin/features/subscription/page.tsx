@@ -15,6 +15,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useT } from '@/lib/i18n';
 import {
   subscriptionQuery,
   plansQuery,
@@ -36,11 +37,11 @@ function planDot(status: string): 'ok' | 'warn' | 'err' | 'idle' {
   return 'idle';
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Đang chờ duyệt',
-  approved: 'Đã duyệt',
-  rejected: 'Từ chối',
-  cancelled: 'Đã huỷ',
+const STATUS_KEYS: Record<string, string> = {
+  pending: 'sub.status.pending',
+  approved: 'sub.status.approved',
+  rejected: 'sub.status.rejected',
+  cancelled: 'sub.status.cancelled',
 };
 
 function CancelModal({
@@ -52,6 +53,7 @@ function CancelModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [reason, setReason] = useState('');
   const [wantRefund, setWantRefund] = useState(false);
@@ -70,7 +72,7 @@ function CancelModal({
       return cancelRequest(req.id, fd);
     },
     onSuccess: () => {
-      toast.success('Đã huỷ yêu cầu');
+      toast.success(t('sub.cancelled'));
       qc.invalidateQueries({ queryKey: ['admin', 'subscription'] });
       setReason('');
       setWantRefund(false);
@@ -83,11 +85,11 @@ function CancelModal({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Huỷ yêu cầu</DialogTitle>
+          <DialogTitle>{t('sub.cancel.title')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
-            <Label>Lý do huỷ</Label>
+            <Label>{t('sub.cancel.reason')}</Label>
             <Textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
@@ -101,25 +103,25 @@ function CancelModal({
               onChange={(e) => setWantRefund(e.target.checked)}
               className="rounded"
             />
-            <span className="text-sm">Tôi muốn hoàn tiền</span>
+            <span className="text-sm">{t('sub.cancel.wantRefund')}</span>
           </label>
           {wantRefund && (
             <div className="space-y-1.5">
-              <Label>QR hoàn tiền</Label>
+              <Label>{t('sub.cancel.refundQr')}</Label>
               <Input ref={qrRef} type="file" accept=".jpg,.jpeg,.png" />
             </div>
           )}
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
-            Đóng
+            {t('sub.cancel.close')}
           </Button>
           <Button
             variant="destructive"
             onClick={() => mut.mutate()}
             disabled={mut.isPending}
           >
-            {mut.isPending ? 'Đang huỷ...' : 'Xác nhận huỷ'}
+            {mut.isPending ? t('sub.cancel.cancelling') : t('sub.cancel.confirm')}
           </Button>
         </div>
       </DialogContent>
@@ -128,6 +130,7 @@ function CancelModal({
 }
 
 export default function SubscriptionPage() {
+  const t = useT();
   const { data: sub } = useSuspenseQuery(subscriptionQuery());
   const { data: plans = [] } = useQuery(plansQuery());
   const { data: requests = [] } = useQuery(requestsQuery());
@@ -144,15 +147,12 @@ export default function SubscriptionPage() {
   const plansRef = useRef<HTMLDivElement>(null);
 
   const expiresAt = sub.expires_at
-    ? new Date(sub.expires_at).toLocaleDateString('vi-VN')
+    ? new Date(sub.expires_at).toLocaleDateString()
     : null;
 
   return (
     <PageWrap className="max-w-[1080px]">
-      <PageHeader
-        title="Gói cước"
-        subtitle="Quản lý gói dịch vụ và giới hạn sử dụng."
-      />
+      <PageHeader title={t('sub.title')} subtitle={t('sub.subtitle')} />
 
       {limits?.over_limit.any_over && !warnDismissed && (
         <ResolutionScreen
@@ -176,7 +176,7 @@ export default function SubscriptionPage() {
           </div>
         </div>
         <div className="px-4 py-3 text-sm text-muted-foreground">
-          {expiresAt ? `Hết hạn: ${expiresAt}` : 'Không giới hạn thời gian'}
+          {expiresAt ? t('sub.expiry', { date: expiresAt }) : t('sub.noExpiry')}
         </div>
       </PageSection>
 
@@ -184,15 +184,14 @@ export default function SubscriptionPage() {
         <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm flex items-center gap-2">
           <Clock className="h-4 w-4 text-yellow-500 shrink-0" />
           <span className="flex-1">
-            Yêu cầu đăng ký gói{' '}
-            <strong>{pendingRequest.plan_label}</strong> đang chờ duyệt.
+            {t('sub.pendingBanner', { plan: pendingRequest.plan_label })}
           </span>
           <button
             onClick={() => setCancelTarget(pendingRequest)}
             className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
           >
             <X className="h-3 w-3" />
-            Huỷ
+            {t('common.cancel')}
           </button>
         </div>
       )}
@@ -201,25 +200,19 @@ export default function SubscriptionPage() {
         <div ref={plansRef}>
           <PageSection>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold">Chọn gói</h2>
+              <h2 className="text-sm font-semibold">{t('sub.choosePlan')}</h2>
               <div className="inline-flex rounded-lg border p-0.5 bg-muted/40">
-                {(
-                  [
-                    { key: '1', label: '1 tháng' },
-                    { key: '3', label: '3 tháng' },
-                    { key: '12', label: '12 tháng' },
-                  ] as { key: BillingPeriod; label: string }[]
-                ).map((p) => (
+                {(['1', '3', '12'] as BillingPeriod[]).map((p) => (
                   <button
-                    key={p.key}
-                    onClick={() => setPeriod(p.key)}
+                    key={p}
+                    onClick={() => setPeriod(p)}
                     className={`px-3 py-1 text-xs rounded-md transition-colors ${
-                      period === p.key
+                      period === p
                         ? 'bg-background shadow-sm font-medium'
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
                   >
-                    {p.label}
+                    {t(`sub.period.${p}`)}
                   </button>
                 ))}
               </div>
@@ -237,7 +230,7 @@ export default function SubscriptionPage() {
 
       {requests.length > 0 && (
         <PageSection>
-          <h2 className="text-sm font-semibold mb-3">Lịch sử yêu cầu</h2>
+          <h2 className="text-sm font-semibold mb-3">{t('sub.history')}</h2>
           <div className="divide-y divide-border rounded-xl border">
             {requests.map((req) => (
               <div
@@ -247,14 +240,14 @@ export default function SubscriptionPage() {
                 <div>
                   <span className="font-medium">{req.plan_label}</span>
                   <span className="text-muted-foreground ml-2 text-xs">
-                    {new Date(req.created_at).toLocaleDateString('vi-VN')}
+                    {new Date(req.created_at).toLocaleDateString()}
                   </span>
                 </div>
                 <div className="flex items-center gap-2">
                   <Badge
                     variant={req.status === 'approved' ? 'default' : 'secondary'}
                   >
-                    {STATUS_LABELS[req.status] ?? req.status}
+                    {STATUS_KEYS[req.status] ? t(STATUS_KEYS[req.status]) : req.status}
                   </Badge>
                   {req.reviewer_note && (
                     <span className="text-xs text-muted-foreground">

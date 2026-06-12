@@ -1,6 +1,7 @@
 import { Check, Minus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 import type { BillingPeriod, Plan, SubscriptionData } from './api';
 
 const fmtVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + 'đ';
@@ -13,26 +14,36 @@ type LimitKey =
   | 'cost_cap_usd_daily'
   | 'duration_days';
 
-const ROWS: { key: LimitKey; label: string; fmt: (v: number | null) => string }[] = [
-  { key: 'max_active_groups', label: 'Nhóm hoạt động', fmt: (v) => (v === null ? 'Không giới hạn' : `${v} nhóm`) },
-  { key: 'max_active_tools', label: 'Tools cho trợ lý', fmt: (v) => (v === null ? 'Không giới hạn' : `${v} tools`) },
-  { key: 'max_active_channels', label: 'Kênh kết nối (Zalo…)', fmt: (v) => (v === null ? 'Không giới hạn' : `${v} kênh`) },
-  { key: 'mcp_slots', label: 'Integrations ngoài (MCP)', fmt: (v) => (v === null ? 'Không giới hạn' : v === 0 ? '—' : `${v} slot`) },
-  { key: 'cost_cap_usd_daily', label: 'Ngân sách AI mỗi ngày', fmt: (v) => (v === null ? 'Không giới hạn' : `$${v}/ngày`) },
-  { key: 'duration_days', label: 'Thời hạn gói', fmt: (v) => (v === null ? 'Không giới hạn' : `${v} ngày`) },
+type T = (key: string, vars?: Record<string, string | number>) => string;
+
+const ROWS: { key: LimitKey; labelKey: string; valKey: string }[] = [
+  { key: 'max_active_groups', labelKey: 'sub.row.groups', valKey: 'sub.val.groups' },
+  { key: 'max_active_tools', labelKey: 'sub.row.tools', valKey: 'sub.val.tools' },
+  { key: 'max_active_channels', labelKey: 'sub.row.channels', valKey: 'sub.val.channels' },
+  { key: 'mcp_slots', labelKey: 'sub.row.mcp', valKey: 'sub.val.mcp' },
+  { key: 'cost_cap_usd_daily', labelKey: 'sub.row.cost', valKey: 'sub.val.cost' },
+  { key: 'duration_days', labelKey: 'sub.row.duration', valKey: 'sub.val.duration' },
 ];
 
-function CellValue({ value, fmt }: { value: number | null; fmt: (v: number | null) => string }) {
-  const text = fmt(value);
-  if (text === '—') return <Minus className="h-4 w-4 mx-auto text-muted-foreground/50" />;
-  if (text === 'Không giới hạn')
+function CellValue({
+  value,
+  valKey,
+  t,
+}: {
+  value: number | null;
+  valKey: string;
+  t: T;
+}) {
+  if (value === null)
     return (
       <span className="inline-flex items-center gap-1.5">
         <Check className="h-3.5 w-3.5 text-primary" />
-        Không giới hạn
+        {t('sub.unlimited')}
       </span>
     );
-  return <>{text}</>;
+  if (valKey === 'sub.val.mcp' && value === 0)
+    return <Minus className="h-4 w-4 mx-auto text-muted-foreground/50" />;
+  return <>{t(valKey, { n: value })}</>;
 }
 
 export function PlanCards({
@@ -48,6 +59,7 @@ export function PlanCards({
   period: BillingPeriod;
   onSelect: (plan: Plan) => void;
 }) {
+  const t = useT();
   return (
     <div className="rounded-xl border overflow-x-auto">
       <table className="w-full text-sm border-collapse min-w-[640px]">
@@ -55,7 +67,7 @@ export function PlanCards({
           <tr>
             <th className="text-left p-4 w-[220px] align-bottom">
               <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Tính năng
+                {t('sub.feature')}
               </span>
             </th>
             {plans.map((plan) => {
@@ -75,17 +87,17 @@ export function PlanCards({
                           <span className="font-semibold text-foreground">
                             {fmtVnd(plan.prices[period]!)}
                           </span>
-                          /{period} tháng
+                          {t('sub.perMonths', { n: period })}
                         </>
                       ) : plan.name === 'trial' ? (
-                        'Miễn phí'
+                        t('sub.free')
                       ) : (
-                        'Liên hệ'
+                        t('sub.contact')
                       )}
                     </p>
                     {isCurrent && (
                       <Badge variant="outline" className="text-[10px]">
-                        Đang dùng
+                        {t('sub.current')}
                       </Badge>
                     )}
                   </div>
@@ -97,7 +109,7 @@ export function PlanCards({
         <tbody>
           {ROWS.map((row, ri) => (
             <tr key={row.key} className={ri % 2 === 0 ? 'bg-muted/20' : ''}>
-              <td className="p-4 text-muted-foreground">{row.label}</td>
+              <td className="p-4 text-muted-foreground">{t(row.labelKey)}</td>
               {plans.map((plan) => {
                 const isCurrent = plan.name === current.plan;
                 return (
@@ -110,9 +122,9 @@ export function PlanCards({
                     {row.key === 'duration_days' &&
                     plan.prices &&
                     Object.keys(plan.prices).length > 0 ? (
-                      <>Theo chu kỳ</>
+                      <>{t('sub.byCycle')}</>
                     ) : (
-                      <CellValue value={plan.limits[row.key] ?? null} fmt={row.fmt} />
+                      <CellValue value={plan.limits[row.key] ?? null} valKey={row.valKey} t={t} />
                     )}
                   </td>
                 );
@@ -138,7 +150,7 @@ export function PlanCards({
                     onClick={() => onSelect(plan)}
                     className="w-full max-w-[140px]"
                   >
-                    {isCurrent ? 'Đang dùng' : hasPending ? 'Chờ duyệt…' : 'Đăng ký'}
+                    {isCurrent ? t('sub.current') : hasPending ? t('sub.waiting') : t('sub.subscribe')}
                   </Button>
                 </td>
               );
