@@ -550,10 +550,20 @@ async def list_bosses(
     async with db.acquire() as c:
         rows = await c.fetch(
             """
-            SELECT id, email, name, role, subscription_status, tz, created_at
-            FROM users
-            WHERE role IN ('boss', 'superadmin')
-            ORDER BY created_at DESC
+            SELECT u.id, u.email, u.name, u.role, u.subscription_status,
+                   u.subscription_expiry, u.tz, u.created_at,
+                   p.label AS plan_label, p.name AS plan_name,
+                   (SELECT COUNT(*) FROM group_notes g
+                     WHERE g.boss_id=u.id AND g.is_active=TRUE)        AS active_groups,
+                   (SELECT COUNT(*) FROM bot_account_assignments baa
+                     WHERE baa.boss_id=u.id AND baa.status='active'
+                       AND baa.provider <> 'web')                      AS active_channels,
+                   (SELECT MAX(m.ts) FROM messages m
+                     WHERE m.boss_id=u.id)                             AS last_message_at
+            FROM users u
+            LEFT JOIN plans p ON p.id = u.plan_id
+            WHERE u.role IN ('boss', 'superadmin')
+            ORDER BY u.created_at DESC
             """
         )
     return [
@@ -563,6 +573,16 @@ async def list_bosses(
             "name": r["name"],
             "role": r["role"],
             "subscription_status": r["subscription_status"],
+            "subscription_expiry": r["subscription_expiry"].isoformat()
+            if r["subscription_expiry"]
+            else None,
+            "plan_label": r["plan_label"],
+            "plan_name": r["plan_name"],
+            "active_groups": int(r["active_groups"]),
+            "active_channels": int(r["active_channels"]),
+            "last_message_at": r["last_message_at"].isoformat()
+            if r["last_message_at"]
+            else None,
             "tz": r["tz"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         }

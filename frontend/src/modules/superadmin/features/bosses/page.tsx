@@ -24,6 +24,7 @@ import {
 import { meQuery } from '@/lib/auth';
 import { bossesQuery, deleteBoss } from './api';
 import type { Boss } from './api';
+import { BossDrawer } from './boss-drawer';
 import { CreateDialog } from './create-dialog';
 import { EditDialog } from './edit-dialog';
 
@@ -109,6 +110,7 @@ export default function BossesPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Boss | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Boss | null>(null);
+  const [detailTarget, setDetailTarget] = useState<Boss | null>(null);
 
   const meId = me.data?.id;
 
@@ -133,27 +135,45 @@ export default function BossesPage() {
       cell: ({ row }) => <RoleChip role={row.original.role} />,
     },
     {
-      header: 'Timezone',
-      accessorKey: 'tz',
+      header: 'Gói',
+      accessorKey: 'plan_label',
       cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground">{row.original.tz}</span>
+        <div>
+          <span className="text-sm">{row.original.plan_label ?? '—'}</span>
+          <span className="block text-[11px] text-muted-foreground capitalize">
+            {row.original.subscription_status}
+          </span>
+        </div>
       ),
     },
     {
-      header: 'Subscription',
-      accessorKey: 'subscription_status',
+      header: 'Hết hạn',
+      accessorKey: 'subscription_expiry',
+      cell: ({ row }) => {
+        const d = row.original.subscription_expiry;
+        if (!d) return <span className="text-sm text-muted-foreground">∞</span>;
+        const expired = new Date(d) < new Date();
+        return (
+          <span className={`text-sm ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {new Date(d).toLocaleDateString('vi-VN')}
+          </span>
+        );
+      },
+    },
+    {
+      header: 'Đang dùng',
       cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground capitalize">
-          {row.original.subscription_status}
+        <span className="text-sm text-muted-foreground tabular-nums">
+          {row.original.active_groups} nhóm · {row.original.active_channels} kênh
         </span>
       ),
     },
     {
-      header: 'Tạo lúc',
-      accessorKey: 'created_at',
+      header: 'Hoạt động cuối',
+      accessorKey: 'last_message_at',
       cell: ({ row }) => {
-        const d = row.original.created_at;
-        if (!d) return <span className="text-muted-foreground">—</span>;
+        const d = row.original.last_message_at;
+        if (!d) return <span className="text-sm text-muted-foreground">—</span>;
         return (
           <span className="text-sm text-muted-foreground">
             {new Date(d).toLocaleDateString('vi-VN')}
@@ -167,7 +187,7 @@ export default function BossesPage() {
       cell: ({ row }) => {
         const isSelf = row.original.id === meId;
         return (
-          <div className="text-right">
+          <div className="text-right" onClick={(e) => e.stopPropagation()}>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-[26px] w-[26px]">
@@ -175,6 +195,9 @@ export default function BossesPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setDetailTarget(row.original)}>
+                  Chi tiết
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
                   Sửa
                 </DropdownMenuItem>
@@ -214,6 +237,7 @@ export default function BossesPage() {
           <DataTable
             columns={columns}
             data={bosses.data ?? []}
+            onRowClick={setDetailTarget}
             mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
             empty={
               <EmptyState
@@ -229,6 +253,9 @@ export default function BossesPage() {
       <CreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <EditDialog boss={editTarget} onOpenChange={v => !v && setEditTarget(null)} />
       <DeleteDialog boss={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      {detailTarget && (
+        <BossDrawer boss={detailTarget} onClose={() => setDetailTarget(null)} />
+      )}
     </PageWrap>
   );
 }

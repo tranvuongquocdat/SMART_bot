@@ -644,25 +644,11 @@ async def patch_settings_account(
 # ---------------------------------------------------------------------------
 
 
-def _mask_keys(api_keys_enc: bytes | None) -> dict[str, dict]:
-    """Decrypt api_keys_enc and return per-provider {present, last_4} map.
-    Never returns raw keys. Returns empty dict on any decryption error.
-    """
-    from cryptography.fernet import Fernet
-    from src.config import settings as cfg
+from src.services.boss_ai_config import AiConfigError  # noqa: E402
 
-    result: dict[str, dict] = {}
-    if not api_keys_enc:
-        return result
-    try:
-        f = Fernet(cfg.FERNET_KEY.encode())
-        data: dict[str, str] = json.loads(f.decrypt(bytes(api_keys_enc)).decode())
-    except Exception:
-        return result
-    for prov, key_val in data.items():
-        last_4 = key_val[-4:] if len(key_val) >= 4 else ""
-        result[prov] = {"present": True, "last_4": last_4}
-    return result
+
+def _ai_err(e: AiConfigError) -> HTTPException:
+    return HTTPException(status_code=e.status, detail=e.message)
 
 
 @router.get("/settings/ai")
@@ -671,68 +657,12 @@ async def get_settings_ai(
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
     """Return 3 model slots + masked API key info + available models list."""
-    async with db.acquire() as c:
-        boss = await c.fetchrow(
-            """
-            SELECT smart_model_id, fast_model_id, vision_model_id,
-                   cost_cap_usd_daily, api_keys_enc
-            FROM users WHERE id = $1
-            """,
-            ctx.boss_id,
-        )
-        models = await c.fetch(
-            """
-            SELECT id, name, provider, tier, capabilities,
-                   cost_per_1m_input_usd, cost_per_1m_output_usd, is_platform_default,
-                   owner_boss_id
-            FROM models
-            WHERE is_active = TRUE AND (owner_boss_id IS NULL OR owner_boss_id = $1)
-            ORDER BY owner_boss_id NULLS FIRST, tier, provider, name
-            """,
-            ctx.boss_id,
-        )
+    from src.services import boss_ai_config
 
-    slots = [
-        {
-            "slot": "smart",
-            "model_id": boss["smart_model_id"] if boss else None,
-        },
-        {
-            "slot": "fast",
-            "model_id": boss["fast_model_id"] if boss else None,
-        },
-        {
-            "slot": "vision",
-            "model_id": boss["vision_model_id"] if boss else None,
-        },
-    ]
-
-    keys = _mask_keys(boss["api_keys_enc"] if boss else None)
-    # Ensure all 3 standard providers appear (even if absent)
-    for prov in ("openai", "groq", "gemini"):
-        keys.setdefault(prov, {"present": False})
-
-    models_list = [
-        {
-            "id": int(m["id"]),
-            "name": m["name"],
-            "provider": m["provider"],
-            "tier": m["tier"],
-            "capabilities": list(m["capabilities"]) if m["capabilities"] else [],
-            "cost_per_1m_input_usd": float(m["cost_per_1m_input_usd"] or 0),
-            "cost_per_1m_output_usd": float(m["cost_per_1m_output_usd"] or 0),
-            "is_platform_default": bool(m["is_platform_default"]),
-            "is_own": m["owner_boss_id"] is not None,
-        }
-        for m in models
-    ]
-
-    return {
-        "slots": slots,
-        "keys": keys,
-        "models": models_list,
-        "cost_cap_usd_daily": float(boss["cost_cap_usd_daily"] or 0) if boss else 0.0,
-    }
+    try:
+        return await boss_ai_config.get_ai_settings(db, ctx.boss_id)
+    except AiConfigError as e:
+        raise _ai_err(e)
 
 
 @router.patch("/settings/ai", dependencies=[Depends(verify_json_csrf)])
@@ -747,44 +677,20 @@ async def patch_settings_ai(
       {slot: 'smart'|'fast'|'vision', model_id: int|null}
       {cost_cap_usd_daily: float}
     """
+    from src.services import boss_ai_config
+
     slot = payload.get("slot")
-    model_id = payload.get("model_id")
     cap = payload.get("cost_cap_usd_daily")
 
-    slot_col_map = {"smart": "smart_model_id", "fast": "fast_model_id", "vision": "vision_model_id"}
-
-    if slot and slot in slot_col_map:
-        col = slot_col_map[slot]
-        async with db.acquire() as c:
-            if model_id is not None:
-                # Chỉ cho gán model nền tảng hoặc model của chính boss.
-                allowed = await c.fetchval(
-                    """
-                    SELECT 1 FROM models
-                    WHERE id=$1 AND is_active=TRUE
-                      AND (owner_boss_id IS NULL OR owner_boss_id=$2)
-                    """,
-                    int(model_id),
-                    ctx.boss_id,
-                )
-                if not allowed:
-                    raise HTTPException(status_code=404, detail="model not found")
-            await c.execute(
-                f"UPDATE users SET {col}=$2 WHERE id=$1",
-                ctx.boss_id,
-                int(model_id) if model_id is not None else None,
-            )
-        return {"updated": 1}
-
-    if cap is not None:
-        async with db.acquire() as c:
-            await c.execute(
-                "UPDATE users SET cost_cap_usd_daily=$2 WHERE id=$1",
-                ctx.boss_id,
-                float(cap),
-            )
-        return {"updated": 1}
-
+    try:
+        if slot:
+            await boss_ai_config.set_model_slot(db, ctx.boss_id, slot, payload.get("model_id"))
+            return {"updated": 1}
+        if cap is not None:
+            await boss_ai_config.set_cost_cap(db, ctx.boss_id, cap)
+            return {"updated": 1}
+    except AiConfigError as e:
+        raise _ai_err(e)
     return {"updated": 0}
 
 
@@ -801,42 +707,18 @@ async def patch_settings_ai_keys(
 
     Keys are Fernet-encrypted at rest. Never echoed back.
     """
-    from cryptography.fernet import Fernet
-    from src.config import settings as cfg
+    from src.services import boss_ai_config
 
-    provider = payload.get("provider", "").strip().lower()
-    if provider not in ("openai", "groq", "gemini"):
-        raise HTTPException(status_code=422, detail="unknown provider")
-
-    async with db.acquire() as c:
-        blob = await c.fetchval(
-            "SELECT api_keys_enc FROM users WHERE id=$1", ctx.boss_id
-        )
-
-    f = Fernet(cfg.FERNET_KEY.encode())
-    existing: dict[str, str] = {}
-    if blob:
-        try:
-            existing = json.loads(f.decrypt(bytes(blob)).decode())
-        except Exception:
-            existing = {}
-
-    if payload.get("clear"):
-        existing.pop(provider, None)
-    else:
-        api_key = (payload.get("api_key") or "").strip()
-        if not api_key:
-            raise HTTPException(status_code=422, detail="api_key required")
-        existing[provider] = api_key
-
-    new_blob = f.encrypt(json.dumps(existing).encode())
-    async with db.acquire() as c:
-        await c.execute(
-            "UPDATE users SET api_keys_enc=$2 WHERE id=$1",
-            ctx.boss_id,
-            new_blob,
-        )
-
+    provider = payload.get("provider", "")
+    try:
+        if payload.get("clear"):
+            await boss_ai_config.clear_api_key(db, ctx.boss_id, provider)
+        else:
+            await boss_ai_config.set_api_key(
+                db, ctx.boss_id, provider, payload.get("api_key") or ""
+            )
+    except AiConfigError as e:
+        raise _ai_err(e)
     return {"updated": 1}
 
 
@@ -845,26 +727,6 @@ async def patch_settings_ai_keys(
 #   POST   /api/v1/admin/settings/ai/models
 #   DELETE /api/v1/admin/settings/ai/models/{model_id}
 # ---------------------------------------------------------------------------
-
-_PROVIDER_DEFAULTS = {
-    "openai": ("openai_compat", None),
-    "groq": ("openai_compat", "https://api.groq.com/openai/v1"),
-    "gemini": ("gemini", None),
-}
-
-
-def _boss_has_key(api_keys_enc: bytes | None, provider: str) -> bool:
-    from cryptography.fernet import Fernet
-    from src.config import settings as cfg
-
-    if not api_keys_enc:
-        return False
-    try:
-        f = Fernet(cfg.FERNET_KEY.encode())
-        keys = json.loads(f.decrypt(bytes(api_keys_enc)).decode())
-        return bool(keys.get(provider))
-    except Exception:
-        return False
 
 
 @router.post("/settings/ai/models", dependencies=[Depends(verify_json_csrf)], status_code=201)
@@ -879,48 +741,12 @@ async def create_own_model(
     Yêu cầu boss đã lưu BYO key cho provider — model riêng không có dữ liệu giá
     nên không được chạy trên quota nền tảng (lách cost cap).
     """
-    provider = (payload.get("provider") or "").strip().lower()
-    name = (payload.get("name") or "").strip()
-    tier = (payload.get("tier") or "smart").strip().lower()
+    from src.services import boss_ai_config
 
-    if provider not in _PROVIDER_DEFAULTS:
-        raise HTTPException(status_code=422, detail="unknown provider")
-    if not name or len(name) > 200:
-        raise HTTPException(status_code=422, detail="invalid model name")
-    if tier not in ("smart", "fast", "vision"):
-        raise HTTPException(status_code=422, detail="invalid tier")
-
-    async with db.acquire() as c:
-        blob = await c.fetchval("SELECT api_keys_enc FROM users WHERE id=$1", ctx.boss_id)
-    if not _boss_has_key(blob, provider):
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cần lưu API key {provider} của bạn trước khi thêm model riêng",
-        )
-
-    endpoint_kind, base_url = _PROVIDER_DEFAULTS[provider]
-    capabilities = ["vision"] if (tier == "vision" or payload.get("vision")) else []
-    ctx_max = int(payload.get("ctx_max") or 128_000)
-
-    from src.repositories.models import ModelsRepo
-
-    repo = ModelsRepo(db, ctx)
     try:
-        new_id = await repo.insert(
-            name=name,
-            provider=provider,
-            endpoint_kind=endpoint_kind,
-            base_url=base_url,
-            tier=tier,
-            ctx_max=ctx_max,
-            capabilities=capabilities,
-            cost_in=None,
-            cost_out=None,
-            notes="BYO",
-            owner_boss_id=ctx.boss_id,
-        )
-    except asyncpg.UniqueViolationError:
-        raise HTTPException(status_code=409, detail="Model này đã có trong danh sách của bạn")
+        new_id = await boss_ai_config.create_own_model(db, ctx, ctx.boss_id, payload)
+    except AiConfigError as e:
+        raise _ai_err(e)
     return {"id": new_id}
 
 
@@ -930,27 +756,12 @@ async def delete_own_model(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    async with db.acquire() as c:
-        owned = await c.fetchval(
-            "SELECT 1 FROM models WHERE id=$1 AND owner_boss_id=$2",
-            model_id,
-            ctx.boss_id,
-        )
-        if not owned:
-            raise HTTPException(status_code=404, detail="model not found")
-        # Gỡ model khỏi slot trước khi xoá để không vỡ routing.
-        await c.execute(
-            """
-            UPDATE users SET
-              smart_model_id  = CASE WHEN smart_model_id=$2 THEN NULL ELSE smart_model_id END,
-              fast_model_id   = CASE WHEN fast_model_id=$2 THEN NULL ELSE fast_model_id END,
-              vision_model_id = CASE WHEN vision_model_id=$2 THEN NULL ELSE vision_model_id END
-            WHERE id=$1
-            """,
-            ctx.boss_id,
-            model_id,
-        )
-        await c.execute("DELETE FROM models WHERE id=$1", model_id)
+    from src.services import boss_ai_config
+
+    try:
+        await boss_ai_config.delete_own_model(db, ctx.boss_id, model_id)
+    except AiConfigError as e:
+        raise _ai_err(e)
     return {"deleted": 1}
 
 
