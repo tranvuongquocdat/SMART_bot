@@ -15,6 +15,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +27,10 @@ log = logging.getLogger(__name__)
 
 BRIDGE_DIR = Path(__file__).parent.parent / "channels" / "zalo" / "bridge"
 QR_LOGIN_SCRIPT = BRIDGE_DIR / "qr_login.js"
+
+# Thời gian sống của một phiên QR — nguồn duy nhất, truyền xuống script qua env
+# và trả về frontend để hiện đếm ngược.
+LOGIN_TTL_SECONDS = 180
 
 
 @dataclass
@@ -39,8 +45,15 @@ class LoginSession:
     display_name: str | None = None
     error: str | None = None
     bot_account_id: int | None = None
+    deadline_monotonic: float = 0.0
     proc: asyncio.subprocess.Process | None = field(default=None, repr=False)
     stderr_tail: list[str] = field(default_factory=list, repr=False)
+
+    @property
+    def expires_in_s(self) -> int:
+        if self.status in ("success", "error"):
+            return 0
+        return max(0, int(self.deadline_monotonic - time.monotonic()))
 
 
 class ZaloQrLoginManager:
@@ -93,17 +106,21 @@ class ZaloQrLoginManager:
             return sess
 
         try:
+            env = os.environ.copy()
+            env["LOGIN_TIMEOUT_MS"] = str(LOGIN_TTL_SECONDS * 1000)
             proc = await asyncio.create_subprocess_exec(
                 "node",
                 str(QR_LOGIN_SCRIPT),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(BRIDGE_DIR),
+                env=env,
             )
         except FileNotFoundError:
             sess.status = "error"
             sess.error = "Không tìm thấy `node` trên server — cần cài Node.js"
             return sess
+        sess.deadline_monotonic = time.monotonic() + LOGIN_TTL_SECONDS
         sess.proc = proc
         asyncio.create_task(self._read_events(sess, proc))
         asyncio.create_task(self._drain_stderr(sess, proc))
@@ -161,7 +178,10 @@ class ZaloQrLoginManager:
                     sess.display_name = data.get("display_name")
                 elif ev == "error":
                     sess.status = "error"
-                    sess.error = data.get("message") or "QR login thất bại"
+                    msg = data.get("message") or "QR login thất bại"
+                    if "timeout" in msg.lower():
+                        msg = f"Hết thời gian quét ({LOGIN_TTL_SECONDS}s) — bấm Thử lại để lấy mã mới"
+                    sess.error = msg
                 elif ev == "success":
                     try:
                         await self._provision(sess, data)

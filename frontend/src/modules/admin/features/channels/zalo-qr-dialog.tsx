@@ -15,6 +15,9 @@ import { startZaloQrLogin, zaloQrLoginStatus, type ZaloQrStatus } from './api';
 
 const POLL_MS = 1500;
 
+const fmtCountdown = (s: number) =>
+  `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
 export function ZaloQrDialog({
   open,
   onClose,
@@ -25,8 +28,16 @@ export function ZaloQrDialog({
   const qc = useQueryClient();
   const [state, setState] = useState<ZaloQrStatus | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const loginIdRef = useRef<string | null>(null);
   const stoppedRef = useRef(false);
+
+  // Đếm ngược mượt 1s giữa các lần poll (poll đồng bộ lại từ server)
+  useEffect(() => {
+    if (countdown == null || countdown <= 0) return;
+    const t = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
 
   async function begin() {
     setState(null);
@@ -55,6 +66,7 @@ export function ZaloQrDialog({
         const s = await zaloQrLoginStatus(id);
         if (stoppedRef.current) return;
         setState(s);
+        setCountdown(s.status === 'qr' || s.status === 'scanned' ? s.expires_in_s : null);
         if (s.status === 'success') {
           stoppedRef.current = true;
           toast.success(
@@ -74,6 +86,7 @@ export function ZaloQrDialog({
           display_name: null,
           error: 'Phiên đăng nhập đã hết hạn.',
           bot_account_id: null,
+          expires_in_s: 0,
         });
       }
     }, POLL_MS);
@@ -114,7 +127,17 @@ export function ZaloQrDialog({
                 alt="QR đăng nhập Zalo"
                 className="h-56 w-56 rounded-lg border bg-white p-2"
               />
-              <p className="text-xs text-muted-foreground">Mã tự làm mới khi hết hạn.</p>
+              <p className="text-xs text-muted-foreground">
+                Mã tự làm mới khi hết hạn
+                {countdown != null && (
+                  <>
+                    {' '}— phiên còn{' '}
+                    <span className="font-mono font-medium text-foreground tabular-nums">
+                      {fmtCountdown(countdown)}
+                    </span>
+                  </>
+                )}
+              </p>
             </>
           ) : status === 'scanned' ? (
             <>

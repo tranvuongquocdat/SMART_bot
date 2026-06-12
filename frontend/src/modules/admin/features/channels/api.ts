@@ -42,6 +42,7 @@ export type ZaloQrStatus = {
   display_name: string | null;
   error: string | null;
   bot_account_id: number | null;
+  expires_in_s: number;
 };
 
 export const startZaloQrLogin = () =>

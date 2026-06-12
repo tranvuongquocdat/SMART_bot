@@ -1598,6 +1598,7 @@ async def zalo_qr_login_status(
         "display_name": sess.display_name,
         "error": sess.error,
         "bot_account_id": sess.bot_account_id,
+        "expires_in_s": sess.expires_in_s,
     }
 
 

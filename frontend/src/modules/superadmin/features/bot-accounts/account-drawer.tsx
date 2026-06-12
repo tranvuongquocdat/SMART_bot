@@ -43,6 +43,9 @@ const ACCOUNT_STATUS_DOT: Record<string, 'ok' | 'warn' | 'err' | 'idle'> = {
   banned: 'err',
 };
 
+const fmtCountdown = (s: number) =>
+  `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+
 // ------------------------------------------------------------- Tổng quan
 
 function OverviewTab({ d }: { d: BotAccountDetail }) {
@@ -137,6 +140,7 @@ function OverviewTab({ d }: { d: BotAccountDetail }) {
 function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => void }) {
   const [state, setState] = useState<QrLoginStatus | null>(null);
   const [running, setRunning] = useState(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
   const loginIdRef = useRef<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -145,9 +149,17 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
     timerRef.current = null;
     loginIdRef.current = null;
     setRunning(false);
+    setCountdown(null);
   }, []);
 
   useEffect(() => stopPolling, [stopPolling]);
+
+  // Đếm ngược mượt 1s giữa các lần poll (poll đồng bộ lại giá trị từ server)
+  useEffect(() => {
+    if (countdown == null || countdown <= 0) return;
+    const t = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
+    return () => clearTimeout(t);
+  }, [countdown]);
 
   async function begin() {
     setState(null);
@@ -166,6 +178,7 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
       try {
         const s = await accountQrLoginStatus(id);
         setState(s);
+        setCountdown(s.status === 'qr' || s.status === 'scanned' ? s.expires_in_s : null);
         if (s.status === 'success') {
           stopPolling();
           toast.success('Đã đăng nhập — listener đã khởi động lại.');
@@ -181,6 +194,7 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
           display_name: null,
           error: 'Phiên đăng nhập đã hết hạn.',
           bot_account_id: null,
+          expires_in_s: 0,
         });
       }
     }, POLL_MS);
@@ -229,7 +243,17 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
               alt="QR đăng nhập Zalo"
               className="h-56 w-56 rounded-lg border bg-white p-2"
             />
-            <p className="text-xs text-muted-foreground">Mã tự làm mới khi hết hạn.</p>
+            <p className="text-xs text-muted-foreground">
+              Mã tự làm mới khi hết hạn
+              {countdown != null && (
+                <>
+                  {' '}— phiên còn{' '}
+                  <span className="font-mono font-medium text-foreground tabular-nums">
+                    {fmtCountdown(countdown)}
+                  </span>
+                </>
+              )}
+            </p>
           </>
         )}
         {status === 'scanned' && (
