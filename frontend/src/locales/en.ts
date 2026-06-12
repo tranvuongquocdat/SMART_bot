@@ -206,6 +206,26 @@ export const en: Record<string, string> = {
   'proj.field.descPlaceholder': 'Short project description',
   'proj.created': 'Project created',
   'proj.createError': 'Failed to create project',
+  'common.actionFailed': 'Action failed',
+  'common.add': 'Add',
+  'common.on': 'Enabled',
+  'common.off': 'Disabled',
+
+  // integrations
+  'intg.title': 'Integrations',
+  'intg.subtitle.unlimited': 'Connect the assistant to external services via MCP — unlimited slots.',
+  'intg.subtitle.capped': 'Connect the assistant to external services via MCP — {used}/{total} slots used on your plan.',
+  'intg.added': 'Added',
+  'intg.addedEmpty': 'No integrations yet. Add from the catalog below.',
+  'intg.catalog': 'Catalog',
+  'intg.catalogPreparing': 'The integration catalog is being prepared by the admin.',
+  'intg.catalogAllAdded': 'You have added every integration in the catalog.',
+  'intg.plugins': 'Internal plugins',
+  'intg.pluginsEmpty': 'No plugins installed on the system.',
+  'intg.addedToast': 'Integration added',
+  'intg.removedToast': 'Integration removed',
+  'intg.pluginOn': 'Plugin enabled',
+  'intg.pluginOff': 'Plugin disabled',
 
   // command palette
   'cmd.placeholder': 'Search pages, actions…',

@@ -206,6 +206,26 @@ export const vi: Record<string, string> = {
   'proj.field.descPlaceholder': 'Mô tả ngắn về dự án',
   'proj.created': 'Đã tạo dự án',
   'proj.createError': 'Tạo dự án thất bại',
+  'common.actionFailed': 'Thao tác thất bại',
+  'common.add': 'Thêm',
+  'common.on': 'Đã bật',
+  'common.off': 'Đã tắt',
+
+  // tích hợp
+  'intg.title': 'Tích hợp',
+  'intg.subtitle.unlimited': 'Kết nối trợ lý với dịch vụ ngoài qua MCP — không giới hạn slot.',
+  'intg.subtitle.capped': 'Kết nối trợ lý với dịch vụ ngoài qua MCP — đã dùng {used}/{total} slot theo gói.',
+  'intg.added': 'Đã thêm',
+  'intg.addedEmpty': 'Chưa có integration nào. Thêm từ danh mục bên dưới.',
+  'intg.catalog': 'Danh mục',
+  'intg.catalogPreparing': 'Danh mục integration đang được quản trị viên chuẩn bị.',
+  'intg.catalogAllAdded': 'Bạn đã thêm tất cả integration trong danh mục.',
+  'intg.plugins': 'Plugins nội bộ',
+  'intg.pluginsEmpty': 'Chưa có plugin nào được cài trên hệ thống.',
+  'intg.addedToast': 'Đã thêm integration',
+  'intg.removedToast': 'Đã gỡ integration',
+  'intg.pluginOn': 'Đã bật plugin',
+  'intg.pluginOff': 'Đã tắt plugin',
 
   // command palette
   'cmd.placeholder': 'Tìm trang, hành động…',
