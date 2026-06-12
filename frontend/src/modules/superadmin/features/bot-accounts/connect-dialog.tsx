@@ -23,6 +23,7 @@ import { createBotAccount } from './api';
 type Props = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  onCreated?: (id: number, provider: string) => void;
 };
 
 const INITIAL = {
@@ -33,7 +34,7 @@ const INITIAL = {
   ownership: 'platform',
 };
 
-export function ConnectDialog({ open, onOpenChange }: Props) {
+export function ConnectDialog({ open, onOpenChange, onCreated }: Props) {
   const qc = useQueryClient();
   const [form, setForm] = useState(INITIAL);
 
@@ -46,11 +47,17 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
         account_kind: form.account_kind,
         ownership: form.ownership || null,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bot-accounts'] });
-      toast.success('Đã kết nối account');
+      toast.success(
+        form.provider === 'zalo'
+          ? 'Đã tạo account — quét QR để đăng nhập'
+          : 'Đã kết nối account'
+      );
+      const provider = form.provider;
       setForm(INITIAL);
       onOpenChange(false);
+      onCreated?.(res.id, provider);
     },
     onError: () => toast.error('Kết nối thất bại'),
   });

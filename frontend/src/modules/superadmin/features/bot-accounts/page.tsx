@@ -27,6 +27,7 @@ import {
   deleteBotAccount,
 } from './api';
 import type { BotAccount, BotMessage } from './api';
+import { AccountDrawer, type AccountTabKey } from './account-drawer';
 import { ConnectDialog } from './connect-dialog';
 import { EditDialog } from './edit-dialog';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
@@ -153,6 +154,7 @@ export default function BotAccountsPage() {
   const [editTarget, setEditTarget] = useState<BotAccount | null>(null);
   const [msgsTarget, setMsgsTarget] = useState<BotAccount | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<BotAccount | null>(null);
+  const [drawer, setDrawer] = useState<{ id: number; tab: AccountTabKey } | null>(null);
 
   const columns: ColumnDef<BotAccount>[] = [
     {
@@ -206,7 +208,7 @@ export default function BotAccountsPage() {
       id: 'actions',
       header: '',
       cell: ({ row }) => (
-        <div className="text-right">
+        <div className="text-right" onClick={(e) => e.stopPropagation()}>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="icon" className="h-[26px] w-[26px]">
@@ -214,11 +216,17 @@ export default function BotAccountsPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => setDrawer({ id: row.original.id, tab: 'overview' })}>
+                Chi tiết
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDrawer({ id: row.original.id, tab: 'connect' })}>
+                Đăng nhập / QR
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setDrawer({ id: row.original.id, tab: 'messages' })}>
+                Tin nhắn theo ngày
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
                 Sửa
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setMsgsTarget(row.original)}>
-                Xem tin nhắn gần đây
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
@@ -253,6 +261,7 @@ export default function BotAccountsPage() {
           <DataTable
             columns={columns}
             data={bots.data ?? []}
+            onRowClick={(acc) => setDrawer({ id: acc.id, tab: 'overview' })}
             mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
             empty={
               <div className="rounded-[12px] bg-card-grad surface-section p-12 text-center text-muted-foreground text-sm">
@@ -263,10 +272,25 @@ export default function BotAccountsPage() {
         )}
       </PageSection>
 
-      <ConnectDialog open={connectOpen} onOpenChange={setConnectOpen} />
+      <ConnectDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        onCreated={(id, provider) =>
+          // Acc Zalo tạo xong là mở luôn tab quét QR để đăng nhập
+          setDrawer({ id, tab: provider === 'zalo' ? 'connect' : 'overview' })
+        }
+      />
       <EditDialog account={editTarget} onOpenChange={v => !v && setEditTarget(null)} />
       <MessagesDialog account={msgsTarget} onClose={() => setMsgsTarget(null)} />
       <DeleteDialog account={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      {drawer && (
+        <AccountDrawer
+          key={`${drawer.id}-${drawer.tab}`}
+          accountId={drawer.id}
+          initialTab={drawer.tab}
+          onClose={() => setDrawer(null)}
+        />
+      )}
     </PageWrap>
   );
 }

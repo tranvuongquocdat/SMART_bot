@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from src.repositories.base import BossContext
@@ -740,6 +740,169 @@ async def list_bot_account_messages(
             "sender_name": r["sender_name"],
             "text": r["text"],
             "ts": r["ts"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Bot account: chi tiết, đăng nhập QR (Zalo), thống kê tin nhắn theo ngày
+#   GET  /bot-accounts/{id}/detail
+#   POST /bot-accounts/{id}/qr-login
+#   GET  /bot-accounts/qr-login/{login_id}
+#   GET  /bot-accounts/{id}/stats/daily?days=30
+#
+# Tin nhắn map về account qua bot_account_assignments (boss_id, provider) —
+# tin cũ trước khi đổi acc tính cho acc hiện tại (chấp nhận cho v1).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/bot-accounts/{account_id}/detail")
+async def bot_account_detail(
+    account_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        acc = await c.fetchrow(
+            """
+            SELECT id, provider, provider_user_id, display_name, account_kind,
+                   ownership, owner_boss_id, status, status_reason,
+                   max_assigned_bosses, last_seen_at,
+                   msgs_received_total, msgs_sent_total, notes, created_at,
+                   (credentials_blob_enc IS NOT NULL) AS has_credentials
+            FROM bot_accounts WHERE id=$1
+            """,
+            account_id,
+        )
+        if not acc:
+            raise HTTPException(404, "bot account not found")
+        assignments = await c.fetch(
+            """
+            SELECT baa.boss_id, baa.status, baa.assigned_at,
+                   u.email AS boss_email, u.name AS boss_name
+            FROM bot_account_assignments baa
+            JOIN users u ON u.id = baa.boss_id
+            WHERE baa.bot_account_id = $1
+            ORDER BY baa.assigned_at DESC
+            """,
+            account_id,
+        )
+    d = dict(acc)
+    for f in ("last_seen_at", "created_at"):
+        if d.get(f):
+            d[f] = d[f].isoformat()
+    d["assignments"] = [
+        {
+            "boss_id": a["boss_id"],
+            "boss_email": a["boss_email"],
+            "boss_name": a["boss_name"],
+            "status": a["status"],
+            "assigned_at": a["assigned_at"].isoformat() if a["assigned_at"] else None,
+        }
+        for a in assignments
+    ]
+    return d
+
+
+@router.post("/bot-accounts/{account_id}/qr-login", dependencies=[Depends(verify_json_csrf)])
+async def bot_account_qr_login_start(
+    account_id: int,
+    request: Request,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_superadmin),
+) -> dict:
+    """Mở phiên QR để đăng nhập acc Zalo cho bot account này (login mới / re-login)."""
+    async with db.acquire() as c:
+        provider = await c.fetchval(
+            "SELECT provider FROM bot_accounts WHERE id=$1", account_id
+        )
+    if provider is None:
+        raise HTTPException(404, "bot account not found")
+    if provider != "zalo":
+        raise HTTPException(422, "Chỉ kênh Zalo dùng đăng nhập QR")
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    if manager is None:
+        raise HTTPException(503, "Zalo QR login chưa sẵn sàng")
+    sess = await manager.start_for_account(account_id, actor_user_id=ctx.boss_id)
+    return {"login_id": sess.login_id, "status": sess.status}
+
+
+@router.get("/bot-accounts/qr-login/{login_id}")
+async def bot_account_qr_login_status(
+    login_id: str,
+    request: Request,
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    sess = manager.get_by_login_id(login_id) if manager else None
+    # Chỉ trả phiên do superadmin mở (mode account_login) — không lộ phiên của boss
+    if sess is None or sess.target_account_id is None:
+        raise HTTPException(404, "Phiên đăng nhập không tồn tại")
+    return {
+        "status": sess.status,
+        "qr_image_b64": sess.qr_image_b64 if sess.status == "qr" else None,
+        "display_name": sess.display_name,
+        "error": sess.error,
+        "bot_account_id": sess.bot_account_id,
+    }
+
+
+@router.get("/bot-accounts/{account_id}/stats/daily")
+async def bot_account_daily_stats(
+    account_id: int,
+    days: int = Query(30, ge=1, le=365),
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    """Số tin nhận/gửi theo ngày (đủ ngày, kể cả ngày 0 tin), mới nhất trước."""
+    async with db.acquire() as c:
+        existing = await c.fetchval(
+            "SELECT 1 FROM bot_accounts WHERE id=$1", account_id
+        )
+        if not existing:
+            raise HTTPException(404, "bot account not found")
+        rows = await c.fetch(
+            """
+            WITH days AS (
+              SELECT (CURRENT_DATE - offs) AS day
+              FROM generate_series(0, $2 - 1) AS offs
+            ),
+            recv AS (
+              SELECT m.ts::date AS day, COUNT(*) AS n
+              FROM messages m
+              JOIN bot_account_assignments baa
+                ON baa.boss_id = m.boss_id AND baa.provider = m.provider
+              WHERE baa.bot_account_id = $1
+                AND m.ts >= CURRENT_DATE - ($2 - 1)
+              GROUP BY 1
+            ),
+            sent AS (
+              SELECT o.sent_at::date AS day, COUNT(*) AS n
+              FROM outbound_messages o
+              JOIN bot_account_assignments baa
+                ON baa.boss_id = o.boss_id AND baa.provider = o.provider
+              WHERE baa.bot_account_id = $1
+                AND o.status <> 'failed'
+                AND o.sent_at >= CURRENT_DATE - ($2 - 1)
+              GROUP BY 1
+            )
+            SELECT d.day,
+                   COALESCE(r.n, 0) AS received,
+                   COALESCE(s.n, 0) AS sent
+            FROM days d
+            LEFT JOIN recv r ON r.day = d.day
+            LEFT JOIN sent s ON s.day = d.day
+            ORDER BY d.day DESC
+            """,
+            account_id,
+            days,
+        )
+    return [
+        {
+            "date": r["day"].isoformat(),
+            "received": int(r["received"]),
+            "sent": int(r["sent"]),
         }
         for r in rows
     ]
