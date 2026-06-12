@@ -186,6 +186,27 @@ export const vi: Record<string, string> = {
   'usage.col.tokensTotal': 'Tổng tokens',
   'usage.col.cost': 'Chi phí (USD)',
 
+  // dự án
+  'proj.title': 'Dự án',
+  'proj.subtitle': 'Quản lý các dự án và nhóm việc cần làm',
+  'proj.create': 'Tạo dự án',
+  'proj.empty.title': 'Chưa có dự án nào',
+  'proj.empty.desc': 'Tạo dự án để nhóm các việc cần làm lại với nhau.',
+  'proj.col.name': 'Tên dự án',
+  'proj.col.desc': 'Mô tả',
+  'proj.col.count': 'Số việc',
+  'proj.deleted': 'Đã xoá dự án',
+  'proj.deleteError': 'Xoá dự án thất bại',
+  'proj.deleteConfirm.title': 'Xác nhận xoá dự án',
+  'proj.deleteConfirm.desc': 'Dự án "{name}" sẽ bị xoá. Các việc cần làm thuộc dự án này sẽ không bị xoá.',
+  'proj.dialog.title': 'Tạo dự án mới',
+  'proj.field.name': 'Tên dự án',
+  'proj.field.namePlaceholder': 'VD: Ra mắt sản phẩm Q3',
+  'proj.field.desc': 'Mô tả (tuỳ chọn)',
+  'proj.field.descPlaceholder': 'Mô tả ngắn về dự án',
+  'proj.created': 'Đã tạo dự án',
+  'proj.createError': 'Tạo dự án thất bại',
+
   // command palette
   'cmd.placeholder': 'Tìm trang, hành động…',
   'cmd.empty': 'Không tìm thấy.',

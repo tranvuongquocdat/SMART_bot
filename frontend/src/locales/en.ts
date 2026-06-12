@@ -186,6 +186,27 @@ export const en: Record<string, string> = {
   'usage.col.tokensTotal': 'Total tokens',
   'usage.col.cost': 'Cost (USD)',
 
+  // projects
+  'proj.title': 'Projects',
+  'proj.subtitle': 'Manage projects and group action items',
+  'proj.create': 'New project',
+  'proj.empty.title': 'No projects yet',
+  'proj.empty.desc': 'Create a project to group action items together.',
+  'proj.col.name': 'Project name',
+  'proj.col.desc': 'Description',
+  'proj.col.count': 'Items',
+  'proj.deleted': 'Project deleted',
+  'proj.deleteError': 'Failed to delete project',
+  'proj.deleteConfirm.title': 'Delete project?',
+  'proj.deleteConfirm.desc': 'Project "{name}" will be deleted. Its action items will not be deleted.',
+  'proj.dialog.title': 'New project',
+  'proj.field.name': 'Project name',
+  'proj.field.namePlaceholder': 'e.g. Q3 product launch',
+  'proj.field.desc': 'Description (optional)',
+  'proj.field.descPlaceholder': 'Short project description',
+  'proj.created': 'Project created',
+  'proj.createError': 'Failed to create project',
+
   // command palette
   'cmd.placeholder': 'Search pages, actions…',
   'cmd.empty': 'No results.',

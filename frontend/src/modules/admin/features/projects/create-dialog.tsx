@@ -11,6 +11,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { useT } from '@/lib/i18n';
 import { createProject, projectsQuery } from './api';
 
 export function CreateProjectDialog({
@@ -20,6 +21,7 @@ export function CreateProjectDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const qc = useQueryClient();
@@ -29,12 +31,12 @@ export function CreateProjectDialog({
       createProject({ name: name.trim(), description: description.trim() || undefined }),
     onSuccess: () => {
       qc.invalidateQueries(projectsQuery());
-      toast.success('Đã tạo dự án');
+      toast.success(t('proj.created'));
       setName('');
       setDescription('');
       onOpenChange(false);
     },
-    onError: () => toast.error('Tạo dự án thất bại'),
+    onError: () => toast.error(t('proj.createError')),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -47,26 +49,26 @@ export function CreateProjectDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Tạo dự án mới</DialogTitle>
+          <DialogTitle>{t('proj.dialog.title')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="project-name">Tên dự án</Label>
+            <Label htmlFor="project-name">{t('proj.field.name')}</Label>
             <Input
               id="project-name"
               value={name}
               onChange={e => setName(e.target.value)}
-              placeholder="VD: Ra mắt sản phẩm Q3"
+              placeholder={t('proj.field.namePlaceholder')}
               required
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="project-desc">Mô tả (tuỳ chọn)</Label>
+            <Label htmlFor="project-desc">{t('proj.field.desc')}</Label>
             <Input
               id="project-desc"
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder="Mô tả ngắn về dự án"
+              placeholder={t('proj.field.descPlaceholder')}
             />
           </div>
           <DialogFooter>
@@ -75,13 +77,13 @@ export function CreateProjectDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Huỷ
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"
               disabled={mutation.isPending || !name.trim()}
             >
-              {mutation.isPending ? 'Đang tạo...' : 'Tạo'}
+              {mutation.isPending ? t('common.creating') : t('common.create')}
             </Button>
           </DialogFooter>
         </form>

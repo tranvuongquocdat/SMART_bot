@@ -12,10 +12,12 @@ import {
 } from '@/components/ui/dialog';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { CreateProjectDialog } from './create-dialog';
 import { projectsQuery, deleteProject, type Project } from './api';
 
 function ProjectRow({ project }: { project: Project }) {
+  const t = useT();
   const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -23,10 +25,10 @@ function ProjectRow({ project }: { project: Project }) {
     mutationFn: () => deleteProject(project.id),
     onSuccess: () => {
       qc.invalidateQueries(projectsQuery());
-      toast.success('Đã xoá dự án');
+      toast.success(t('proj.deleted'));
       setConfirmDelete(false);
     },
-    onError: () => toast.error('Xoá dự án thất bại'),
+    onError: () => toast.error(t('proj.deleteError')),
   });
 
   return (
@@ -43,7 +45,7 @@ function ProjectRow({ project }: { project: Project }) {
             onClick={() => setConfirmDelete(true)}
           >
             <Trash2 className="h-4 w-4" />
-            <span className="sr-only">Xoá</span>
+            <span className="sr-only">{t('common.delete')}</span>
           </Button>
         </td>
       </tr>
@@ -51,10 +53,10 @@ function ProjectRow({ project }: { project: Project }) {
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Xác nhận xoá dự án</DialogTitle>
+            <DialogTitle>{t('proj.deleteConfirm.title')}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground mt-1">
-            Dự án "{project.name}" sẽ bị xoá. Các việc cần làm thuộc dự án này sẽ không bị xoá.
+            {t('proj.deleteConfirm.desc', { name: project.name })}
           </p>
           <DialogFooter className="mt-4">
             <Button
@@ -62,14 +64,14 @@ function ProjectRow({ project }: { project: Project }) {
               onClick={() => setConfirmDelete(false)}
               disabled={deleteMut.isPending}
             >
-              Huỷ
+              {t('common.cancel')}
             </Button>
             <Button
               variant="destructive"
               onClick={() => deleteMut.mutate()}
               disabled={deleteMut.isPending}
             >
-              {deleteMut.isPending ? 'Đang xoá...' : 'Xoá'}
+              {deleteMut.isPending ? t('common.deleting') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -79,14 +81,15 @@ function ProjectRow({ project }: { project: Project }) {
 }
 
 function ProjectList() {
+  const t = useT();
   const { data: projects } = useSuspenseQuery(projectsQuery());
 
   if (projects.length === 0) {
     return (
       <EmptyState
         icon={FolderKanban}
-        title="Chưa có dự án nào"
-        description="Tạo dự án để nhóm các việc cần làm lại với nhau."
+        title={t('proj.empty.title')}
+        description={t('proj.empty.desc')}
       />
     );
   }
@@ -95,9 +98,9 @@ function ProjectList() {
     <table className="w-full text-sm">
       <thead>
         <tr className="text-left text-muted-foreground border-b">
-          <th className="p-3">Tên dự án</th>
-          <th className="p-3">Mô tả</th>
-          <th className="p-3 text-center">Số việc</th>
+          <th className="p-3">{t('proj.col.name')}</th>
+          <th className="p-3">{t('proj.col.desc')}</th>
+          <th className="p-3 text-center">{t('proj.col.count')}</th>
           <th className="p-3 w-12"></th>
         </tr>
       </thead>
@@ -111,17 +114,18 @@ function ProjectList() {
 }
 
 export default function ProjectsPage() {
+  const t = useT();
   const [createOpen, setCreateOpen] = useState(false);
 
   return (
     <PageWrap>
       <PageHeader
-        title="Dự án"
-        subtitle="Quản lý các dự án và nhóm việc cần làm"
+        title={t('proj.title')}
+        subtitle={t('proj.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="mr-1 h-3.5 w-3.5" />
-            Tạo dự án
+            {t('proj.create')}
           </Button>
         }
       />
