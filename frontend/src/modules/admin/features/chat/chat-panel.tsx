@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Paperclip, SendHorizontal, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { useT } from '@/lib/i18n';
 import {
   chatMessagesQuery,
   sendChatMessage,
@@ -25,8 +26,9 @@ type PendingMessage = {
 };
 
 function MessageBubble({ m }: { m: ChatMessage }) {
+  const t = useT();
   const fromBot = m.kind === 'out';
-  const time = new Date(m.ts).toLocaleTimeString('vi-VN', {
+  const time = new Date(m.ts).toLocaleTimeString([], {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -42,7 +44,7 @@ function MessageBubble({ m }: { m: ChatMessage }) {
         {m.media_url && m.media_kind === 'image' && (
           <img
             src={m.media_url}
-            alt="đính kèm"
+            alt={t('chat.attachAlt')}
             className="rounded-lg mb-2 max-h-56 object-contain"
           />
         )}
@@ -56,7 +58,7 @@ function MessageBubble({ m }: { m: ChatMessage }) {
             }`}
           >
             <Paperclip className="h-3 w-3" />
-            Tệp đính kèm
+            {t('chat.attachment')}
           </a>
         )}
         {m.text && <p>{m.text}</p>}
@@ -95,6 +97,7 @@ export function ChatPanel({
   conversationId: string | null;
   className?: string;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const { data: messages = [] } = useQuery(chatMessagesQuery(conversationId));
   const [draft, setDraft] = useState('');
@@ -184,7 +187,7 @@ export function ChatPanel({
     try {
       setAttachment(await uploadChatFile(f));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Tải tệp thất bại');
+      toast.error(e instanceof Error ? e.message : t('chat.uploadError'));
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
@@ -212,7 +215,7 @@ export function ChatPanel({
     timeoutRef.current = setTimeout(() => {
       setAwaitingReply(false);
       setReplyError(
-        'Trợ lý không phản hồi (quá 90 giây). Kiểm tra cấu hình model/API key trong Cài đặt > AI, hoặc thử lại.'
+        t('chat.timeout')
       );
     }, REPLY_TIMEOUT_MS);
     try {
@@ -229,7 +232,7 @@ export function ChatPanel({
       if (sentAttachment) setAttachment((a) => a ?? sentAttachment);
       setAwaitingReply(false);
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
-      toast.error(e instanceof Error ? e.message : 'Không gửi được tin nhắn');
+      toast.error(e instanceof Error ? e.message : t('chat.sendError'));
     }
   }
 
@@ -248,7 +251,7 @@ export function ChatPanel({
       <div className="flex-1 overflow-y-auto p-6 space-y-4">
         {messages.length === 0 && pending.length === 0 && !awaitingReply ? (
           <p className="text-sm text-muted-foreground text-center mt-10">
-            Chưa có tin nhắn. Hãy bắt đầu trò chuyện với trợ lý của bạn.
+            {t('chat.empty')}
           </p>
         ) : (
           messages.map((m) => <MessageBubble key={`${m.kind}-${m.id}`} m={m} />)
@@ -263,7 +266,7 @@ export function ChatPanel({
                 </span>
               )}
               {p.text && <p>{p.text}</p>}
-              <p className="mt-1 text-[10px] text-primary-foreground/70">Đang gửi…</p>
+              <p className="mt-1 text-[10px] text-primary-foreground/70">{t('chat.sending')}</p>
             </div>
           </div>
         ))}
@@ -283,7 +286,7 @@ export function ChatPanel({
           <span className="inline-flex items-center gap-1.5 text-xs bg-muted rounded-full px-3 py-1.5 max-w-[260px]">
             <Paperclip className="h-3 w-3 shrink-0" />
             <span className="truncate">{attachment.name}</span>
-            <button onClick={() => setAttachment(null)} aria-label="Bỏ đính kèm">
+            <button onClick={() => setAttachment(null)} aria-label={t('chat.removeAttach')}>
               <X className="h-3 w-3" />
             </button>
           </span>
@@ -303,15 +306,15 @@ export function ChatPanel({
           variant="outline"
           disabled={uploading}
           onClick={() => fileRef.current?.click()}
-          aria-label="Đính kèm ảnh hoặc tệp"
-          title="Đính kèm ảnh hoặc tệp"
+          aria-label={t('chat.attachFile')}
+          title={t('chat.attachFile')}
         >
           <Paperclip className={`h-4 w-4 ${uploading ? 'animate-pulse' : ''}`} />
         </Button>
         <textarea
           className="flex-1 resize-none rounded-lg border bg-card px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
           rows={1}
-          placeholder="Nhắn cho trợ lý…"
+          placeholder={t('chat.placeholder')}
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -326,7 +329,7 @@ export function ChatPanel({
             size="icon"
             variant="outline"
             onClick={handleStop}
-            aria-label="Dừng trợ lý"
+            aria-label={t('chat.stop')}
           >
             <Square className="h-3.5 w-3.5 fill-current" />
           </Button>
@@ -335,7 +338,7 @@ export function ChatPanel({
             size="icon"
             disabled={!draft.trim() && !attachment}
             onClick={handleSend}
-            aria-label="Gửi"
+            aria-label={t('chat.send')}
           >
             <SendHorizontal className="h-4 w-4" />
           </Button>

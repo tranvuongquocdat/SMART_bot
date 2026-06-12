@@ -4,6 +4,7 @@ import { MessageCirclePlus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { PageWrap, PageHeader } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { ChatPanel } from './chat-panel';
 import {
   conversationsQuery,
@@ -13,6 +14,7 @@ import {
 } from './api';
 
 export default function ChatPage() {
+  const t = useT();
   const qc = useQueryClient();
   const { data: conversations = [] } = useQuery(conversationsQuery());
   const [selected, setSelected] = useState<string | null>(null);
@@ -28,14 +30,14 @@ export default function ChatPage() {
       invalidate();
       setSelected(c.id);
     },
-    onError: () => toast.error('Không tạo được hội thoại'),
+    onError: () => toast.error(t('chat.createError')),
   });
 
   const renameMut = useMutation({
     mutationFn: ({ id, name }: { id: string; name: string }) =>
       renameConversation(id, name),
     onSuccess: invalidate,
-    onError: () => toast.error('Đổi tên thất bại'),
+    onError: () => toast.error(t('chat.renameError')),
   });
 
   const deleteMut = useMutation({
@@ -43,20 +45,20 @@ export default function ChatPage() {
     onSuccess: (_d, id) => {
       invalidate();
       if (activeId === id) setSelected(null);
-      toast.success('Đã xoá hội thoại');
+      toast.success(t('chat.deleted'));
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('common.deleteError')),
   });
 
   return (
     <PageWrap className="max-w-[1280px]">
       <PageHeader
-        title="Trợ lý"
-        subtitle="Chat trực tiếp với thư ký ảo — giao việc, hỏi note, đặt lịch nhắc."
+        title={t('chat.title')}
+        subtitle={t('chat.subtitle')}
         actions={
           <Button size="sm" onClick={() => createMut.mutate()} disabled={createMut.isPending}>
             <MessageCirclePlus className="h-4 w-4 mr-1.5" />
-            Hội thoại mới
+            {t('chat.newConversation')}
           </Button>
         }
       />
@@ -77,10 +79,10 @@ export default function ChatPage() {
                   className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-foreground transition-opacity"
                   onClick={(e) => {
                     e.stopPropagation();
-                    const name = window.prompt('Tên hội thoại', c.name);
+                    const name = window.prompt(t('chat.renamePrompt'), c.name);
                     if (name?.trim()) renameMut.mutate({ id: c.id, name: name.trim() });
                   }}
-                  aria-label="Đổi tên"
+                  aria-label={t('chat.rename')}
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -88,10 +90,10 @@ export default function ChatPage() {
                   className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-opacity"
                   onClick={(e) => {
                     e.stopPropagation();
-                    if (window.confirm(`Xoá hội thoại "${c.name}"? Toàn bộ tin nhắn sẽ mất.`))
+                    if (window.confirm(t('chat.deleteConfirm', { name: c.name })))
                       deleteMut.mutate(c.id);
                   }}
-                  aria-label="Xoá"
+                  aria-label={t('common.delete')}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -104,7 +106,7 @@ export default function ChatPage() {
             </div>
           ))}
           {conversations.length === 0 && (
-            <p className="text-xs text-muted-foreground p-4 text-center">Đang tải…</p>
+            <p className="text-xs text-muted-foreground p-4 text-center">{t('common.loading')}</p>
           )}
         </div>
 

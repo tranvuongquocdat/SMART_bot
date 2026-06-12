@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/lib/i18n';
 import { ChatPanel } from './chat-panel';
 import { conversationsQuery, createConversation } from './api';
 
@@ -15,6 +16,7 @@ import { conversationsQuery, createConversation } from './api';
  * Có chọn hội thoại + tạo hội thoại mới ngay trong header panel.
  */
 export function AssistantBubble() {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const location = useLocation();
@@ -32,7 +34,7 @@ export function AssistantBubble() {
       qc.invalidateQueries({ queryKey: ['admin', 'chat', 'conversations'] });
       setSelected(c.id);
     },
-    onError: () => toast.error('Không tạo được hội thoại'),
+    onError: () => toast.error(t('chat.createError')),
   });
 
   // Trang Trợ lý full-screen đã có chat — ẩn bong bóng để khỏi trùng
@@ -58,7 +60,7 @@ export function AssistantBubble() {
                     onValueChange={(v) => setSelected(v)}
                   >
                     <SelectTrigger className="h-8 text-sm border-0 shadow-none bg-transparent px-2">
-                      <SelectValue placeholder="Trợ lý" />
+                      <SelectValue placeholder={t('chat.assistant')} />
                     </SelectTrigger>
                     <SelectContent>
                       {conversations.map((c) => (
@@ -72,15 +74,15 @@ export function AssistantBubble() {
                 <button
                   className="text-muted-foreground hover:text-foreground transition-colors p-1"
                   onClick={() => createMut.mutate()}
-                  aria-label="Hội thoại mới"
-                  title="Hội thoại mới"
+                  aria-label={t('chat.newConversation')}
+                  title={t('chat.newConversation')}
                 >
                   <MessageCirclePlus className="h-4 w-4" />
                 </button>
                 <button
                   className="text-muted-foreground hover:text-foreground transition-colors p-1"
                   onClick={() => setOpen(false)}
-                  aria-label="Đóng trợ lý"
+                  aria-label={t('chat.closeAssistant')}
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -98,7 +100,7 @@ export function AssistantBubble() {
       <button
         className="fixed bottom-6 right-6 z-50 h-12 w-12 rounded-full bg-primary text-primary-foreground shadow-lg hover:opacity-90 transition-opacity flex items-center justify-center"
         onClick={() => setOpen((v) => !v)}
-        aria-label="Mở trợ lý"
+        aria-label={t('chat.openAssistant')}
       >
         {open ? <X className="h-5 w-5" /> : <MessageCircle className="h-5 w-5" />}
       </button>
