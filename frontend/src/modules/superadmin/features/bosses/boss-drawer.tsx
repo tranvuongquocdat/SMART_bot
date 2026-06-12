@@ -15,6 +15,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { plansAdminQuery } from '../plans/api';
+import { proxiesQuery, setBossProxy } from '../proxies/api';
 import {
   bossOverviewQuery,
   patchBossSubscription,
@@ -55,10 +56,62 @@ function Gauge({ label, gauge }: { label: string; gauge: UsageGauge }) {
   );
 }
 
-function OverviewTab({ data }: { data: BossOverview }) {
+function ProxySection({ bossId, data }: { bossId: number; data: BossOverview }) {
+  const qc = useQueryClient();
+  const proxies = useQuery(proxiesQuery);
+  const current = data.proxy;
+
+  const mut = useMutation({
+    mutationFn: (proxyId: number | null) => setBossProxy(bossId, proxyId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['superadmin', 'boss', bossId] });
+      qc.invalidateQueries({ queryKey: ['superadmin', 'proxies'] });
+      toast.success('Đã cập nhật proxy — listener kênh đang restart');
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <div className="rounded-lg border bg-card px-3 py-2.5 space-y-2">
+      <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Proxy / IP riêng</p>
+      <div className="flex items-center gap-2">
+        <Select
+          value={current ? String(current.id) : 'none'}
+          onValueChange={(v) => mut.mutate(v === 'none' ? null : Number(v))}
+          disabled={mut.isPending}
+        >
+          <SelectTrigger className="h-8 text-sm flex-1">
+            <SelectValue placeholder="Chưa gán" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">— không dùng proxy (IP server) —</SelectItem>
+            {(proxies.data ?? [])
+              .filter((p) => p.status === 'active')
+              .map((p) => (
+                <SelectItem
+                  key={p.id}
+                  value={String(p.id)}
+                  disabled={p.assigned_count >= p.max_bosses && current?.id !== p.id}
+                >
+                  {p.label}
+                  {p.region ? ` · ${p.region}` : ''} ({p.assigned_count}/{p.max_bosses})
+                </SelectItem>
+              ))}
+          </SelectContent>
+        </Select>
+      </div>
+      <p className="text-[11px] text-muted-foreground">
+        Mọi acc Zalo/Messenger của khách đi qua proxy này. Telegram không dùng.
+      </p>
+    </div>
+  );
+}
+
+function OverviewTab({ bossId, data }: { bossId: number; data: BossOverview }) {
   const u = data.usage;
   return (
     <div className="space-y-5">
+      <ProxySection bossId={bossId} data={data} />
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <Gauge label="Nhóm" gauge={u.groups} />
         <Gauge label="Tools" gauge={u.tools} />
@@ -383,7 +436,7 @@ export function BossDrawer({ boss, onClose }: { boss: Boss; onClose: () => void 
             (overview.isLoading || !overview.data ? (
               <Skeleton className="h-60 w-full" />
             ) : (
-              <OverviewTab data={overview.data} />
+              <OverviewTab bossId={boss.id} data={overview.data} />
             ))}
           {tab === 'subscription' &&
             (overview.isLoading || !overview.data ? (

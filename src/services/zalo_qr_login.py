@@ -108,6 +108,9 @@ class ZaloQrLoginManager:
         try:
             env = os.environ.copy()
             env["LOGIN_TIMEOUT_MS"] = str(LOGIN_TTL_SECONDS * 1000)
+            proxy_url = await self._resolve_proxy(sess)
+            if proxy_url:
+                env["PROXY_URL"] = proxy_url
             proc = await asyncio.create_subprocess_exec(
                 "node",
                 str(QR_LOGIN_SCRIPT),
@@ -125,6 +128,26 @@ class ZaloQrLoginManager:
         asyncio.create_task(self._read_events(sess, proc))
         asyncio.create_task(self._drain_stderr(sess, proc))
         return sess
+
+    async def _resolve_proxy(self, sess: LoginSession) -> str | None:
+        """Proxy của boss sở hữu acc — boss-connect dùng boss_id trực tiếp,
+        account-login truy owner_boss_id của account đích."""
+        from src.services.proxy_pool import resolve_for_boss
+
+        try:
+            boss_id = sess.boss_id
+            if boss_id is None and sess.target_account_id is not None:
+                async with self.pool.acquire() as c:
+                    boss_id = await c.fetchval(
+                        "SELECT owner_boss_id FROM bot_accounts WHERE id=$1",
+                        sess.target_account_id,
+                    )
+            if boss_id is None:
+                return None
+            return await resolve_for_boss(self.pool, boss_id)
+        except Exception:
+            log.exception("qr_login: resolve proxy failed")
+            return None
 
     def get(self, boss_id: int, login_id: str) -> LoginSession | None:
         sess = self._sessions.get(login_id)

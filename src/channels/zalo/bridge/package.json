@@ -8,6 +8,8 @@
     "start": "node bridge.js"
   },
   "dependencies": {
+    "node-fetch": "^2.7.0",
+    "proxy-agent": "^8.0.2",
     "zca-js": "^2.1.2"
   }
 }

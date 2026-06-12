@@ -1,4 +1,4 @@
-import { Cpu, Bot, UserCog, FileText, BarChart3, Code2, BookTemplate, Zap, GitBranch, CreditCard, Package, Plug2 } from 'lucide-react';
+import { Cpu, Bot, UserCog, FileText, BarChart3, Code2, BookTemplate, Zap, GitBranch, CreditCard, Package, Plug2, Network } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 export const superadminNav: NavSection[] = [
@@ -17,6 +17,7 @@ export const superadminNav: NavSection[] = [
     items: [
       { label: 'Tài khoản bot', href: '/app/superadmin/bot-accounts', icon: Bot },
       { label: 'Boss', href: '/app/superadmin/bosses', icon: UserCog },
+      { label: 'Proxy', href: '/app/superadmin/proxies', icon: Network },
       { label: 'MCP Catalog', href: '/app/superadmin/mcp-catalog', icon: Plug2 },
     ],
   },

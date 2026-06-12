@@ -910,6 +910,96 @@ async def bot_account_daily_stats(
 
 
 # ---------------------------------------------------------------------------
+# Proxy pool — IP dân cư gán per-boss
+#   GET/POST /proxies   PATCH/DELETE /proxies/{id}   POST /proxies/{id}/test
+# ---------------------------------------------------------------------------
+
+
+@router.get("/proxies")
+async def list_proxies_sa(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    from src.services import proxy_pool
+
+    return await proxy_pool.list_proxies(db)
+
+
+@router.post("/proxies", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_proxy_sa(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import proxy_pool
+
+    if not payload.get("url"):
+        raise HTTPException(422, "url required")
+    try:
+        new_id = await proxy_pool.create_proxy(
+            db,
+            label=payload.get("label", ""),
+            url=payload["url"],
+            region=payload.get("region"),
+            max_bosses=payload.get("max_bosses", 1),
+            notes=payload.get("notes"),
+        )
+    except proxy_pool.ProxyError as e:
+        raise HTTPException(e.status, e.message)
+    return {"id": new_id}
+
+
+@router.patch("/proxies/{proxy_id}", dependencies=[Depends(verify_json_csrf)])
+async def update_proxy_sa(
+    proxy_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import proxy_pool
+
+    try:
+        await proxy_pool.update_proxy(db, proxy_id, payload)
+    except proxy_pool.ProxyError as e:
+        raise HTTPException(e.status, e.message)
+    return {"updated": 1}
+
+
+@router.delete("/proxies/{proxy_id}", dependencies=[Depends(verify_json_csrf)])
+async def delete_proxy_sa(
+    proxy_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import proxy_pool
+
+    try:
+        await proxy_pool.delete_proxy(db, proxy_id)
+    except proxy_pool.ProxyError as e:
+        raise HTTPException(e.status, e.message)
+    return {"deleted": 1}
+
+
+@router.post("/proxies/{proxy_id}/test", dependencies=[Depends(verify_json_csrf)])
+async def test_proxy_sa(
+    proxy_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    """Gọi thử qua proxy lấy IP công khai để kiểm tra còn sống."""
+    from src.services import proxy_pool
+
+    async with db.acquire() as c:
+        blob = await c.fetchval("SELECT url_enc FROM proxies WHERE id=$1", proxy_id)
+    if blob is None:
+        raise HTTPException(404, "proxy not found")
+    url = proxy_pool.decrypt_url(blob)
+    if not url:
+        raise HTTPException(500, "không giải mã được url proxy")
+    return await proxy_pool.test_proxy(url)
+
+
+# ---------------------------------------------------------------------------
 # GET /usage — platform-wide token usage analytics
 # ---------------------------------------------------------------------------
 

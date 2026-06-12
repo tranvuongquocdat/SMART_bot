@@ -26,7 +26,16 @@ const killer = setTimeout(() => {
 }, TIMEOUT_MS);
 
 (async () => {
-  const zalo = new Zalo({ logging: false });
+  // Login QR cũng đi qua proxy của boss (nếu có) để geo đăng nhập khớp IP sẽ
+  // dùng về sau — tránh "login một nơi, hoạt động một nẻo".
+  const zaloOpts = { logging: false };
+  if (process.env.PROXY_URL) {
+    const { ProxyAgent } = require('proxy-agent');
+    zaloOpts.agent = new ProxyAgent(process.env.PROXY_URL);
+    zaloOpts.polyfill = require('node-fetch');
+    emit('info', { proxy: true });
+  }
+  const zalo = new Zalo(zaloOpts);
   let scannedName = null;
 
   const api = await zalo.loginQR({}, (event) => {

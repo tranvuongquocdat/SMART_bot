@@ -60,6 +60,11 @@ class ZaloAdapter:
             session_path.write_text(json.dumps(creds))
         env = os.environ.copy()
         env["SESSION_PATH"] = str(session_path)
+        # Acc của boss đi qua proxy được gán (nếu có) — các kênh của một khách
+        # cùng ra một IP dân cư. Acc pool (owner_boss_id=None) đi IP server.
+        proxy_url = await self._resolve_proxy(bot_acc)
+        if proxy_url:
+            env["PROXY_URL"] = proxy_url
         proc = await asyncio.create_subprocess_exec(
             "node",
             str(BRIDGE_SCRIPT),
@@ -164,6 +169,18 @@ class ZaloAdapter:
         return list(result.get("member_ids", []))
 
     # --- internals --------------------------------------------------------------
+
+    async def _resolve_proxy(self, bot_acc) -> str | None:
+        owner = getattr(bot_acc, "owner_boss_id", None)
+        if owner is None or self.repo is None:
+            return None
+        try:
+            from src.services.proxy_pool import resolve_for_boss
+
+            return await resolve_for_boss(self.repo.pool, owner)
+        except Exception:
+            log.exception("zalo: resolve proxy failed bot_acc=%s", bot_acc.id)
+            return None
 
     def _next_req_id(self, bot_acc_id: int) -> int:
         n = self._req_seq.get(bot_acc_id, 0) + 1

@@ -38,6 +38,12 @@ export type BossOverview = {
     expiry: string | null;
     overrides: Record<string, number>;
   };
+  proxy: {
+    id: number;
+    label: string;
+    region: string | null;
+    status: string;
+  } | null;
   usage: {
     groups: UsageGauge;
     tools: UsageGauge;

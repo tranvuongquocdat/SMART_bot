@@ -121,9 +121,24 @@ function normalize(msg, ownId) {
 let api = null;
 let ownId = '';
 
+function zaloOptions() {
+  // PROXY_URL được Python (adapter) gán theo proxy của boss sở hữu acc.
+  // zca-js qua proxy cần http.Agent + polyfill node-fetch (undici global fetch
+  // không dùng http.Agent).
+  const opts = { logging: false, selfListen: false };
+  const proxyUrl = process.env.PROXY_URL;
+  if (proxyUrl) {
+    const { ProxyAgent } = require('proxy-agent');
+    opts.agent = new ProxyAgent(proxyUrl);
+    opts.polyfill = require('node-fetch');
+    console.error('[bridge] using proxy');
+  }
+  return opts;
+}
+
 async function init() {
   const session = JSON.parse(fs.readFileSync(sessionPath, 'utf8'));
-  const zalo = new Zalo({ logging: false, selfListen: false });
+  const zalo = new Zalo(zaloOptions());
   api = await zalo.login({
     cookie: session.cookie,
     imei: session.imei,

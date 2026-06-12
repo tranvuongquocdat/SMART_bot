@@ -17,7 +17,7 @@ from datetime import datetime
 from typing import Any, Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from src.repositories.admin_audit_log import AdminAuditLogRepo
@@ -129,6 +129,13 @@ async def boss_overview(
         plan = await c.fetchrow(
             "SELECT id, name, label FROM plans WHERE id=$1", user["plan_id"]
         )
+        proxy = await c.fetchrow(
+            """
+            SELECT p.id, p.label, p.region, p.status
+            FROM proxies p WHERE p.id = $1
+            """,
+            user["proxy_id"],
+        )
 
     overrides = user["plan_overrides_json"]
     if isinstance(overrides, str):
@@ -151,6 +158,14 @@ async def boss_overview(
             else None,
             "overrides": overrides or {},
         },
+        "proxy": {
+            "id": proxy["id"],
+            "label": proxy["label"],
+            "region": proxy["region"],
+            "status": proxy["status"],
+        }
+        if proxy
+        else None,
         "usage": {
             "groups": {"used": groups, "limit": limits.max_active_groups},
             "tools": {"used": tools, "limit": limits.max_active_tools},
@@ -250,6 +265,65 @@ async def patch_boss_subscription(
     if changes:
         await _audit(db, actor, "boss.subscription_updated", boss_id, changes)
     return {"updated": len(changes), "changes": changes}
+
+
+# ---------------------------------------------------------------------------
+# Proxy gán cho boss
+# ---------------------------------------------------------------------------
+
+
+async def _restart_boss_session_listeners(request: Request, db: asyncpg.Pool, boss_id: int) -> None:
+    """Sau khi đổi proxy: restart inbound các acc session-based của boss để
+    áp IP mới (proxy chỉ inject lúc start_inbound)."""
+    from src.repositories.bot_accounts import _row_to_bot_account
+
+    registry = getattr(request.app.state, "channel_registry", None)
+    if registry is None:
+        return
+    adapters = {a.provider: a for a in registry.adapters()}
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT ba.* FROM bot_accounts ba
+            JOIN bot_account_assignments baa ON baa.bot_account_id = ba.id
+            WHERE baa.boss_id=$1 AND baa.status='active'
+              AND ba.provider IN ('zalo', 'messenger')
+            """,
+            boss_id,
+        )
+    for row in rows:
+        adapter = adapters.get(row["provider"])
+        if adapter is None:
+            continue
+        acc = _row_to_bot_account(row)
+        try:
+            await adapter.stop_inbound(acc)
+            await adapter.start_inbound(acc)
+        except Exception:
+            pass  # best-effort; acc sẽ áp proxy ở lần restart tới
+
+
+@router.put("/{boss_id}/proxy", dependencies=[Depends(verify_json_csrf)])
+async def set_boss_proxy(
+    boss_id: int,
+    payload: dict,
+    request: Request,
+    db: asyncpg.Pool = Depends(get_db),
+    actor: BossContext = Depends(require_superadmin),
+) -> dict:
+    """Gán/đổi/gỡ proxy cho boss. payload: {proxy_id: int|null}."""
+    from src.services import proxy_pool
+
+    await _require_boss_user(db, boss_id)
+    proxy_id = payload.get("proxy_id")
+    try:
+        await proxy_pool.assign_to_boss(db, boss_id, proxy_id)
+    except proxy_pool.ProxyError as e:
+        raise HTTPException(e.status, e.message)
+
+    await _restart_boss_session_listeners(request, db, boss_id)
+    await _audit(db, actor, "boss.proxy_assigned", boss_id, {"proxy_id": proxy_id})
+    return {"ok": True, "proxy_id": proxy_id}
 
 
 # ---------------------------------------------------------------------------
