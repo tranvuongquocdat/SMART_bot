@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { drawerBackdrop, drawerPanel, tabFade } from '@/lib/motion';
+import { errorMessage } from '@/lib/api';
 import { plansAdminQuery } from '../plans/api';
 import { proxiesQuery, setBossProxy } from '../proxies/api';
 import {
@@ -70,7 +71,7 @@ function ProxySection({ bossId, data }: { bossId: number; data: BossOverview }) 
       qc.invalidateQueries({ queryKey: ['superadmin', 'proxies'] });
       toast.success('Đã cập nhật proxy — listener kênh đang restart');
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e) => toast.error(errorMessage(e, 'Cập nhật proxy thất bại')),
   });
 
   return (
@@ -252,7 +253,7 @@ function SubscriptionTab({ bossId, data }: { bossId: number; data: BossOverview 
       qc.invalidateQueries({ queryKey: ['superadmin', 'bosses'] });
       toast.success('Đã lưu gói & giới hạn');
     },
-    onError: () => toast.error('Lưu thất bại'),
+    onError: (e) => toast.error(errorMessage(e, 'Lưu thất bại')),
   });
 
   return (

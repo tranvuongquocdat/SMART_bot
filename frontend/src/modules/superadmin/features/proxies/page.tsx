@@ -24,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { errorMessage } from '@/lib/api';
 import {
   proxiesQuery,
   createProxy,
@@ -103,7 +104,7 @@ function ProxyModal({
       qc.invalidateQueries({ queryKey: ['superadmin', 'proxies'] });
       onClose();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e) => toast.error(errorMessage(e, 'Lưu proxy thất bại')),
   });
 
   const valid = form.label.trim() && (isEdit || form.url.trim());
@@ -182,7 +183,7 @@ export default function ProxiesPage() {
       qc.invalidateQueries({ queryKey: ['superadmin', 'proxies'] });
       toast.success('Đã xoá proxy');
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e) => toast.error(errorMessage(e, 'Xoá proxy thất bại')),
   });
 
   async function runTest(p: Proxy) {
