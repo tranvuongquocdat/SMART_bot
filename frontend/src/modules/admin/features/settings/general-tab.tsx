@@ -22,13 +22,15 @@ export default function GeneralTab() {
 
   const [name, setName] = useState('');
   const [tz, setTz] = useState('');
-  const [language, setLanguage] = useState<Lang>(lang);
+  const [uiLanguage, setUiLanguage] = useState<Lang>(lang);
+  const [botLanguage, setBotLanguage] = useState('vi'); // vi | en | auto
 
   useEffect(() => {
     if (data) {
       setName(data.name ?? '');
       setTz(data.tz ?? 'Asia/Ho_Chi_Minh');
-      if (data.language === 'vi' || data.language === 'en') setLanguage(data.language);
+      if (data.ui_language === 'vi' || data.ui_language === 'en') setUiLanguage(data.ui_language);
+      setBotLanguage(data.language ?? 'vi');
     }
   }, [data]);
 
@@ -37,7 +39,8 @@ export default function GeneralTab() {
       patchGeneral({
         name: name || undefined,
         tz: tz || undefined,
-        language: language || undefined,
+        language: botLanguage || undefined,
+        ui_language: uiLanguage || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: generalQuery.queryKey });
@@ -46,10 +49,10 @@ export default function GeneralTab() {
     onError: () => toast.error(t('common.saveError')),
   });
 
-  // Đổi ngôn ngữ → flip UI ngay (không cần bấm Lưu), Lưu để ghi vào tài khoản.
-  const onLanguageChange = (v: string) => {
+  // Đổi ngôn ngữ giao diện → flip ngay (không cần bấm Lưu); Lưu để ghi vào tài khoản.
+  const onUiLanguageChange = (v: string) => {
     const next = v as Lang;
-    setLanguage(next);
+    setUiLanguage(next);
     setLang(next);
   };
 
@@ -79,9 +82,9 @@ export default function GeneralTab() {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="gen-lang">{t('settings.general.language')}</Label>
-        <Select value={language} onValueChange={onLanguageChange}>
-          <SelectTrigger id="gen-lang">
+        <Label htmlFor="gen-ui-lang">{t('settings.general.uiLanguage')}</Label>
+        <Select value={uiLanguage} onValueChange={onUiLanguageChange}>
+          <SelectTrigger id="gen-ui-lang">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -89,6 +92,22 @@ export default function GeneralTab() {
             <SelectItem value="en">{t('lang.en')}</SelectItem>
           </SelectContent>
         </Select>
+        <p className="text-xs text-muted-foreground">{t('settings.general.uiLanguageHint')}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="gen-bot-lang">{t('settings.general.botLanguage')}</Label>
+        <Select value={botLanguage} onValueChange={setBotLanguage}>
+          <SelectTrigger id="gen-bot-lang">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">{t('lang.auto')}</SelectItem>
+            <SelectItem value="vi">{t('lang.vi')}</SelectItem>
+            <SelectItem value="en">{t('lang.en')}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{t('settings.general.botLanguageHint')}</p>
       </div>
 
       <Button onClick={() => mut.mutate()} disabled={mut.isPending}>

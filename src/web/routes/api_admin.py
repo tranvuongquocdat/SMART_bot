@@ -775,10 +775,10 @@ async def get_settings_general(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Return general/profile settings: name, tz, language."""
+    """Return general/profile settings: name, tz, language (bot), ui_language (web)."""
     async with db.acquire() as c:
         row = await c.fetchrow(
-            "SELECT id, name, tz, language FROM users WHERE id=$1",
+            "SELECT id, name, tz, language, ui_language FROM users WHERE id=$1",
             ctx.boss_id,
         )
     if not row:
@@ -983,8 +983,8 @@ async def patch_settings_general(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Update name, tz, language."""
-    allowed = {"name", "tz", "language"}
+    """Update name, tz, language (bot), ui_language (web)."""
+    allowed = {"name", "tz", "language", "ui_language"}
     sets = {k: v for k, v in payload.items() if k in allowed}
     if not sets:
         return {"updated": 0}

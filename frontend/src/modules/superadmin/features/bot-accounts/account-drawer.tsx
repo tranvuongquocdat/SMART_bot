@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { motion } from 'framer-motion';
 import { Loader2, Maximize2, Minimize2, QrCode, RefreshCw, Smartphone, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -21,6 +21,7 @@ import {
   botAccountDailyStatsQuery,
   botAccountDetailQuery,
   botAccountMessagesQuery,
+  patchBotAccount,
   startAccountQrLogin,
   type BotAccountDetail,
   type QrLoginStatus,
@@ -50,9 +51,52 @@ const fmtCountdown = (s: number) =>
 
 // ------------------------------------------------------------- Tổng quan
 
+function ActiveToggle({ d }: { d: BotAccountDetail }) {
+  const qc = useQueryClient();
+  const isActive = d.status === 'active';
+  // banned/logged_out là trạng thái hệ thống — không cho bật/tắt tay.
+  const locked = d.status === 'banned' || d.status === 'logged_out';
+
+  const mut = useMutation({
+    mutationFn: () => patchBotAccount(d.id, { status: isActive ? 'paused' : 'active' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['superadmin', 'bot-accounts'] });
+      toast.success(isActive ? 'Đã tạm dừng bot' : 'Đã kích hoạt bot');
+    },
+    onError: () => toast.error('Đổi trạng thái thất bại'),
+  });
+
+  return (
+    <div className="rounded-lg border bg-card px-3 py-2.5 flex items-center justify-between">
+      <div>
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Hoạt động</p>
+        <p className="text-sm font-medium">
+          {isActive ? 'Đang chạy' : locked ? d.status : 'Đã tạm dừng'}
+        </p>
+      </div>
+      <button
+        onClick={() => !locked && mut.mutate()}
+        disabled={locked || mut.isPending}
+        role="switch"
+        aria-checked={isActive}
+        className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
+          locked ? 'bg-input cursor-not-allowed' : isActive ? 'bg-primary cursor-pointer' : 'bg-input cursor-pointer'
+        }`}
+      >
+        <span
+          className={`block h-4 w-4 rounded-full bg-background shadow-lg transition-transform ${
+            isActive ? 'translate-x-4' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </div>
+  );
+}
+
 function OverviewTab({ d }: { d: BotAccountDetail }) {
   return (
     <div className="space-y-5">
+      <ActiveToggle d={d} />
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div className="rounded-lg border bg-card px-3 py-2.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">

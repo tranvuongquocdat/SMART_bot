@@ -489,6 +489,7 @@ class PatchBotAccountBody(BaseModel):
     label: Optional[str] = None
     ownership: Optional[str] = None
     account_kind: Optional[str] = None
+    status: Optional[str] = None  # superadmin chỉ bật/tắt: active | paused
 
 
 @router.patch(
@@ -498,11 +499,19 @@ class PatchBotAccountBody(BaseModel):
 async def patch_bot_account(
     account_id: int,
     body: PatchBotAccountBody,
+    request: Request,
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> dict:
+    # Chỉ cho superadmin bật/tắt thủ công giữa active/paused; banned/logged_out
+    # là trạng thái hệ thống tự đặt, không cho set tay.
+    if body.status is not None and body.status not in ("active", "paused"):
+        raise HTTPException(status_code=422, detail="status chỉ nhận active | paused")
+
     async with db.acquire() as c:
-        existing = await c.fetchrow("SELECT id FROM bot_accounts WHERE id = $1", account_id)
+        existing = await c.fetchrow(
+            "SELECT * FROM bot_accounts WHERE id = $1", account_id
+        )
         if not existing:
             raise HTTPException(status_code=404, detail="bot account not found")
         await c.execute(
@@ -511,6 +520,7 @@ async def patch_bot_account(
             SET display_name  = COALESCE($2, display_name),
                 ownership     = COALESCE($3, ownership),
                 account_kind  = COALESCE($4, account_kind),
+                status        = COALESCE($5, status),
                 updated_at    = NOW()
             WHERE id = $1
             """,
@@ -518,7 +528,27 @@ async def patch_bot_account(
             body.label,
             body.ownership,
             body.account_kind,
+            body.status,
         )
+
+    # Bật/tắt listener tương ứng (best-effort).
+    if body.status is not None and body.status != existing["status"]:
+        from src.repositories.bot_accounts import _row_to_bot_account
+
+        registry = getattr(request.app.state, "channel_registry", None)
+        adapters = {a.provider: a for a in registry.adapters()} if registry else {}
+        adapter = adapters.get(existing["provider"])
+        if adapter is not None:
+            async with db.acquire() as c:
+                row = await c.fetchrow("SELECT * FROM bot_accounts WHERE id=$1", account_id)
+            acc = _row_to_bot_account(row)
+            try:
+                if body.status == "paused":
+                    await adapter.stop_inbound(acc)
+                elif body.status == "active" and row["credentials_blob_enc"]:
+                    await adapter.start_inbound(acc)
+            except Exception:
+                pass
     return {"id": account_id, "ok": True}
 
 

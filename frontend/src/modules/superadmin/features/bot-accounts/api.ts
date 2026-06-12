@@ -122,7 +122,7 @@ export async function createBotAccount(body: {
 
 export async function patchBotAccount(
   id: number,
-  body: { label?: string; ownership?: string | null; account_kind?: string },
+  body: { label?: string; ownership?: string | null; account_kind?: string; status?: string },
 ) {
   return api<{ id: number; ok: boolean }>(`/api/v1/superadmin/bot-accounts/${id}`, {
     method: 'PATCH',

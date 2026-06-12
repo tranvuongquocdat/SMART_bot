@@ -278,3 +278,24 @@ def test_daily_stats_full_series(client, logged_in_superadmin, clean_db):
     yesterday = rows[1]
     assert today["received"] == 1 and today["sent"] == 1
     assert yesterday["received"] == 2 and yesterday["sent"] == 0
+
+
+def test_toggle_status_active_paused(client, logged_in_superadmin, clean_db):
+    acc_id = _seed_zalo_account(clean_db)
+    from src.web.security import CSRF_COOKIE
+
+    client.cookies.set(CSRF_COOKIE, "csrf-toggle")
+    h = {"X-CSRF-Token": "csrf-toggle"}
+
+    r = client.patch(f"/api/v1/superadmin/bot-accounts/{acc_id}", json={"status": "paused"}, headers=h)
+    assert r.status_code == 200
+    d = client.get(f"/api/v1/superadmin/bot-accounts/{acc_id}/detail").json()
+    assert d["status"] == "paused"
+
+    r2 = client.patch(f"/api/v1/superadmin/bot-accounts/{acc_id}", json={"status": "active"}, headers=h)
+    assert r2.status_code == 200
+    assert client.get(f"/api/v1/superadmin/bot-accounts/{acc_id}/detail").json()["status"] == "active"
+
+    # status lạ bị từ chối
+    r3 = client.patch(f"/api/v1/superadmin/bot-accounts/{acc_id}", json={"status": "banned"}, headers=h)
+    assert r3.status_code == 422

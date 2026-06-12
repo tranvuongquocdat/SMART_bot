@@ -27,14 +27,20 @@ export const vi: Record<string, string> = {
   'settings.account.displayNamePlaceholder': 'Nhập tên hiển thị',
   'settings.account.savedName': 'Đã lưu tên hiển thị.',
 
-  // tab Chung
+  // mục Chung
+  'settings.section.account': 'Tài khoản',
+  'settings.section.general': 'Chung',
   'settings.general.displayName': 'Tên hiển thị',
   'settings.general.displayNamePlaceholder': 'Tên hiển thị',
   'settings.general.tz': 'Múi giờ',
-  'settings.general.language': 'Ngôn ngữ',
+  'settings.general.uiLanguage': 'Ngôn ngữ giao diện',
+  'settings.general.uiLanguageHint': 'Ngôn ngữ hiển thị của trang web.',
+  'settings.general.botLanguage': 'Ngôn ngữ trợ lý trả lời',
+  'settings.general.botLanguageHint': 'Ngôn ngữ bot dùng khi trả lời trong chat/nhóm.',
   'settings.general.saved': 'Đã lưu cài đặt chung.',
 
   // bộ chọn ngôn ngữ
   'lang.vi': 'Tiếng Việt',
   'lang.en': 'English',
+  'lang.auto': 'Theo người nhắn',
 };

@@ -37,6 +37,15 @@ async def _load_prompt(prompt_key: str, ctx) -> str:
     return (p.body if p else "") or ""
 
 
+def _bot_language_directive(language: str | None) -> str | None:
+    """Chỉ thị ngôn ngữ trả lời của bot theo cài đặt của boss.
+    'auto' / None → không ép (bot trả lời theo ngôn ngữ người nhắn)."""
+    return {
+        "vi": "Luôn trả lời bằng tiếng Việt, bất kể người dùng nhắn bằng ngôn ngữ nào.",
+        "en": "Always respond in English, regardless of the language the user writes in.",
+    }.get((language or "").lower())
+
+
 def _format_memory(semantic, episodic, reminders, action_items) -> str:
     lines: list[str] = []
     if semantic:
@@ -138,8 +147,11 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     cfg = op_cls._op_config
     op_name = cfg.name
 
-    # 1. System prompt
+    # 1. System prompt (+ chỉ thị ngôn ngữ trả lời theo cài đặt của boss)
     system_prompt = await _load_prompt(cfg.prompt_key, ctx)
+    lang_directive = _bot_language_directive(getattr(ctx.boss, "language", None))
+    if lang_directive:
+        system_prompt = f"{system_prompt}\n\n{lang_directive}"
 
     # 2. Memory recall (semantic + episodic + prospective when configured)
     semantic: list[Any] = []

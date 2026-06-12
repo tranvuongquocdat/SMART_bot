@@ -27,14 +27,20 @@ export const en: Record<string, string> = {
   'settings.account.displayNamePlaceholder': 'Enter display name',
   'settings.account.savedName': 'Display name saved.',
 
-  // General tab
+  // General section
+  'settings.section.account': 'Account',
+  'settings.section.general': 'General',
   'settings.general.displayName': 'Display name',
   'settings.general.displayNamePlaceholder': 'Display name',
   'settings.general.tz': 'Timezone',
-  'settings.general.language': 'Language',
+  'settings.general.uiLanguage': 'Interface language',
+  'settings.general.uiLanguageHint': 'Display language of the web app.',
+  'settings.general.botLanguage': 'Assistant reply language',
+  'settings.general.botLanguageHint': 'Language the bot uses when replying in chat/groups.',
   'settings.general.saved': 'General settings saved.',
 
   // language switcher
   'lang.vi': 'Tiếng Việt',
   'lang.en': 'English',
+  'lang.auto': "Match sender's language",
 };

@@ -42,7 +42,8 @@ export type GeneralSettings = {
   id: number;
   name: string | null;
   tz: string | null;
-  language: string | null;
+  language: string | null; // ngôn ngữ trợ lý trả lời (vi | en | auto)
+  ui_language: string | null; // ngôn ngữ giao diện web (vi | en)
 };
 
 export const accountQuery = queryOptions({
@@ -81,8 +82,9 @@ export const testAiKey = (body: { provider: string; api_key: string }) =>
     body: new URLSearchParams(body).toString(),
   });
 
-export const patchGeneral = (body: Partial<Pick<GeneralSettings, 'name' | 'tz' | 'language'>>) =>
-  api('/api/v1/admin/settings/general', { method: 'PATCH', body: JSON.stringify(body) });
+export const patchGeneral = (
+  body: Partial<Pick<GeneralSettings, 'name' | 'tz' | 'language' | 'ui_language'>>,
+) => api('/api/v1/admin/settings/general', { method: 'PATCH', body: JSON.stringify(body) });
 
 export type ProviderModelsResult = { ok: boolean; models: { id: string }[]; message?: string };
 
