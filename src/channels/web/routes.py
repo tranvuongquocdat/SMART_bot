@@ -34,6 +34,20 @@ def _adapter(request: Request):
     return adapter
 
 
+async def _web_bot_account_id(adapter):
+    """Resolve (and cache on adapter) the single active 'web' bot_account id —
+    InboundIngest scope candidates theo bot_account_id (assignment provider='web')."""
+    cached = getattr(adapter, "web_bot_account_id", None)
+    if cached is not None:
+        return cached
+    async with adapter.pool.acquire() as c:
+        bid = await c.fetchval(
+            "SELECT id FROM bot_accounts WHERE provider='web' AND status='active' LIMIT 1"
+        )
+    adapter.web_bot_account_id = bid
+    return bid
+
+
 class CreateUserBody(BaseModel):
     name: str
     role: str = "employee"  # employee | boss | superadmin
@@ -177,18 +191,26 @@ async def send_inbound(request: Request):
         raise HTTPException(404, "sender not found")
 
     import uuid as _uuid
-    await a.bus.publish(
-        "inbound.raw.web",
-        {
-            "web_user_id": as_uid,
-            "chat_id": chat_id,
-            "chat_type": "dm" if chat_id.startswith("dm:") else "group",
-            "text": text,
-            "mention_bot": mention_bot,
-            "provider_msg_id": f"w-{_uuid.uuid4().hex[:10]}",
-            "sender_name": sender["name"],
-        },
+    from datetime import datetime, timezone
+
+    from src.channels.base import InboundMessage
+
+    msg = InboundMessage(
+        bot_account_id=await _web_bot_account_id(a),
+        provider="web",
+        chat_id=chat_id,
+        chat_type="dm" if chat_id.startswith("dm:") else "group",
+        provider_msg_id=f"w-{_uuid.uuid4().hex[:10]}",
+        sender_provider_id=as_uid,
+        sender_name=sender["name"],
+        text=text,
+        mentions_bot=mention_bot,
+        reply_to_provider_msg_id=None,
+        media_kind="text",
+        media_url=None,
+        ts=datetime.now(tz=timezone.utc),
     )
+    await a.bus.publish("inbound.normalized", {"message": msg})
     return {"ok": True}
 
 

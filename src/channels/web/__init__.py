@@ -8,7 +8,7 @@ sse_hub + repos qua app.state).
 from __future__ import annotations
 
 from src.channels.registry import ChannelSetupContext
-from src.channels.web import fanout, normalizer
+from src.channels.web import fanout
 from src.channels.web.adapter import WebAdapter
 from src.channels.web.sse import SSEHub
 from src.channels.web.state_repo import WebGroupsRepo, WebUsersRepo
@@ -21,7 +21,7 @@ def setup(ctx: ChannelSetupContext) -> WebAdapter:
 
     adapter = WebAdapter(bus=ctx.bus, sse_hub=sse_hub, groups_repo=groups_repo)
 
-    normalizer.register(ctx.bus, ctx.pool)
+    # Inbound đi qua InboundIngest (wrapper chung) — web không còn normalizer riêng.
     fanout.register(ctx.bus, sse_hub, groups_repo, ctx.pool)
 
     # Expose handles cho routes.py (mounted ở main.py) qua attributes
