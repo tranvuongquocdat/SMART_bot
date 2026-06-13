@@ -37,6 +37,20 @@ class InboundMessage:
     raw: Any = None
 
 
+class BaseChannelAdapter:
+    """Base cho adapter: cung cấp đường DUY NHẤT đẩy tin vào hệ thống.
+
+    Adapter chỉ việc dịch wire-format -> InboundMessage rồi gọi _emit_inbound.
+    Toàn bộ định danh/lọc/persist do InboundIngest (subscriber inbound.normalized).
+    """
+
+    def __init__(self, bus, *args, **kwargs):
+        self.bus = bus
+
+    async def _emit_inbound(self, msg: "InboundMessage") -> None:
+        await self.bus.publish("inbound.normalized", {"message": msg})
+
+
 class ChannelAdapter(Protocol):
     provider: str
 
