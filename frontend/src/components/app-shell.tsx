@@ -97,7 +97,7 @@ export function AppShell({
           </div>
           <button
             onClick={() => setCollapsed(!collapsed)}
-            aria-label={collapsed ? 'Mở rộng' : 'Thu gọn'}
+            aria-label={collapsed ? t('common.expand') : t('common.collapse')}
             className="h-[26px] w-[26px] rounded-md grid place-items-center text-[hsl(var(--dim))] hover:text-foreground hover:bg-[hsl(var(--hover))] transition-colors"
           >
             <ChevronLeft className={cn('h-3.5 w-3.5 transition-transform', collapsed && 'rotate-180')} />

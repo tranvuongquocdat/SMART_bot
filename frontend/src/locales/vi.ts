@@ -78,6 +78,11 @@ export const vi: Record<string, string> = {
   'due.tomorrow': 'Mai · {time}',
   'due.inDays': '{n}d sau',
   'common.cancel': 'Hủy',
+  'common.expand': 'Mở rộng',
+  'common.collapse': 'Thu gọn',
+  'picker.choosePerson': 'Chọn người…',
+  'picker.searchByName': 'Tìm theo tên...',
+  'picker.notFound': 'Không tìm thấy.',
 
   // kênh kết nối
   'channels.title': 'Kênh kết nối',

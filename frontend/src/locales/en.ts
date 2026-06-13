@@ -78,6 +78,11 @@ export const en: Record<string, string> = {
   'due.tomorrow': 'Tomorrow · {time}',
   'due.inDays': 'in {n}d',
   'common.cancel': 'Cancel',
+  'common.expand': 'Expand',
+  'common.collapse': 'Collapse',
+  'picker.choosePerson': 'Choose a person…',
+  'picker.searchByName': 'Search by name...',
+  'picker.notFound': 'No results.',
 
   // channels
   'channels.title': 'Channels',
