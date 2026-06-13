@@ -94,6 +94,13 @@ async def lifespan(app: FastAPI):
         app.state.channel_registry,
         _admin_repo,
     )
+    # Wrapper định danh + lọc nhóm dùng chung — subscriber DUY NHẤT cho
+    # inbound.normalized. Đăng ký TRƯỚC khi channels boot_inbound emit tin.
+    from src.channels.ingest import InboundIngest
+
+    InboundIngest(
+        app.state.db_pool, app.state.bus, app.state.outbound_service
+    ).register()
     _setup_ctx = ChannelSetupContext(
         bus=app.state.bus,
         pool=app.state.db_pool,
