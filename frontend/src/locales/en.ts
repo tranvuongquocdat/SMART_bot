@@ -586,6 +586,12 @@ export const en: Record<string, string> = {
   'zaloqr.by': ' by {name}',
   'zaloqr.loginFailed': 'Login failed.',
   'zaloqr.creating': 'Generating QR code…',
+  'zaloqr.handshakeTitle': 'Last step: let the bot recognize you',
+  'zaloqr.handshakeDesc': 'Open Zalo with your main account and send the message below to {bot}. The bot will then recognize you in DMs and when you appear in a group.',
+  'zaloqr.handshakeCmd': 'Message to send',
+  'zaloqr.handshakeCopied': 'Copied',
+  'zaloqr.handshakeError': 'Could not create a link code. You can retry from the Channels page.',
+  'zaloqr.handshakeDone': 'Done',
 
   // ===== SUPERADMIN (sa.*) =====
   'sa.common.save': 'Save',

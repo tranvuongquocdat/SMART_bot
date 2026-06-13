@@ -586,6 +586,12 @@ export const vi: Record<string, string> = {
   'zaloqr.by': ' bởi {name}',
   'zaloqr.loginFailed': 'Đăng nhập thất bại.',
   'zaloqr.creating': 'Đang tạo mã QR…',
+  'zaloqr.handshakeTitle': 'Bước cuối: để bot nhận diện bạn',
+  'zaloqr.handshakeDesc': 'Mở Zalo bằng tài khoản chính của bạn, nhắn nội dung dưới đây cho {bot}. Sau đó bot sẽ nhận diện bạn khi bạn nhắn riêng hoặc khi bạn có mặt trong nhóm.',
+  'zaloqr.handshakeCmd': 'Nội dung cần nhắn',
+  'zaloqr.handshakeCopied': 'Đã copy',
+  'zaloqr.handshakeError': 'Không tạo được mã kết nối. Bạn có thể tạo lại ở trang Kênh.',
+  'zaloqr.handshakeDone': 'Xong',
 
   // ===== SUPERADMIN (sa.*) =====
   'sa.common.save': 'Lưu',

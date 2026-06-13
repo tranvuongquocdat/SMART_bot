@@ -12,7 +12,13 @@ import {
 } from '@/components/ui/dialog';
 import { ApiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
-import { startZaloQrLogin, zaloQrLoginStatus, type ZaloQrStatus } from './api';
+import {
+  mintLinkToken,
+  startZaloQrLogin,
+  zaloQrLoginStatus,
+  type LinkToken,
+  type ZaloQrStatus,
+} from './api';
 
 const POLL_MS = 1500;
 
@@ -31,6 +37,9 @@ export function ZaloQrDialog({
   const [state, setState] = useState<ZaloQrStatus | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
+  // Sau khi QR success → bước handshake để bot nhận diện acc chính của boss.
+  const [handshake, setHandshake] = useState<LinkToken | null>(null);
+  const [handshakeError, setHandshakeError] = useState(false);
   const loginIdRef = useRef<string | null>(null);
   const stoppedRef = useRef(false);
 
@@ -60,6 +69,8 @@ export function ZaloQrDialog({
   useEffect(() => {
     if (!open) return;
     stoppedRef.current = false;
+    setHandshake(null);
+    setHandshakeError(false);
     begin();
     const timer = setInterval(async () => {
       const id = loginIdRef.current;
@@ -75,7 +86,12 @@ export function ZaloQrDialog({
             t('zaloqr.connected', { name: s.display_name ? ` — ${s.display_name}` : '' })
           );
           qc.invalidateQueries({ queryKey: ['admin', 'channels'] });
-          onClose();
+          // Không đóng ngay — chuyển sang bước handshake định danh acc chính.
+          try {
+            setHandshake(await mintLinkToken('zalo'));
+          } catch {
+            setHandshakeError(true);
+          }
         } else if (s.status === 'error') {
           stoppedRef.current = true;
         }
@@ -113,7 +129,38 @@ export function ZaloQrDialog({
         </DialogHeader>
 
         <div className="flex flex-col items-center gap-3 py-2 min-h-[280px] justify-center">
-          {startError ? (
+          {handshake || handshakeError ? (
+            <div className="flex w-full flex-col gap-3">
+              <p className="text-sm font-medium">{t('zaloqr.handshakeTitle')}</p>
+              {handshakeError ? (
+                <p className="text-sm text-destructive">{t('zaloqr.handshakeError')}</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    {t('zaloqr.handshakeDesc', { bot: handshake!.bot_name })}
+                  </p>
+                  <div className="flex items-center gap-2 rounded-lg border bg-muted/40 p-2">
+                    <code className="flex-1 truncate font-mono text-sm">
+                      /start {handshake!.token}
+                    </code>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(`/start ${handshake!.token}`);
+                        toast.success(t('zaloqr.handshakeCopied'));
+                      }}
+                    >
+                      {t('zaloqr.handshakeCmd')}
+                    </Button>
+                  </div>
+                </>
+              )}
+              <Button className="self-end" size="sm" onClick={onClose}>
+                {t('zaloqr.handshakeDone')}
+              </Button>
+            </div>
+          ) : startError ? (
             <>
               <p className="text-sm text-destructive text-center">{startError}</p>
               <Button size="sm" variant="outline" onClick={begin}>

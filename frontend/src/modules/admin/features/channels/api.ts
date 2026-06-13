@@ -53,3 +53,11 @@ export const startZaloQrLogin = () =>
 
 export const zaloQrLoginStatus = (loginId: string) =>
   api<ZaloQrStatus>(`/api/v1/admin/channels/zalo/qr-login/${loginId}`);
+
+export type LinkToken = { token: string; bot_name: string };
+
+export const mintLinkToken = (provider: string) =>
+  api<LinkToken>(
+    `/api/v1/admin/channels/${encodeURIComponent(provider)}/link-token`,
+    { method: 'POST', body: JSON.stringify({}) }
+  );

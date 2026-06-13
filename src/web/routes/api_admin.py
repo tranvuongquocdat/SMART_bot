@@ -1559,6 +1559,45 @@ async def connect_channel(
     return {"provider": provider, "status": "active", "display_name": display_name}
 
 
+@router.post("/channels/{provider}/link-token", dependencies=[Depends(verify_json_csrf)])
+async def mint_link_token(
+    provider: str,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Cấp token handshake để boss nhắn ``/start <token>`` từ TÀI KHOẢN CHÍNH.
+
+    Đây là khâu định danh acc chính của sếp: bot nhận DM ``/start <token>``,
+    InboundIngest consume token -> ghi account_links. Nhờ đó bot nhận diện được
+    sếp khi sếp DM hoặc khi sếp xuất hiện trong nhóm.
+    """
+    provider = provider.lower().strip()
+    async with db.acquire() as c:
+        acc = await c.fetchrow(
+            """
+            SELECT ba.id, ba.provider_user_id, ba.display_name
+            FROM bot_account_assignments baa
+            JOIN bot_accounts ba ON ba.id = baa.bot_account_id
+            WHERE baa.boss_id=$1 AND baa.provider=$2 AND baa.status='active'
+            """,
+            ctx.boss_id,
+            provider,
+        )
+    if acc is None:
+        raise HTTPException(
+            409,
+            tr(ctx, vi="Chưa kết nối kênh này", en="Channel not connected"),
+        )
+    from src.services.linking_service import LinkingService
+
+    token = await LinkingService(db).generate(ctx.boss_id, provider, acc["id"])
+    return {
+        "token": token,
+        "bot_name": acc["display_name"] or acc["provider_user_id"],
+    }
+
+
 # ---------------------------------------------------------------------------
 # Zalo: boss tự kết nối acc phụ qua QR
 #   POST /channels/zalo/qr-login        → mở phiên login, trả login_id
