@@ -2,10 +2,12 @@ import { Link, Outlet, useLoaderData, useLocation, useMatches } from 'react-rout
 import { AnimatePresence, motion } from 'framer-motion';
 import { AppShell } from '@/components/app-shell';
 import { pageTransition } from '@/lib/motion';
+import { useT } from '@/lib/i18n';
 import type { Me } from '@/lib/auth';
 import { superadminNav } from './nav';
 
 export default function SuperadminLayout() {
+  const t = useT();
   const me = useLoaderData() as Me;
   const matches = useMatches();
   const location = useLocation();
@@ -27,17 +29,17 @@ export default function SuperadminLayout() {
               <span key={i}>
                 {i > 0 && <span className="mx-2 text-[hsl(var(--dim))]">/</span>}
                 {isLast ? (
-                  <b className="text-foreground font-medium">{c.label}</b>
+                  <b className="text-foreground font-medium">{t(c.label)}</b>
                 ) : (
                   <Link to={c.pathname} className="hover:text-foreground transition-colors">
-                    {c.label}
+                    {t(c.label)}
                   </Link>
                 )}
               </span>
             );
           })
         ) : (
-          'Super-admin'
+          t('crumb.superadmin')
         )
       }
     >

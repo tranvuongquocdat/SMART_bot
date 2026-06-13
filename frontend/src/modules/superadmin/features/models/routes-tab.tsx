@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { llmRoutesQuery, patchLlmRoute } from './api';
 import type { LlmRoute } from './api';
+import { useT } from '@/lib/i18n';
 
 function EditRouteDialog({
   route,
@@ -34,6 +35,7 @@ function EditRouteDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({
     target_tier: route.target_tier,
@@ -51,10 +53,10 @@ function EditRouteDialog({
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'llm-routes'] });
-      toast.success('Đã cập nhật route');
+      toast.success(t('sa.models.routeUpdated'));
       onOpenChange(false);
     },
-    onError: () => toast.error('Cập nhật route thất bại'),
+    onError: () => toast.error(t('sa.models.routeUpdateError')),
   });
 
   const set = (k: keyof typeof form, v: unknown) =>
@@ -64,7 +66,7 @@ function EditRouteDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Sửa route — {route.feature}</DialogTitle>
+          <DialogTitle>{t('sa.models.routeEditTitle', { feature: route.feature })}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3 mt-2">
           <div className="flex flex-col gap-1.5">
@@ -102,8 +104,8 @@ function EditRouteDialog({
           </div>
         </div>
         <DialogFooter className="mt-4">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Huỷ</Button>
-          <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>Lưu</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('sa.common.cancel')}</Button>
+          <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>{t('sa.common.save')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -111,6 +113,7 @@ function EditRouteDialog({
 }
 
 export function RoutesTab() {
+  const t = useT();
   const routes = useQuery(llmRoutesQuery);
   const [editTarget, setEditTarget] = useState<LlmRoute | null>(null);
 
@@ -175,12 +178,12 @@ export function RoutesTab() {
       <div className="mb-3.5">
         <h2 className="text-[14.5px] font-semibold tracking-tight">LLM routes</h2>
         <p className="text-[12.5px] text-muted-foreground mt-0.5">
-          Mapping feature → tier để điều phối model theo ngữ cảnh.
+          {t('sa.models.routesDesc')}
         </p>
       </div>
       {routes.data?.length === 0 && !routes.isLoading ? (
         <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          Chưa có LLM routes nào. Seed dữ liệu hoặc thêm qua Jinja2 admin.
+          {t('sa.models.routesEmpty')}
         </div>
       ) : (
         <DataTable columns={columns} data={routes.data ?? []} />
