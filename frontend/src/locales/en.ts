@@ -386,6 +386,9 @@ export const en: Record<string, string> = {
   'aitab.checking': 'Checking…',
   'aitab.byoTitle': 'Your API keys (BYO)',
   'aitab.byoDesc': 'Enter a key to use your own quota instead of the platform quota. Keys are Fernet-encrypted before storing.',
+  'aitab.providerCustom': 'Custom / Self-hosted',
+  'aitab.baseUrlPlaceholder': 'http://localhost:11434/v1 or https://… (OpenAI-compatible)',
+  'aitab.customKeyHint': 'enter a key, or anything if your server needs none',
 
   // groups
   'grp.title': 'Groups',

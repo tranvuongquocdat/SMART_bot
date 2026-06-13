@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
@@ -33,11 +33,12 @@ const SLOT_LABEL_KEYS: Record<string, string> = {
   vision: 'sa.boss.slotVision',
 };
 
-const PROVIDERS = ['openai', 'groq', 'gemini'] as const;
+const PROVIDERS = ['openai', 'groq', 'gemini', 'custom'] as const;
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   groq: 'Groq',
   gemini: 'Gemini',
+  custom: 'Custom / Self-hosted',
 };
 
 function errDetail(e: unknown, fallback: string): string {
@@ -120,21 +121,30 @@ function KeyRow({
   provider,
   present,
   last4,
+  baseUrlSaved,
 }: {
   bossId: number;
   provider: string;
   present: boolean;
   last4?: string;
+  baseUrlSaved?: string;
 }) {
   const t = useT();
   const qc = useQueryClient();
   const [val, setVal] = useState('');
+  const isCustom = provider === 'custom';
+  const [baseUrl, setBaseUrl] = useState(baseUrlSaved ?? '');
+
+  useEffect(() => {
+    setBaseUrl(baseUrlSaved ?? '');
+  }, [baseUrlSaved]);
 
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: ['superadmin', 'boss', bossId, 'ai'] });
 
   const saveMut = useMutation({
-    mutationFn: () => patchBossAiKey(bossId, { provider, api_key: val }),
+    mutationFn: () =>
+      patchBossAiKey(bossId, { provider, api_key: val, base_url: isCustom ? baseUrl : undefined }),
     onSuccess: () => {
       setVal('');
       invalidate();
@@ -151,6 +161,52 @@ function KeyRow({
     },
     onError: () => toast.error(t('sa.boss.keyDeleteError')),
   });
+
+  if (isCustom) {
+    return (
+      <div className="rounded-md border bg-card p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold uppercase text-muted-foreground">
+            {t('aitab.providerCustom')}
+          </span>
+          {present && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-destructive hover:text-destructive"
+              disabled={clearMut.isPending}
+              onClick={() => clearMut.mutate()}
+            >
+              {t('sa.common.delete')}
+            </Button>
+          )}
+        </div>
+        <Input
+          className="h-8 text-sm"
+          placeholder={t('aitab.baseUrlPlaceholder')}
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+        />
+        <div className="flex gap-2">
+          <Input
+            type="password"
+            className="h-8 text-sm flex-1"
+            placeholder={present ? t('sa.boss.keyPresent', { last4: last4 ?? '' }) : t('aitab.customKeyHint')}
+            value={val}
+            onChange={(e) => setVal(e.target.value)}
+          />
+          <Button
+            size="sm"
+            className="h-8 text-xs shrink-0"
+            disabled={!val || !baseUrl.trim() || saveMut.isPending}
+            onClick={() => saveMut.mutate()}
+          >
+            {saveMut.isPending ? t('sa.boss.keyChecking') : t('sa.common.save')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-12 gap-2 items-center">
@@ -203,18 +259,30 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
   const invalidate = () =>
     qc.invalidateQueries({ queryKey: ['superadmin', 'boss', bossId, 'ai'] });
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await listBossProviderModels(bossId, provider);
-      if (!res.ok) toast.error(res.message ?? t('sa.boss.loadListFail'));
-      setAvailable(res.models);
-    } catch {
-      toast.error(t('sa.boss.loadModelsFail'));
-    } finally {
-      setLoading(false);
+  const load = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      setLoading(true);
+      try {
+        const res = await listBossProviderModels(bossId, provider);
+        if (!res.ok && !opts?.silent) toast.error(res.message ?? t('sa.boss.loadListFail'));
+        setAvailable(res.ok ? res.models : []);
+      } catch {
+        if (!opts?.silent) toast.error(t('sa.boss.loadModelsFail'));
+      } finally {
+        setLoading(false);
+      }
+    },
+    [bossId, provider, t],
+  );
+
+  // Tự tải danh sách model khi chọn provider (nếu boss đã có key).
+  useEffect(() => {
+    if (hasKey) {
+      void load({ silent: true });
+    } else {
+      setAvailable([]);
     }
-  };
+  }, [provider, hasKey, load]);
 
   const addMut = useMutation({
     mutationFn: () => addBossOwnModel(bossId, { provider, name: name.trim(), tier }),
@@ -285,7 +353,7 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
               <SelectContent>
                 {PROVIDERS.map((p) => (
                   <SelectItem key={p} value={p}>
-                    {PROVIDER_LABELS[p]}
+                    {p === 'custom' ? t('aitab.providerCustom') : PROVIDER_LABELS[p]}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -315,7 +383,7 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
               />
             )}
           </div>
-          <Button size="sm" variant="outline" className="h-8 text-xs" disabled={loading} onClick={load}>
+          <Button size="sm" variant="outline" className="h-8 text-xs" disabled={loading} onClick={() => load()}>
             {loading ? t('sa.common.loading') : t('sa.boss.loadList')}
           </Button>
           <div className="space-y-1">
@@ -423,6 +491,7 @@ export function BossAiTab({ bossId }: { bossId: number }) {
               provider={p}
               present={info.present}
               last4={info.last_4}
+              baseUrlSaved={data.provider_urls?.[p]}
             />
           );
         })}

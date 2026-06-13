@@ -386,6 +386,9 @@ export const vi: Record<string, string> = {
   'aitab.checking': 'Đang kiểm tra…',
   'aitab.byoTitle': 'API key của bạn (BYO)',
   'aitab.byoDesc': 'Nhập key để dùng quota của bạn thay vì quota nền tảng. Key được mã hoá (Fernet) trước khi lưu DB.',
+  'aitab.providerCustom': 'Custom / Self-hosted',
+  'aitab.baseUrlPlaceholder': 'http://localhost:11434/v1 hoặc https://… (OpenAI-compatible)',
+  'aitab.customKeyHint': 'nhập key, hoặc bất kỳ nếu server không yêu cầu',
 
   // nhóm
   'grp.title': 'Nhóm',

@@ -36,6 +36,7 @@ export type AiSettings = {
   keys: Record<string, KeyInfo>;
   models: ModelOption[];
   cost_cap_usd_daily: number;
+  provider_urls: Record<string, string>; // base_url của provider custom/self-hosted
 };
 
 export type GeneralSettings = {
@@ -70,12 +71,12 @@ export const patchAiSlot = (body: { slot: string; model_id: number | null }) =>
 export const patchAiCap = (body: { cost_cap_usd_daily: number }) =>
   api('/api/v1/admin/settings/ai', { method: 'PATCH', body: JSON.stringify(body) });
 
-export const patchAiKey = (body: { provider: string; api_key?: string; clear?: boolean }) =>
+export const patchAiKey = (body: { provider: string; api_key?: string; clear?: boolean; base_url?: string }) =>
   api('/api/v1/admin/settings/ai/keys', { method: 'PATCH', body: JSON.stringify(body) });
 
 export type TestKeyResult = { ok: boolean; status: string; message: string };
 
-export const testAiKey = (body: { provider: string; api_key: string }) =>
+export const testAiKey = (body: { provider: string; api_key: string; base_url?: string }) =>
   api<TestKeyResult>('/api/ai/test-key', {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },

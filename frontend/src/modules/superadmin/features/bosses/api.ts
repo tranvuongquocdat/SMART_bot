@@ -73,6 +73,7 @@ export type BossAiSettings = {
     is_own: boolean;
   }[];
   cost_cap_usd_daily: number;
+  provider_urls: Record<string, string>;
 };
 
 export type BossConversation = {
@@ -189,7 +190,7 @@ export async function patchBossAi(
 
 export async function patchBossAiKey(
   id: number,
-  body: { provider: string; api_key?: string; clear?: boolean },
+  body: { provider: string; api_key?: string; clear?: boolean; base_url?: string },
 ) {
   return api(`/api/v1/superadmin/bosses/${id}/ai/keys`, {
     method: 'PATCH',

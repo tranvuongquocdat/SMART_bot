@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
@@ -36,11 +36,12 @@ const SLOT_LABELS: Record<string, string> = {
   vision: 'aitab.slot.vision',
 };
 
-const PROVIDERS = ['openai', 'groq', 'gemini'] as const;
+const PROVIDERS = ['openai', 'groq', 'gemini', 'custom'] as const;
 const PROVIDER_LABELS: Record<string, string> = {
   openai: 'OpenAI',
   groq: 'Groq',
   gemini: 'Gemini',
+  custom: 'Custom / Self-hosted',
 };
 
 function SlotCard({
@@ -120,20 +121,28 @@ function KeyRow({
   provider,
   present,
   last4,
+  baseUrlSaved,
 }: {
   provider: string;
   present: boolean;
   last4?: string;
+  baseUrlSaved?: string;
 }) {
   const t = useT();
   const qc = useQueryClient();
   const [keyVal, setKeyVal] = useState('');
+  const isCustom = provider === 'custom';
+  const [baseUrl, setBaseUrl] = useState(baseUrlSaved ?? '');
+
+  useEffect(() => {
+    setBaseUrl(baseUrlSaved ?? '');
+  }, [baseUrlSaved]);
 
   const saveMut = useMutation({
     mutationFn: async () => {
-      const test = await testAiKey({ provider, api_key: keyVal });
+      const test = await testAiKey({ provider, api_key: keyVal, base_url: isCustom ? baseUrl : undefined });
       if (!test.ok) throw new Error(test.message);
-      return patchAiKey({ provider, api_key: keyVal });
+      return patchAiKey({ provider, api_key: keyVal, base_url: isCustom ? baseUrl : undefined });
     },
     onSuccess: () => {
       setKeyVal('');
@@ -159,7 +168,55 @@ function KeyRow({
 
   const placeholder = present
     ? t('aitab.keyHasPlaceholder', { last4: last4 ?? '' })
-    : provider === 'openai' ? 'sk-…' : provider === 'groq' ? 'gsk_…' : 'AI…';
+    : provider === 'openai' ? 'sk-…' : provider === 'groq' ? 'gsk_…' : provider === 'gemini' ? 'AI…' : t('aitab.customKeyHint');
+
+  // Custom / self-hosted: cần base_url + key → bố cục dọc trong khung riêng.
+  if (isCustom) {
+    const canSave = !!keyVal && !!baseUrl.trim() && !saveMut.isPending;
+    return (
+      <div className="rounded-lg border bg-card p-3 space-y-2">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold uppercase text-muted-foreground">
+            {t('aitab.providerCustom')}
+          </span>
+          {present && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 text-xs text-destructive hover:text-destructive"
+              disabled={clearMut.isPending}
+              onClick={() => clearMut.mutate()}
+            >
+              {t('common.delete')}
+            </Button>
+          )}
+        </div>
+        <Input
+          className="h-8 text-sm"
+          placeholder={t('aitab.baseUrlPlaceholder')}
+          value={baseUrl}
+          onChange={(e) => setBaseUrl(e.target.value)}
+        />
+        <div className="flex gap-2">
+          <Input
+            type="password"
+            className="h-8 text-sm flex-1"
+            placeholder={placeholder}
+            value={keyVal}
+            onChange={(e) => setKeyVal(e.target.value)}
+          />
+          <Button
+            size="sm"
+            className="h-8 text-xs shrink-0"
+            disabled={!canSave}
+            onClick={() => saveMut.mutate()}
+          >
+            {saveMut.isPending ? t('aitab.checking') : t('common.save')}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="grid grid-cols-12 gap-2 items-center">
@@ -217,23 +274,35 @@ function OwnModelsSection({
 
   const hasKey = keysPresent[provider];
 
-  const loadModels = async () => {
-    setLoadingList(true);
-    try {
-      const res = await listProviderModels(provider);
-      if (!res.ok) {
-        toast.error(res.message ?? t('aitab.loadModelsError'));
-        setAvailable([]);
-      } else {
-        setAvailable(res.models);
-        if (res.models.length === 0) toast.info(t('aitab.noProviderModels'));
+  const loadModels = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      setLoadingList(true);
+      try {
+        const res = await listProviderModels(provider);
+        if (!res.ok) {
+          if (!opts?.silent) toast.error(res.message ?? t('aitab.loadModelsError'));
+          setAvailable([]);
+        } else {
+          setAvailable(res.models);
+          if (res.models.length === 0 && !opts?.silent) toast.info(t('aitab.noProviderModels'));
+        }
+      } catch {
+        if (!opts?.silent) toast.error(t('aitab.loadModelsError'));
+      } finally {
+        setLoadingList(false);
       }
-    } catch {
-      toast.error(t('aitab.loadModelsError'));
-    } finally {
-      setLoadingList(false);
+    },
+    [provider, t],
+  );
+
+  // Tự tải danh sách model ngay khi chọn provider (nếu đã có key) — không cần bấm.
+  useEffect(() => {
+    if (hasKey) {
+      void loadModels({ silent: true });
+    } else {
+      setAvailable([]);
     }
-  };
+  }, [provider, hasKey, loadModels]);
 
   const addMut = useMutation({
     mutationFn: () => addOwnModel({ provider, name: name.trim(), tier, vision }),
@@ -310,7 +379,7 @@ function OwnModelsSection({
               <SelectContent>
                 {PROVIDERS.map((p) => (
                   <SelectItem key={p} value={p}>
-                    {PROVIDER_LABELS[p]}
+                    {p === 'custom' ? t('aitab.providerCustom') : PROVIDER_LABELS[p]}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -345,7 +414,7 @@ function OwnModelsSection({
                 variant="outline"
                 className="h-8 text-xs shrink-0"
                 disabled={loadingList}
-                onClick={loadModels}
+                onClick={() => loadModels()}
               >
                 {loadingList ? t('common.loading') : t('aitab.loadList')}
               </Button>
@@ -477,6 +546,7 @@ export default function AiTab() {
                 provider={prov}
                 present={info.present}
                 last4={info.last_4}
+                baseUrlSaved={data.provider_urls?.[prov]}
               />
             );
           })}
