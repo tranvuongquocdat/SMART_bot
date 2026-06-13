@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { relativeTime } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import {
   notificationsQuery,
   markNotificationsRead,
@@ -20,6 +21,7 @@ const KIND_ICON = {
 } as const;
 
 export function NotificationBell() {
+  const t = useT();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { data } = useQuery(notificationsQuery);
@@ -47,7 +49,7 @@ export function NotificationBell() {
       <DropdownMenuTrigger asChild>
         <button
           className="relative h-[30px] w-[30px] rounded-[7px] grid place-items-center text-[hsl(var(--muted-foreground))] surface-section hover:bg-[hsl(var(--hover))] hover:text-foreground transition-colors"
-          aria-label="Thông báo"
+          aria-label={t('notif.title')}
         >
           <Bell className="h-4 w-4" />
           {unread > 0 && (
@@ -59,7 +61,7 @@ export function NotificationBell() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 p-0">
         <div className="flex items-center justify-between px-3 py-2 border-b border-[hsl(var(--divider))]">
-          <span className="text-sm font-medium">Thông báo</span>
+          <span className="text-sm font-medium">{t('notif.title')}</span>
           {unread > 0 && (
             <button
               className="text-[11px] text-[hsl(var(--primary))] hover:underline"
@@ -68,7 +70,7 @@ export function NotificationBell() {
                 markAll.mutate();
               }}
             >
-              Đánh dấu đã đọc
+              {t('notif.markRead')}
             </button>
           )}
         </div>
@@ -76,7 +78,7 @@ export function NotificationBell() {
         <div className="max-h-[360px] overflow-y-auto">
           {items.length === 0 ? (
             <p className="text-sm text-muted-foreground text-center py-8">
-              Chưa có thông báo nào.
+              {t('notif.empty')}
             </p>
           ) : (
             items.map((n) => {

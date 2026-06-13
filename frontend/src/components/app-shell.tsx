@@ -156,7 +156,7 @@ export function AppShell({
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              aria-label="Tìm kiếm"
+              aria-label={t('common.search')}
               className="h-[30px] px-[10px] rounded-[7px] bg-transparent text-[hsl(var(--muted-foreground))] flex items-center gap-2 text-[11px] surface-section hover:bg-[hsl(var(--hover))] transition-colors"
             >
               <Search className="h-3.5 w-3.5" />
