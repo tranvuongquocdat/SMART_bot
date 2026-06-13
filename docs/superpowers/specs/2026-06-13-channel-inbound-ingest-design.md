@@ -94,8 +94,11 @@ nó. Vì vậy **không tạo bảng `group_boss_link`** — dùng chính `group
 - **Gate ≠ `is_group_active`.** `is_group_active` trả `True` cho nhóm *chưa có row* (coi như chưa
   bị tắt) — KHÔNG dùng làm điều kiện capture. Điều kiện capture là **row PHẢI tồn tại và
   `is_active=TRUE`**. Sếp tắt nhóm = `is_active=FALSE` ⇒ ngừng capture.
-- Quy tắc khi sếp nói mà row đã tồn tại & đang paused (`is_active=FALSE`): **giữ nguyên paused**
-  (tôn trọng lựa chọn thủ công), không tự reactivate.
+- Phân biệt 2 lý do `is_active=FALSE` qua cột `status` sẵn có:
+  - `status='left'` — auto-deactivate do sếp rời nhóm (§3.8). Sếp quay lại nói tiếp → boss-spoke
+    **reactivate** (`is_active=TRUE`, `status='active'`).
+  - `status='paused'` — sếp tự tắt thủ công trên web. Boss-spoke **KHÔNG** tự bật lại; chỉ sếp
+    bật lại trên web.
 
 Cần thêm: một query cross-boss `SELECT boss_id FROM group_notes WHERE provider=$1 AND chat_id=$2
 AND is_active` (kèm index `(provider, chat_id)`) cho bước gate — tương tự `account_links.lookup`.
@@ -176,13 +179,17 @@ active) theo từng provider hỗ trợ `list_members`:
 với mỗi (boss B, provider, chat_id) active:
     members = adapter.list_members(bot_acc, chat_id)
     nếu account_links UID của B KHÔNG nằm trong members:
-        UPDATE group_notes SET is_active=FALSE  (boss rời/bị kick)
+        UPDATE group_notes SET is_active=FALSE, status='left'  (boss rời/bị kick)
 ```
 
 - Kênh không hỗ trợ `list_members` (Tele/Mess sau này) → bỏ qua re-verify, dựa fallback khác khi
   thêm kênh. Zalo/Web có `list_members` sẵn (`adapter.list_members`).
 - Đây là chỗ DUY NHẤT dùng `list_members` — để tắt, không phải để bật. Bật vẫn là boss-spoke.
 - Tần suất: cấu hình ở job (mặc định đề xuất ~hằng giờ); rẻ vì chỉ quét nhóm đã track.
+- **Deactivate KHÔNG xoá dữ liệu.** Tin cũ trong `messages` + note đã tổng hợp được giữ nguyên,
+  vẫn truy được qua `search_history` / `find_exact_quote` / `read_group_note`. Chỉ ngừng ghi tin
+  MỚI; note đóng băng ở thời điểm rời. Sếp quay lại nói tiếp → boss-spoke reactivate (set
+  `is_active=TRUE`) và ghi nhận lại từ đó.
 
 ## 4. Vá kèm (cùng vùng, không phình scope)
 
