@@ -45,6 +45,17 @@ def _is_builtin(provider: str) -> bool:
     return provider in PROVIDER_DEFAULTS
 
 
+def _parse_cost(raw) -> float | None:
+    """Giá $/1M token tự nhập → float ≥ 0, hoặc None nếu trống/không hợp lệ."""
+    if raw is None or raw == "":
+        return None
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return v if v >= 0 else None
+
+
 def _parse_urls(raw) -> dict:
     """ai_provider_urls (JSONB) → dict. asyncpg trả JSONB dạng str (no codec)."""
     if isinstance(raw, str):
@@ -114,7 +125,7 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
         boss = await c.fetchrow(
             """
             SELECT smart_model_id, fast_model_id, vision_model_id,
-                   cost_cap_usd_daily, api_keys_enc
+                   cost_cap_usd_daily, api_keys_enc, ai_provider_urls
             FROM users WHERE id = $1
             """,
             boss_id,
@@ -150,6 +161,7 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
             {"slot": slot, "model_id": boss[col]} for slot, col in SLOT_COLUMNS.items()
         ],
         "keys": mask_keys(boss["api_keys_enc"]),
+        "provider_urls": _parse_urls(boss["ai_provider_urls"]),
         "models": [
             {
                 "id": int(m["id"]),
@@ -365,6 +377,11 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
         endpoint_kind, base_url = PROVIDER_DEFAULTS[provider]
     capabilities = ["vision"] if (tier == "vision" or payload.get("vision")) else []
 
+    # Giá tự nhập ($/1M token) — để usage tính được chi phí cho model BYO/không
+    # tra được giá. Bỏ trống = None (usage hiển thị "chưa tính được giá").
+    cost_in = _parse_cost(payload.get("cost_per_1m_input_usd"))
+    cost_out = _parse_cost(payload.get("cost_per_1m_output_usd"))
+
     repo = ModelsRepo(pool, ctx)
     try:
         return await repo.insert(
@@ -375,8 +392,8 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
             tier=tier,
             ctx_max=int(payload.get("ctx_max") or 128_000),
             capabilities=capabilities,
-            cost_in=None,
-            cost_out=None,
+            cost_in=cost_in,
+            cost_out=cost_out,
             notes="BYO",
             owner_boss_id=boss_id,
         )

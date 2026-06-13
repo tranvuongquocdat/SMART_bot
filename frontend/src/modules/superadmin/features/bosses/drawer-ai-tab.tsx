@@ -252,6 +252,8 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
   const [available, setAvailable] = useState<{ id: string }[]>([]);
   const [name, setName] = useState('');
   const [tier, setTier] = useState('smart');
+  const [costIn, setCostIn] = useState('');
+  const [costOut, setCostOut] = useState('');
   const [loading, setLoading] = useState(false);
 
   const hasKey = data.keys[provider]?.present ?? false;
@@ -285,9 +287,18 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
   }, [provider, hasKey, load]);
 
   const addMut = useMutation({
-    mutationFn: () => addBossOwnModel(bossId, { provider, name: name.trim(), tier }),
+    mutationFn: () =>
+      addBossOwnModel(bossId, {
+        provider,
+        name: name.trim(),
+        tier,
+        cost_per_1m_input_usd: costIn.trim() ? Number(costIn) : null,
+        cost_per_1m_output_usd: costOut.trim() ? Number(costOut) : null,
+      }),
     onSuccess: () => {
       setName('');
+      setCostIn('');
+      setCostOut('');
       invalidate();
       toast.success(t('sa.boss.modelAdded'));
     },
@@ -398,6 +409,26 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
                 <SelectItem value="vision">Vision</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t('aitab.costIn')}</Label>
+            <Input
+              type="number" min="0" step="0.01"
+              className="h-8 text-sm w-24"
+              placeholder="—"
+              value={costIn}
+              onChange={(e) => setCostIn(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t('aitab.costOut')}</Label>
+            <Input
+              type="number" min="0" step="0.01"
+              className="h-8 text-sm w-24"
+              placeholder="—"
+              value={costOut}
+              onChange={(e) => setCostOut(e.target.value)}
+            />
           </div>
           <Button
             size="sm"

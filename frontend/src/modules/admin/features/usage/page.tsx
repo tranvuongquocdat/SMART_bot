@@ -4,6 +4,7 @@ import { BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { BarChart, RankBars } from '@/components/charts';
 import { useT } from '@/lib/i18n';
 import { usageQuery } from './api';
 
@@ -50,6 +51,38 @@ function UsageContent({ range }: { range: RangeValue }) {
         <SummaryCard
           label={t('usage.card.avgTokens')}
           value={Math.round(data.totals.tokens / data.range_days).toLocaleString()}
+        />
+      </div>
+
+      {/* Daily cost chart */}
+      <div className="rounded-[12px] bg-card-grad surface-section p-4">
+        <p className="text-[10px] uppercase tracking-[0.07em] text-[hsl(var(--dim))] font-medium mb-3">
+          {t('usage.chart.dailyCost')}
+        </p>
+        <BarChart
+          data={[...data.daily]
+            .reverse()
+            .map((r) => {
+              const [, m, d] = r.date.split('-');
+              return { label: `${d}/${m}`, value: r.cost_usd, title: `${r.date}: $${fmt(r.cost_usd)}` };
+            })}
+          emptyText={t('usage.chart.empty')}
+        />
+      </div>
+
+      {/* Cost by model */}
+      <div className="rounded-[12px] bg-card-grad surface-section p-4">
+        <p className="text-[10px] uppercase tracking-[0.07em] text-[hsl(var(--dim))] font-medium mb-3">
+          {t('usage.byModel.title')}
+        </p>
+        <RankBars
+          data={data.by_model.map((m) => ({
+            label: m.model,
+            value: m.cost_usd,
+            sub: `${m.provider} · ${t('usage.byModel.calls', { n: m.calls })}`,
+            display: m.cost_usd > 0 ? `$${fmt(m.cost_usd)}` : t('usage.byModel.noCost'),
+          }))}
+          emptyText={t('usage.chart.empty')}
         />
       </div>
 

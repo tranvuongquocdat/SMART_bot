@@ -270,6 +270,8 @@ function OwnModelsSection({
   const [name, setName] = useState('');
   const [tier, setTier] = useState('smart');
   const [vision, setVision] = useState(false);
+  const [costIn, setCostIn] = useState('');
+  const [costOut, setCostOut] = useState('');
   const [loadingList, setLoadingList] = useState(false);
 
   const hasKey = keysPresent[provider];
@@ -305,9 +307,19 @@ function OwnModelsSection({
   }, [provider, hasKey, loadModels]);
 
   const addMut = useMutation({
-    mutationFn: () => addOwnModel({ provider, name: name.trim(), tier, vision }),
+    mutationFn: () =>
+      addOwnModel({
+        provider,
+        name: name.trim(),
+        tier,
+        vision,
+        cost_per_1m_input_usd: costIn.trim() ? Number(costIn) : null,
+        cost_per_1m_output_usd: costOut.trim() ? Number(costOut) : null,
+      }),
     onSuccess: () => {
       setName('');
+      setCostIn('');
+      setCostOut('');
       qc.invalidateQueries({ queryKey: aiQuery.queryKey });
       toast.success(t('aitab.modelAdded'));
     },
@@ -425,7 +437,7 @@ function OwnModelsSection({
           <div className="space-y-1.5">
             <Label className="text-xs">{t('aitab.useForSlot')}</Label>
             <Select value={tier} onValueChange={setTier}>
-              <SelectTrigger className="h-8 text-sm w-44">
+              <SelectTrigger className="h-8 text-sm w-36">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -434,6 +446,26 @@ function OwnModelsSection({
                 <SelectItem value="vision">Vision</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('aitab.costIn')}</Label>
+            <Input
+              type="number" min="0" step="0.01"
+              className="h-8 text-sm w-28"
+              placeholder="—"
+              value={costIn}
+              onChange={(e) => setCostIn(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs">{t('aitab.costOut')}</Label>
+            <Input
+              type="number" min="0" step="0.01"
+              className="h-8 text-sm w-28"
+              placeholder="—"
+              value={costOut}
+              onChange={(e) => setCostOut(e.target.value)}
+            />
           </div>
           <label className="flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
             <Checkbox checked={vision} onCheckedChange={(v) => setVision(v === true)} />
@@ -448,6 +480,7 @@ function OwnModelsSection({
             {addMut.isPending ? t('aitab.adding') : t('aitab.addModel')}
           </Button>
         </div>
+        <p className="text-[11px] text-muted-foreground">{t('aitab.costHint')}</p>
         {!hasKey && (
           <p className="text-xs text-amber-600 dark:text-amber-500">
             {t('aitab.needKey', { provider: PROVIDER_LABELS[provider] })}

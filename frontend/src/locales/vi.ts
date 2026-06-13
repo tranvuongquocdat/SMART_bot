@@ -191,6 +191,11 @@ export const vi: Record<string, string> = {
   // sử dụng
   'usage.title': 'Sử dụng',
   'usage.subtitle': 'Thống kê tokens và chi phí AI theo ngày.',
+  'usage.chart.dailyCost': 'Chi phí theo ngày (USD)',
+  'usage.chart.empty': 'Chưa có dữ liệu',
+  'usage.byModel.title': 'Chi phí theo model',
+  'usage.byModel.calls': '{n} lượt',
+  'usage.byModel.noCost': 'chưa cấu hình giá',
   'usage.range.7d': '7 ngày',
   'usage.range.30d': '30 ngày',
   'usage.range.90d': '90 ngày',
@@ -389,6 +394,9 @@ export const vi: Record<string, string> = {
   'aitab.providerCustom': 'Custom / Self-hosted',
   'aitab.baseUrlPlaceholder': 'http://localhost:11434/v1 hoặc https://… (OpenAI-compatible)',
   'aitab.customKeyHint': 'nhập key, hoặc bất kỳ nếu server không yêu cầu',
+  'aitab.costIn': 'Giá in ($/1M)',
+  'aitab.costOut': 'Giá out ($/1M)',
+  'aitab.costHint': 'Giá $/1M token để tính chi phí ở phần Sử dụng. Bỏ trống nếu không rõ — sẽ hiện "chưa cấu hình giá".',
 
   // nhóm
   'grp.title': 'Nhóm',

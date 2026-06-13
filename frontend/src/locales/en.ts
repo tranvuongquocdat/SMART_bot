@@ -191,6 +191,11 @@ export const en: Record<string, string> = {
   // usage
   'usage.title': 'Usage',
   'usage.subtitle': 'Daily token and AI cost analytics.',
+  'usage.chart.dailyCost': 'Cost by day (USD)',
+  'usage.chart.empty': 'No data',
+  'usage.byModel.title': 'Cost by model',
+  'usage.byModel.calls': '{n} calls',
+  'usage.byModel.noCost': 'price not set',
   'usage.range.7d': '7 days',
   'usage.range.30d': '30 days',
   'usage.range.90d': '90 days',
@@ -389,6 +394,9 @@ export const en: Record<string, string> = {
   'aitab.providerCustom': 'Custom / Self-hosted',
   'aitab.baseUrlPlaceholder': 'http://localhost:11434/v1 or https://… (OpenAI-compatible)',
   'aitab.customKeyHint': 'enter a key, or anything if your server needs none',
+  'aitab.costIn': 'In price ($/1M)',
+  'aitab.costOut': 'Out price ($/1M)',
+  'aitab.costHint': 'Price per 1M tokens, used to compute cost on the Usage page. Leave empty if unknown — it will show "price not set".',
 
   // groups
   'grp.title': 'Groups',

@@ -200,7 +200,14 @@ export async function patchBossAiKey(
 
 export async function addBossOwnModel(
   id: number,
-  body: { provider: string; name: string; tier: string; vision?: boolean },
+  body: {
+    provider: string;
+    name: string;
+    tier: string;
+    vision?: boolean;
+    cost_per_1m_input_usd?: number | null;
+    cost_per_1m_output_usd?: number | null;
+  },
 ) {
   return api<{ id: number }>(`/api/v1/superadmin/bosses/${id}/ai/models`, {
     method: 'POST',

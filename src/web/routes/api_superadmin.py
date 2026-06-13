@@ -1097,12 +1097,25 @@ async def platform_usage(
             """,
             str(days),
         )
+        by_model = await c.fetch(
+            """
+            SELECT provider, model,
+                   SUM(tokens_in + tokens_out)::bigint AS tokens,
+                   COUNT(*)::bigint                    AS calls,
+                   SUM(cost_usd)::float                AS cost_usd
+            FROM token_usage
+            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
+            GROUP BY provider, model ORDER BY SUM(cost_usd) DESC NULLS LAST
+            """,
+            str(days),
+        )
     return {
         "range_days": days,
         "totals": dict(totals),
         "daily": [{**dict(r), "day": str(r["day"])} for r in daily],
         "by_boss": [dict(r) for r in by_boss],
         "by_feature": [dict(r) for r in by_feature],
+        "by_model": [dict(r) for r in by_model],
     }
 
 

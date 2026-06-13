@@ -92,7 +92,14 @@ export type ProviderModelsResult = { ok: boolean; models: { id: string }[]; mess
 export const listProviderModels = (provider: string) =>
   api<ProviderModelsResult>(`/api/ai/provider-models?provider=${encodeURIComponent(provider)}`);
 
-export const addOwnModel = (body: { provider: string; name: string; tier: string; vision?: boolean }) =>
+export const addOwnModel = (body: {
+  provider: string;
+  name: string;
+  tier: string;
+  vision?: boolean;
+  cost_per_1m_input_usd?: number | null;
+  cost_per_1m_output_usd?: number | null;
+}) =>
   api<{ id: number }>('/api/v1/admin/settings/ai/models', {
     method: 'POST',
     body: JSON.stringify(body),

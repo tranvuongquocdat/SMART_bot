@@ -18,10 +18,20 @@ export type UsageDayRow = {
   cost_usd: number;
 };
 
+export type UsageModelRow = {
+  provider: string;
+  model: string;
+  tokens_in: number;
+  tokens_out: number;
+  calls: number;
+  cost_usd: number;
+};
+
 export type UsageData = {
   range_days: number;
   totals: UsageTotals;
   daily: UsageDayRow[];
+  by_model: UsageModelRow[];
 };
 
 export const usageQuery = (range: string = '30d') =>

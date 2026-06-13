@@ -20,6 +20,7 @@ export type PlatformUsage = {
     cost_usd: number;
   }[];
   by_feature: { feature: string; tokens: number; calls: number; cost_usd: number }[];
+  by_model: { provider: string; model: string; tokens: number; calls: number; cost_usd: number }[];
 };
 
 export const platformUsageQuery = (range: string) =>

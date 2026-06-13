@@ -1698,6 +1698,24 @@ async def get_usage(
             str(days),
         )
 
+        # Per-model breakdown — model nào tốn bao nhiêu (cost + tokens + calls).
+        model_rows = await c.fetch(
+            """
+            SELECT provider, model,
+                   SUM(tokens_in)  AS tokens_in,
+                   SUM(tokens_out) AS tokens_out,
+                   COUNT(*)        AS calls,
+                   SUM(cost_usd)   AS cost_usd
+            FROM token_usage
+            WHERE boss_id = $1
+              AND called_at > NOW() - ($2 || ' days')::INTERVAL
+            GROUP BY provider, model
+            ORDER BY cost_usd DESC NULLS LAST, calls DESC
+            """,
+            ctx.boss_id,
+            str(days),
+        )
+
     return {
         "range_days": days,
         "totals": {
@@ -1717,6 +1735,17 @@ async def get_usage(
                 "cost_usd": float(r["cost_usd"] or 0),
             }
             for r in daily_rows
+        ],
+        "by_model": [
+            {
+                "provider": r["provider"],
+                "model": r["model"],
+                "tokens_in": int(r["tokens_in"] or 0),
+                "tokens_out": int(r["tokens_out"] or 0),
+                "calls": int(r["calls"] or 0),
+                "cost_usd": float(r["cost_usd"] or 0),
+            }
+            for r in model_rows
         ],
     }
 
