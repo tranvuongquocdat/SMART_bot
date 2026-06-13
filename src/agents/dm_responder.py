@@ -61,4 +61,5 @@ class DMResponder:
             chat_id=event["chat_id"],
             content=answer,
             trigger="dm",
+            chat_type="dm",
         )

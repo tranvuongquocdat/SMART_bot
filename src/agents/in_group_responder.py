@@ -70,6 +70,7 @@ class InGroupResponder:
                 chat_id=event["chat_id"],
                 content=_QUICK_ACK_TEXT,
                 trigger="quick_ack",
+                chat_type="group",
             )
 
         answer = await run_agent(InGroupResponder, event, ctx)
@@ -82,4 +83,5 @@ class InGroupResponder:
             content=answer,
             trigger="mention",
             reply_to_message_id=event.get("message_id"),
+            chat_type="group",
         )
