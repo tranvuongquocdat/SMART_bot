@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { createAgentTrigger, patchAgentTrigger } from './api';
 import type { AgentTrigger } from './api';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   trigger: AgentTrigger | null; // null = create mode
@@ -41,6 +42,7 @@ function parseJson(s: string): Record<string, unknown> | null {
 }
 
 export function EditDialog({ trigger, open, onOpenChange }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const isEdit = trigger !== null;
 
@@ -98,14 +100,14 @@ export function EditDialog({ trigger, open, onOpenChange }: Props) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'agent-triggers'] });
-      toast.success(isEdit ? 'Đã cập nhật trigger' : 'Đã tạo trigger mới');
+      toast.success(isEdit ? t('sa.trig.updated') : t('sa.trig.created'));
       onOpenChange(false);
     },
     onError: (err: Error) => {
       if (err.message.includes('invalid JSON')) {
         setJsonError(err.message);
       } else {
-        toast.error(isEdit ? 'Cập nhật thất bại' : 'Tạo thất bại');
+        toast.error(isEdit ? t('sa.common.updateError') : t('sa.trig.createError'));
       }
     },
   });
@@ -117,7 +119,7 @@ export function EditDialog({ trigger, open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[520px]">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Sửa agent trigger' : 'Thêm agent trigger'}</DialogTitle>
+          <DialogTitle>{isEdit ? t('sa.trig.editTitle') : t('sa.trig.addTitle')}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -126,7 +128,7 @@ export function EditDialog({ trigger, open, onOpenChange }: Props) {
               <div className="grid gap-1.5">
                 <Label>Op name</Label>
                 <Input
-                  placeholder="vd: analyze_group"
+                  placeholder={t('sa.trig.opNamePlaceholder')}
                   value={form.op_name}
                   onChange={e => set('op_name', e.target.value)}
                 />
@@ -134,7 +136,7 @@ export function EditDialog({ trigger, open, onOpenChange }: Props) {
               <div className="grid gap-1.5">
                 <Label>Event name</Label>
                 <Input
-                  placeholder="vd: msg_received"
+                  placeholder={t('sa.trig.eventNamePlaceholder')}
                   value={form.event_name}
                   onChange={e => set('event_name', e.target.value)}
                 />
@@ -188,7 +190,7 @@ export function EditDialog({ trigger, open, onOpenChange }: Props) {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             disabled={
@@ -197,7 +199,7 @@ export function EditDialog({ trigger, open, onOpenChange }: Props) {
             }
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang lưu...' : 'Lưu'}
+            {mutation.isPending ? t('sa.common.saving') : t('sa.common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>

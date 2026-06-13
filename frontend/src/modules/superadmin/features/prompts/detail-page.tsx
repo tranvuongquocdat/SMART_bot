@@ -10,9 +10,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { promptDetailQuery, createPrompt, patchPrompt } from './api';
 
 export default function PromptDetailPage() {
+  const t = useT();
   const { id } = useParams<{ id: string }>();
   const promptId = Number(id);
   const qc = useQueryClient();
@@ -41,10 +43,10 @@ export default function PromptDetailPage() {
       }),
     onSuccess: data => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'prompts'] });
-      toast.success(`Đã lưu version mới (id=${data.id})`);
+      toast.success(t('sa.prompt.savedVersion', { id: data.id }));
       setDirty(false);
     },
-    onError: () => toast.error('Lưu thất bại'),
+    onError: () => toast.error(t('sa.common.saveError')),
   });
 
   const activateMut = useMutation({
@@ -52,9 +54,9 @@ export default function PromptDetailPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'prompts', promptId] });
       qc.invalidateQueries({ queryKey: ['superadmin', 'prompts'] });
-      toast.success('Đã kích hoạt');
+      toast.success(t('sa.prompt.activatedShort'));
     },
-    onError: () => toast.error('Kích hoạt thất bại'),
+    onError: () => toast.error(t('sa.prompt.activateError')),
   });
 
   if (detail.isLoading) {
@@ -68,7 +70,7 @@ export default function PromptDetailPage() {
   if (!detail.data) {
     return (
       <PageWrap className="max-w-[860px]">
-        <p className="text-muted-foreground">Không tìm thấy prompt.</p>
+        <p className="text-muted-foreground">{t('sa.prompt.notFound')}</p>
       </PageWrap>
     );
   }
@@ -83,7 +85,7 @@ export default function PromptDetailPage() {
           className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Danh sách prompts
+          {t('sa.prompt.backList')}
         </Link>
       </PageSection>
 
@@ -101,7 +103,7 @@ export default function PromptDetailPage() {
               onClick={() => activateMut.mutate()}
             >
               <Zap className="h-3 w-3 mr-1" />
-              Kích hoạt
+              {t('sa.prompt.activate')}
             </Button>
           )
         }
@@ -123,9 +125,9 @@ export default function PromptDetailPage() {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Ghi chú cho version mới</Label>
+            <Label>{t('sa.prompt.notesNewVersion')}</Label>
             <Input
-              placeholder="vd: fix tone"
+              placeholder={t('sa.prompt.notesPlaceholder')}
               value={notes}
               onChange={(e: ChangeEvent<HTMLInputElement>) => {
                 setNotes(e.target.value);
@@ -140,7 +142,7 @@ export default function PromptDetailPage() {
               onClick={() => saveMut.mutate()}
             >
               <Save className="h-3.5 w-3.5 mr-1.5" />
-              {saveMut.isPending ? 'Đang lưu...' : 'Lưu phiên bản mới'}
+              {saveMut.isPending ? t('sa.common.saving') : t('sa.prompt.saveNewVersion')}
             </Button>
           </div>
         </div>

@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { patchRetrievalPipeline } from './api';
 import type { RetrievalPipeline } from './api';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   pipeline: RetrievalPipeline | null;
@@ -22,6 +23,7 @@ type Props = {
 };
 
 export function EditDialog({ pipeline, open, onOpenChange }: Props) {
+  const t = useT();
   const qc = useQueryClient();
 
   const [stagesRaw, setStagesRaw] = useState('');
@@ -43,7 +45,7 @@ export function EditDialog({ pipeline, open, onOpenChange }: Props) {
         parsed = JSON.parse(stagesRaw);
         if (!Array.isArray(parsed)) throw new Error('Must be array');
       } catch (e) {
-        throw new Error('stages_json không hợp lệ: ' + (e as Error).message);
+        throw new Error(t('sa.rp.stagesInvalid', { msg: (e as Error).message }));
       }
       return patchRetrievalPipeline(pipeline!.feature, {
         stages_json: parsed,
@@ -52,11 +54,11 @@ export function EditDialog({ pipeline, open, onOpenChange }: Props) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'retrieval-pipelines'] });
-      toast.success('Đã cập nhật pipeline');
+      toast.success(t('sa.rp.updated'));
       onOpenChange(false);
     },
     onError: (e: Error) => {
-      toast.error(e.message || 'Cập nhật thất bại');
+      toast.error(e.message || t('sa.common.updateError'));
     },
   });
 
@@ -65,11 +67,11 @@ export function EditDialog({ pipeline, open, onOpenChange }: Props) {
     try {
       const parsed = JSON.parse(stagesRaw);
       if (!Array.isArray(parsed)) {
-        setStagesError('Phải là JSON array');
+        setStagesError(t('sa.rp.mustArray'));
         return;
       }
     } catch {
-      setStagesError('JSON không hợp lệ');
+      setStagesError(t('sa.rp.jsonInvalid'));
       return;
     }
     mutation.mutate();
@@ -79,7 +81,7 @@ export function EditDialog({ pipeline, open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Sửa pipeline: {pipeline?.feature}</DialogTitle>
+          <DialogTitle>{t('sa.rp.editTitle', { feature: pipeline?.feature ?? '' })}</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
@@ -102,22 +104,22 @@ export function EditDialog({ pipeline, open, onOpenChange }: Props) {
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="description">Mô tả</Label>
+            <Label htmlFor="description">{t('sa.rp.desc')}</Label>
             <Input
               id="description"
               value={description}
               onChange={e => setDescription(e.target.value)}
-              placeholder="Mô tả ngắn về pipeline"
+              placeholder={t('sa.rp.descPlaceholder')}
             />
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button onClick={handleSave} disabled={mutation.isPending}>
-            {mutation.isPending ? 'Đang lưu...' : 'Lưu'}
+            {mutation.isPending ? t('sa.common.saving') : t('sa.common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
