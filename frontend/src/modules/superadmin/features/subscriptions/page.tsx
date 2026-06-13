@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { useT, useI18n } from '@/lib/i18n';
 import {
   subscriptionRequestsQuery,
   approveRequest,
@@ -20,21 +21,22 @@ import {
   type SASubscriptionRequest,
 } from './api';
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Chờ duyệt',
-  approved: 'Đã duyệt',
-  rejected: 'Từ chối',
-  cancelled: 'Đã huỷ',
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  pending: 'sa.sub.stPending',
+  approved: 'sa.sub.stApproved',
+  rejected: 'sa.sub.stRejected',
+  cancelled: 'sa.sub.stCancelled',
 };
 
 function StatusBadge({ status }: { status: string }) {
+  const t = useT();
   const variant =
     status === 'approved'
       ? 'default'
       : status === 'pending'
         ? 'secondary'
         : 'outline';
-  return <Badge variant={variant}>{STATUS_LABELS[status] ?? status}</Badge>;
+  return <Badge variant={variant}>{STATUS_LABEL_KEYS[status] ? t(STATUS_LABEL_KEYS[status]) : status}</Badge>;
 }
 
 function RejectModal({
@@ -46,13 +48,14 @@ function RejectModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [note, setNote] = useState('');
 
   const mut = useMutation({
     mutationFn: () => rejectRequest(req!.id, note),
     onSuccess: () => {
-      toast.success('Đã từ chối yêu cầu');
+      toast.success(t('sa.sub.rejected'));
       qc.invalidateQueries({ queryKey: ['superadmin', 'subscription-requests'] });
       setNote('');
       onClose();
@@ -64,27 +67,27 @@ function RejectModal({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Từ chối yêu cầu</DialogTitle>
+          <DialogTitle>{t('sa.sub.rejectTitle')}</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 py-2">
           <p className="text-sm text-muted-foreground">
-            Boss: <strong>{req?.boss_email}</strong> — Gói: <strong>{req?.plan_label}</strong>
+            {t('sa.sub.bossLabel')}<strong>{req?.boss_email}</strong>{t('sa.sub.planMid')}<strong>{req?.plan_label}</strong>
           </p>
           <div className="space-y-1.5">
-            <Label>Lý do từ chối</Label>
+            <Label>{t('sa.sub.rejectReason')}</Label>
             <Textarea value={note} onChange={(e) => setNote(e.target.value)} rows={3} />
           </div>
         </div>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             variant="destructive"
             onClick={() => mut.mutate()}
             disabled={mut.isPending || !note.trim()}
           >
-            {mut.isPending ? 'Đang từ chối...' : 'Xác nhận'}
+            {mut.isPending ? t('sa.sub.rejecting') : t('sa.sub.confirm')}
           </Button>
         </div>
       </DialogContent>
@@ -93,6 +96,9 @@ function RejectModal({
 }
 
 export default function SASubscriptionsPage() {
+  const t = useT();
+  const { lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const [filter, setFilter] = useState<string | undefined>('pending');
   const { data: requests } = useSuspenseQuery(subscriptionRequestsQuery(filter));
   const qc = useQueryClient();
@@ -102,24 +108,24 @@ export default function SASubscriptionsPage() {
   const approveMut = useMutation({
     mutationFn: (id: number) => approveRequest(id),
     onSuccess: () => {
-      toast.success('Đã duyệt yêu cầu');
+      toast.success(t('sa.sub.approved'));
       qc.invalidateQueries({ queryKey: ['superadmin', 'subscription-requests'] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const FILTERS = [
-    { value: 'pending', label: 'Chờ duyệt' },
-    { value: 'approved', label: 'Đã duyệt' },
-    { value: 'rejected', label: 'Từ chối' },
-    { value: undefined, label: 'Tất cả' },
+    { value: 'pending', label: t('sa.sub.stPending') },
+    { value: 'approved', label: t('sa.sub.stApproved') },
+    { value: 'rejected', label: t('sa.sub.stRejected') },
+    { value: undefined, label: t('sa.sub.all') },
   ];
 
   return (
     <PageWrap className="max-w-[900px]">
       <PageHeader
-        title="Yêu cầu đăng ký gói"
-        subtitle="Duyệt hoặc từ chối yêu cầu nâng cấp gói từ boss."
+        title={t('sa.sub.title')}
+        subtitle={t('sa.sub.subtitle')}
       />
 
       <div className="flex gap-2 flex-wrap">
@@ -140,7 +146,7 @@ export default function SASubscriptionsPage() {
 
       {requests.length === 0 ? (
         <PageSection>
-          <p className="text-sm text-muted-foreground">Không có yêu cầu nào.</p>
+          <p className="text-sm text-muted-foreground">{t('sa.sub.noRequests')}</p>
         </PageSection>
       ) : (
         <PageSection>
@@ -152,22 +158,22 @@ export default function SASubscriptionsPage() {
                     <p className="text-sm font-medium truncate">{req.boss_email}</p>
                     <p className="text-xs text-muted-foreground">
                       {req.boss_name} · {req.plan_label}
-                      {req.current_plan_name && ` (hiện: ${req.current_plan_name})`}
+                      {req.current_plan_name && ` ${t('sa.sub.currentPlan', { name: req.current_plan_name })}`}
                     </p>
                   </div>
                   <StatusBadge status={req.status} />
                 </div>
 
                 <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                  {req.billing_months && <span>{req.billing_months} tháng</span>}
+                  {req.billing_months && <span>{t('sa.plan.months', { n: req.billing_months })}</span>}
                   {req.amount_paid_vnd && (
                     <span>
                       {req.billing_months ? '· ' : ''}
-                      {req.amount_paid_vnd.toLocaleString('vi-VN')} VND
+                      {req.amount_paid_vnd.toLocaleString(locale)} VND
                     </span>
                   )}
                   {req.transfer_content && <span>· {req.transfer_content}</span>}
-                  <span>· {new Date(req.created_at).toLocaleDateString('vi-VN')}</span>
+                  <span>· {new Date(req.created_at).toLocaleDateString(locale)}</span>
                   {req.refund_qr_path && (
                     <a
                       href={`/api/v1/superadmin/payment-proof/${req.refund_qr_path.split('/').pop()}`}
@@ -176,17 +182,17 @@ export default function SASubscriptionsPage() {
                       className="flex items-center gap-1 hover:text-foreground"
                     >
                       <ExternalLink className="h-3 w-3" />
-                      QR hoàn tiền
+                      {t('sa.sub.refundQr')}
                     </a>
                   )}
                 </div>
 
                 {req.note && (
-                  <p className="text-xs text-muted-foreground italic">Ghi chú: {req.note}</p>
+                  <p className="text-xs text-muted-foreground italic">{t('sa.sub.noteLabel', { note: req.note })}</p>
                 )}
                 {req.reviewer_note && (
                   <p className="text-xs text-muted-foreground">
-                    Phản hồi: {req.reviewer_note}
+                    {t('sa.sub.reviewerNote', { note: req.reviewer_note })}
                   </p>
                 )}
 
@@ -199,7 +205,7 @@ export default function SASubscriptionsPage() {
                       className="gap-1"
                     >
                       <Check className="h-3.5 w-3.5" />
-                      Duyệt
+                      {t('sa.sub.approve')}
                     </Button>
                     <Button
                       size="sm"
@@ -208,7 +214,7 @@ export default function SASubscriptionsPage() {
                       className="gap-1"
                     >
                       <X className="h-3.5 w-3.5" />
-                      Từ chối
+                      {t('sa.sub.reject')}
                     </Button>
                     {req.refund_qr_path === null && (
                       <a
@@ -218,7 +224,7 @@ export default function SASubscriptionsPage() {
                         className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 ml-auto"
                       >
                         <ExternalLink className="h-3 w-3" />
-                        Xem minh chứng
+                        {t('sa.sub.viewProof')}
                       </a>
                     )}
                   </div>

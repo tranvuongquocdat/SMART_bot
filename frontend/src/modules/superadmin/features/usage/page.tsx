@@ -4,12 +4,13 @@ import { BarChart3 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { platformUsageQuery } from './api';
 
 const RANGES = [
-  { value: '7d', label: '7 ngày' },
-  { value: '30d', label: '30 ngày' },
-  { value: '90d', label: '90 ngày' },
+  { value: '7d', days: 7 },
+  { value: '30d', days: 30 },
+  { value: '90d', days: 90 },
 ] as const;
 
 type RangeValue = (typeof RANGES)[number]['value'];
@@ -31,14 +32,15 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 }
 
 function UsageContent({ range }: { range: RangeValue }) {
+  const t = useT();
   const { data } = useSuspenseQuery(platformUsageQuery(range));
 
   if (data.totals.calls === 0) {
     return (
       <EmptyState
         icon={BarChart3}
-        title="Chưa có dữ liệu sử dụng"
-        description={`Không có hoạt động nào trong ${data.range_days} ngày qua.`}
+        title={t('sa.usage.empty')}
+        description={t('sa.usage.emptyDesc', { n: data.range_days })}
       />
     );
   }
@@ -48,16 +50,16 @@ function UsageContent({ range }: { range: RangeValue }) {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <SummaryCard label="LLM calls" value={data.totals.calls.toLocaleString('vi-VN')} />
         <SummaryCard label="Tokens" value={data.totals.tokens.toLocaleString('vi-VN')} />
-        <SummaryCard label="Chi phí (USD)" value={`$${fmt(data.totals.cost_usd)}`} />
+        <SummaryCard label={t('sa.usage.costUsd')} value={`$${fmt(data.totals.cost_usd)}`} />
         <SummaryCard
-          label="Chi phí TB / ngày"
+          label={t('sa.usage.costAvgDay')}
           value={`$${fmt(data.totals.cost_usd / data.range_days)}`}
         />
       </div>
 
       {/* Per-boss breakdown */}
       <div>
-        <h3 className="text-sm font-semibold mb-2">Theo boss</h3>
+        <h3 className="text-sm font-semibold mb-2">{t('sa.usage.byBoss')}</h3>
         <div className="rounded-[12px] bg-card-grad surface-section overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -65,7 +67,7 @@ function UsageContent({ range }: { range: RangeValue }) {
                 <th className="p-3">Boss</th>
                 <th className="p-3 text-right">Calls</th>
                 <th className="p-3 text-right">Tokens</th>
-                <th className="p-3 text-right">Chi phí (USD)</th>
+                <th className="p-3 text-right">{t('sa.usage.costUsd')}</th>
               </tr>
             </thead>
             <tbody>
@@ -89,15 +91,15 @@ function UsageContent({ range }: { range: RangeValue }) {
 
       {/* Per-feature breakdown */}
       <div>
-        <h3 className="text-sm font-semibold mb-2">Theo tính năng</h3>
+        <h3 className="text-sm font-semibold mb-2">{t('sa.usage.byFeature')}</h3>
         <div className="rounded-[12px] bg-card-grad surface-section overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-muted-foreground border-b">
-                <th className="p-3">Tính năng</th>
+                <th className="p-3">{t('sa.usage.colFeature')}</th>
                 <th className="p-3 text-right">Calls</th>
                 <th className="p-3 text-right">Tokens</th>
-                <th className="p-3 text-right">Chi phí (USD)</th>
+                <th className="p-3 text-right">{t('sa.usage.costUsd')}</th>
               </tr>
             </thead>
             <tbody>
@@ -116,15 +118,15 @@ function UsageContent({ range }: { range: RangeValue }) {
 
       {/* Daily breakdown */}
       <div>
-        <h3 className="text-sm font-semibold mb-2">Theo ngày</h3>
+        <h3 className="text-sm font-semibold mb-2">{t('sa.usage.byDay')}</h3>
         <div className="rounded-[12px] bg-card-grad surface-section overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-muted-foreground border-b">
-                <th className="p-3">Ngày</th>
+                <th className="p-3">{t('sa.usage.colDate')}</th>
                 <th className="p-3 text-right">Calls</th>
                 <th className="p-3 text-right">Tokens</th>
-                <th className="p-3 text-right">Chi phí (USD)</th>
+                <th className="p-3 text-right">{t('sa.usage.costUsd')}</th>
               </tr>
             </thead>
             <tbody>
@@ -145,13 +147,14 @@ function UsageContent({ range }: { range: RangeValue }) {
 }
 
 export default function PlatformUsagePage() {
+  const t = useT();
   const [range, setRange] = useState<RangeValue>('30d');
 
   return (
     <PageWrap>
       <PageHeader
-        title="Sử dụng"
-        subtitle="Thống kê tokens và chi phí AI toàn nền tảng — theo boss, tính năng, ngày."
+        title={t('nav.sa.usage')}
+        subtitle={t('sa.usage.subtitle')}
         actions={
           <div className="flex gap-1 rounded-md border border-border p-1 bg-[hsl(var(--muted))]">
             {RANGES.map(r => (
@@ -162,7 +165,7 @@ export default function PlatformUsagePage() {
                 className="h-7 text-xs px-3"
                 onClick={() => setRange(r.value)}
               >
-                {r.label}
+                {t('sa.acct.days', { n: r.days })}
               </Button>
             ))}
           </div>

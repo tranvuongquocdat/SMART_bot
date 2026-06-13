@@ -12,6 +12,7 @@ import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 
 type CatalogItem = {
   id: number;
@@ -29,13 +30,14 @@ const catalogQuery = () =>
     queryFn: () => api<CatalogItem[]>('/api/v1/superadmin/mcp-catalog'),
   });
 
-function errDetail(e: unknown): string {
+function errDetail(e: unknown, fallback: string): string {
   return e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
     ? (e.body as { detail: string }).detail
-    : 'Thao tác thất bại';
+    : fallback;
 }
 
 export default function McpCatalogPage() {
+  const t = useT();
   const { data } = useSuspenseQuery(catalogQuery());
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
@@ -55,9 +57,9 @@ export default function McpCatalogPage() {
       invalidate();
       setOpen(false);
       setName(''); setUrl(''); setDesc('');
-      toast.success('Đã thêm vào danh mục');
+      toast.success(t('sa.mcp.added'));
     },
-    onError: (e) => toast.error(errDetail(e)),
+    onError: (e) => toast.error(errDetail(e, t('sa.common.actionFailed'))),
   });
 
   const toggleMut = useMutation({
@@ -67,28 +69,28 @@ export default function McpCatalogPage() {
         body: JSON.stringify({ is_active: !item.is_active }),
       }),
     onSuccess: invalidate,
-    onError: (e) => toast.error(errDetail(e)),
+    onError: (e) => toast.error(errDetail(e, t('sa.common.actionFailed'))),
   });
 
   const delMut = useMutation({
     mutationFn: (id: number) =>
       api(`/api/v1/superadmin/mcp-catalog/${id}`, { method: 'DELETE' }),
-    onSuccess: () => { invalidate(); toast.success('Đã xoá'); },
-    onError: (e) => toast.error(errDetail(e)),
+    onSuccess: () => { invalidate(); toast.success(t('sa.mcp.deleted')); },
+    onError: (e) => toast.error(errDetail(e, t('sa.common.actionFailed'))),
   });
 
   return (
     <PageWrap className="max-w-[860px]">
       <PageHeader
-        title="MCP Catalog"
-        subtitle="Danh mục integration đã kiểm duyệt — boss chọn từ đây theo slot của gói."
-        actions={<Button size="sm" onClick={() => setOpen(true)}>+ Thêm MCP</Button>}
+        title={t('nav.sa.mcpCatalog')}
+        subtitle={t('sa.mcp.subtitle')}
+        actions={<Button size="sm" onClick={() => setOpen(true)}>{t('sa.mcp.addBtn')}</Button>}
       />
       <PageSection>
         {data.length === 0 ? (
           <div className="rounded-xl border p-8 text-center text-sm text-muted-foreground">
             <Plug2 className="h-6 w-6 mx-auto mb-2 opacity-50" />
-            Chưa có MCP nào trong danh mục.
+            {t('sa.mcp.empty')}
           </div>
         ) : (
           <div className="divide-y rounded-xl border">
@@ -99,7 +101,7 @@ export default function McpCatalogPage() {
                   <p className="text-sm font-medium">
                     {item.name}
                     {!item.is_active && (
-                      <span className="ml-2 text-xs text-muted-foreground">(ẩn)</span>
+                      <span className="ml-2 text-xs text-muted-foreground">{t('sa.mcp.hiddenTag')}</span>
                     )}
                   </p>
                   <p className="text-xs text-muted-foreground truncate">
@@ -113,14 +115,14 @@ export default function McpCatalogPage() {
                   className="h-7 text-xs"
                   onClick={() => toggleMut.mutate(item)}
                 >
-                  {item.is_active ? 'Ẩn' : 'Hiện'}
+                  {item.is_active ? t('sa.mcp.hide') : t('sa.mcp.show')}
                 </Button>
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
                   onClick={() => delMut.mutate(item.id)}
-                  aria-label="Xoá"
+                  aria-label={t('sa.common.delete')}
                 >
                   <Trash2 className="h-4 w-4" />
                 </Button>
@@ -133,29 +135,29 @@ export default function McpCatalogPage() {
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Thêm MCP vào danh mục</DialogTitle>
+            <DialogTitle>{t('sa.mcp.addTitle')}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-1.5">
-              <Label>Tên</Label>
+              <Label>{t('sa.mcp.name')}</Label>
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Google Calendar" />
             </div>
             <div className="space-y-1.5">
-              <Label>URL MCP server</Label>
+              <Label>{t('sa.mcp.url')}</Label>
               <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
             </div>
             <div className="space-y-1.5">
-              <Label>Mô tả <span className="text-muted-foreground text-xs">(tuỳ chọn)</span></Label>
+              <Label>{t('sa.mcp.desc')} <span className="text-muted-foreground text-xs">{t('sa.mcp.optional')}</span></Label>
               <Input value={desc} onChange={(e) => setDesc(e.target.value)} />
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setOpen(false)}>Huỷ</Button>
+            <Button variant="outline" onClick={() => setOpen(false)}>{t('sa.common.cancel')}</Button>
             <Button
               disabled={!name.trim() || !url.trim() || createMut.isPending}
               onClick={() => createMut.mutate()}
             >
-              {createMut.isPending ? 'Đang thêm…' : 'Thêm'}
+              {createMut.isPending ? t('sa.mcp.adding') : t('sa.mcp.add')}
             </Button>
           </DialogFooter>
         </DialogContent>
