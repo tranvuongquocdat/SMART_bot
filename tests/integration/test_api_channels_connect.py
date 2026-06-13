@@ -91,7 +91,7 @@ def test_connect_no_capacity(client, logged_in_boss, clean_db):
     _set_channel_limit(clean_db, logged_in_boss.boss_id, 3)
     r = client.post("/api/v1/admin/channels/zalo/connect", headers=_csrf(client))
     assert r.status_code == 409
-    assert "tài khoản" in r.json()["detail"].lower() or "capacity" in r.json()["detail"].lower()
+    assert "account" in r.json()["detail"].lower() or "capacity" in r.json()["detail"].lower()
 
 
 def test_connect_respects_channel_limit(client, logged_in_boss, clean_db):

@@ -524,7 +524,7 @@ async def boss_conversations(
         elif chat_type == "dm":
             title = r["last_sender_name"] or f"DM {r['chat_id']}"
         else:
-            title = f"Nhóm {r['chat_id']}"
+            title = f"Group {r['chat_id']}"
         result.append(
             {
                 "provider": r["provider"],

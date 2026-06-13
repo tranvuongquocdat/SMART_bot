@@ -195,14 +195,14 @@ async def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
                     params={"key": api_key},
                 )
             else:
-                return False, "Provider không hợp lệ"
+                return False, "Invalid provider"
     except httpx.RequestError:
-        return False, "Không gọi được provider"
+        return False, "Could not reach provider"
     if r.status_code == 200:
-        return True, "Key hợp lệ"
+        return True, "Key is valid"
     if r.status_code in (401, 403):
-        return False, "Key sai hoặc hết hạn"
-    return False, f"Provider trả về {r.status_code}"
+        return False, "Invalid or expired key"
+    return False, f"Provider returned {r.status_code}"
 
 
 async def set_api_key(
@@ -287,7 +287,7 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
         raise AiConfigError(422, "invalid tier")
     if not await boss_has_key(pool, boss_id, provider):
         raise AiConfigError(
-            409, f"Cần lưu API key {provider} của boss trước khi thêm model riêng"
+            409, f"Save the boss's {provider} API key before adding a custom model"
         )
 
     endpoint_kind, base_url = PROVIDER_DEFAULTS[provider]
@@ -309,7 +309,7 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
             owner_boss_id=boss_id,
         )
     except asyncpg.UniqueViolationError:
-        raise AiConfigError(409, "Model này đã có trong danh sách của boss")
+        raise AiConfigError(409, "This model is already in the boss's list")
 
 
 async def delete_own_model(pool, boss_id: int, model_id: int) -> None:
@@ -343,10 +343,10 @@ async def list_provider_models(pool, boss_id: int, provider: str) -> dict:
     """
     provider = provider.strip().lower()
     if provider not in PROVIDERS:
-        return {"ok": False, "models": [], "message": "Provider không hợp lệ"}
+        return {"ok": False, "models": [], "message": "Invalid provider"}
     key = await resolve_key(pool, boss_id, provider)
     if not key:
-        return {"ok": False, "models": [], "message": f"Chưa có API key {provider}"}
+        return {"ok": False, "models": [], "message": f"No {provider} API key yet"}
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -366,10 +366,10 @@ async def list_provider_models(pool, boss_id: int, provider: str) -> dict:
                 )
     except httpx.RequestError as e:
         log.warning("list_provider_models network err provider=%s: %s", provider, e)
-        return {"ok": False, "models": [], "message": "Không gọi được provider"}
+        return {"ok": False, "models": [], "message": "Could not reach provider"}
 
     if r.status_code != 200:
-        return {"ok": False, "models": [], "message": f"Provider trả về {r.status_code}"}
+        return {"ok": False, "models": [], "message": f"Provider returned {r.status_code}"}
 
     try:
         data = r.json()
@@ -382,6 +382,6 @@ async def list_provider_models(pool, boss_id: int, provider: str) -> dict:
         else:
             ids = [m["id"] for m in data.get("data", [])]
     except Exception:
-        return {"ok": False, "models": [], "message": "Không đọc được phản hồi provider"}
+        return {"ok": False, "models": [], "message": "Could not read provider response"}
 
     return {"ok": True, "models": [{"id": i} for i in sorted(ids)]}

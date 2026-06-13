@@ -100,8 +100,8 @@ class ZaloQrLoginManager:
         if not (BRIDGE_DIR / "node_modules" / "zca-js").exists():
             sess.status = "error"
             sess.error = (
-                "Bridge Zalo chưa cài dependencies — chạy `npm install` trong "
-                "src/channels/zalo/bridge rồi thử lại"
+                "Zalo bridge dependencies not installed — run `npm install` in "
+                "src/channels/zalo/bridge then try again"
             )
             return sess
 
@@ -121,7 +121,7 @@ class ZaloQrLoginManager:
             )
         except FileNotFoundError:
             sess.status = "error"
-            sess.error = "Không tìm thấy `node` trên server — cần cài Node.js"
+            sess.error = "`node` not found on the server — Node.js must be installed"
             return sess
         sess.deadline_monotonic = time.monotonic() + LOGIN_TTL_SECONDS
         sess.proc = proc
@@ -201,9 +201,9 @@ class ZaloQrLoginManager:
                     sess.display_name = data.get("display_name")
                 elif ev == "error":
                     sess.status = "error"
-                    msg = data.get("message") or "QR login thất bại"
+                    msg = data.get("message") or "QR login failed"
                     if "timeout" in msg.lower():
-                        msg = f"Hết thời gian quét ({LOGIN_TTL_SECONDS}s) — bấm Thử lại để lấy mã mới"
+                        msg = f"Scan timed out ({LOGIN_TTL_SECONDS}s) — press Try again to get a new code"
                     sess.error = msg
                 elif ev == "success":
                     try:
@@ -212,16 +212,16 @@ class ZaloQrLoginManager:
                     except Exception as e:
                         log.exception("zalo qr provision failed boss=%s", sess.boss_id)
                         sess.status = "error"
-                        sess.error = f"Lưu tài khoản thất bại: {e}"
+                        sess.error = f"Failed to save account: {e}"
         finally:
             await proc.wait()
             if sess.status not in ("success", "error"):
                 sess.status = "error"
                 detail = sess.stderr_tail[-1] if sess.stderr_tail else None
                 sess.error = sess.error or (
-                    f"Phiên đăng nhập kết thúc bất thường: {detail}"
+                    f"Login session ended unexpectedly: {detail}"
                     if detail
-                    else "Phiên đăng nhập kết thúc bất thường"
+                    else "Login session ended unexpectedly"
                 )
 
     async def _provision(self, sess: LoginSession, data: dict) -> None:
@@ -257,7 +257,7 @@ class ZaloQrLoginManager:
             )
             if conflict:
                 raise RuntimeError(
-                    f"Acc Zalo này đã thuộc bot account #{conflict} — không thể gắn trùng"
+                    f"This Zalo account already belongs to bot account #{conflict} — cannot link twice"
                 )
             row = await c.fetchrow(
                 """
@@ -275,7 +275,7 @@ class ZaloQrLoginManager:
                 data.get("display_name"),
             )
             if row is None:
-                raise RuntimeError("bot account không tồn tại")
+                raise RuntimeError("bot account does not exist")
 
         # Restart listener với session mới (re-login phải thay proc cũ).
         adapter = self._adapter_map_getter().get("zalo")
@@ -327,7 +327,7 @@ class ZaloQrLoginManager:
             )
             if conflict:
                 raise RuntimeError(
-                    f"Tài khoản Zalo này đã được dùng ở nơi khác (#{conflict}) — không thể kết nối trùng"
+                    f"This Zalo account is already used elsewhere (#{conflict}) — cannot connect twice"
                 )
 
             # Boss đã có acc Zalo khác uid → chặn. Phải gỡ acc cũ trước (1 acc/nền tảng).
@@ -340,8 +340,8 @@ class ZaloQrLoginManager:
             )
             if existing and existing["provider_user_id"] != own_id:
                 raise RuntimeError(
-                    "Bạn đã kết nối một tài khoản Zalo khác. Gỡ tài khoản cũ trong "
-                    "trang Kênh kết nối trước khi kết nối tài khoản mới."
+                    "You already connected a different Zalo account. Remove the old one on "
+                    "the Channels page before connecting a new account."
                 )
 
             if existing is not None:

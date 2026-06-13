@@ -35,7 +35,7 @@ async def test_key(
 
     provider = provider.lower().strip()
     if provider not in ("openai", "groq", "gemini"):
-        return {"ok": False, "status": "invalid_provider", "message": "Provider không hợp lệ"}
+        return {"ok": False, "status": "invalid_provider", "message": "Invalid provider"}
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -56,16 +56,16 @@ async def test_key(
                 )
     except httpx.RequestError as e:
         logger.warning("test_key network err provider=%s: %s", provider, e)
-        return {"ok": False, "status": "network_error", "message": "Không gọi được provider"}
+        return {"ok": False, "status": "network_error", "message": "Could not reach provider"}
 
     if r.status_code == 200:
-        return {"ok": True, "status": "ok", "message": "Key hợp lệ"}
+        return {"ok": True, "status": "ok", "message": "Key is valid"}
     if r.status_code in (401, 403):
-        return {"ok": False, "status": "unauthorized", "message": "Key sai hoặc hết hạn"}
+        return {"ok": False, "status": "unauthorized", "message": "Invalid or expired key"}
     return {
         "ok": False,
         "status": f"http_{r.status_code}",
-        "message": f"Provider trả về {r.status_code}",
+        "message": f"Provider returned {r.status_code}",
     }
 
 

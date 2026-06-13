@@ -149,7 +149,7 @@ def test_toggle_group_active_respects_limit(client, logged_in_boss, seed_group_o
         headers={"X-CSRF-Token": "csrf-group-limit"},
     )
     assert r.status_code == 400
-    assert "giới hạn" in r.json()["detail"]
+    assert "limit" in r.json()["detail"]
 
 
 def test_toggle_group_active_other_boss_404(client, logged_in_boss, seed_group_owned_by_other):

@@ -107,7 +107,7 @@ async def create_proxy(
 ) -> int:
     url = (url or "").strip()
     if "://" not in url:
-        raise ProxyError(422, "URL proxy phải có scheme (http://, https://, socks5://)")
+        raise ProxyError(422, "Proxy URL must include a scheme (http://, https://, socks5://)")
     async with pool.acquire() as c:
         return await c.fetchval(
             """
@@ -133,7 +133,7 @@ async def update_proxy(pool: Any, proxy_id: int, fields: dict) -> None:
     if "url" in fields and fields["url"]:
         url = fields["url"].strip()
         if "://" not in url:
-            raise ProxyError(422, "URL proxy phải có scheme")
+            raise ProxyError(422, "Proxy URL must include a scheme")
         sets.append(f"url_enc=${i}")
         vals.append(encrypt_url(url))
         i += 1
@@ -150,7 +150,7 @@ async def delete_proxy(pool: Any, proxy_id: int) -> None:
             "SELECT COUNT(*) FROM users WHERE proxy_id=$1", proxy_id
         )
         if n:
-            raise ProxyError(409, f"Đang gán cho {n} khách — gỡ trước khi xoá")
+            raise ProxyError(409, f"Assigned to {n} customer(s) — unassign before deleting")
         await c.execute("DELETE FROM proxies WHERE id=$1", proxy_id)
 
 
@@ -162,9 +162,9 @@ async def assign_to_boss(pool: Any, boss_id: int, proxy_id: int | None) -> None:
                 "SELECT max_bosses, status FROM proxies WHERE id=$1", proxy_id
             )
             if not p:
-                raise ProxyError(404, "proxy không tồn tại")
+                raise ProxyError(404, "proxy does not exist")
             if p["status"] != "active":
-                raise ProxyError(409, "proxy đang không active")
+                raise ProxyError(409, "proxy is not active")
             used = await c.fetchval(
                 "SELECT COUNT(*) FROM users WHERE proxy_id=$1 AND id<>$2",
                 proxy_id,
@@ -172,7 +172,7 @@ async def assign_to_boss(pool: Any, boss_id: int, proxy_id: int | None) -> None:
             )
             if used >= p["max_bosses"]:
                 raise ProxyError(
-                    409, f"Proxy đã đạt cap {p['max_bosses']} khách"
+                    409, f"Proxy reached its cap of {p['max_bosses']} customers"
                 )
         await c.execute(
             "UPDATE users SET proxy_id=$2 WHERE id=$1", boss_id, proxy_id

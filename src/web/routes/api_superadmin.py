@@ -476,8 +476,8 @@ async def create_bot_account(
             )
     except asyncpg.UniqueViolationError as e:
         if "uq_boss_owned_one_per_provider" in str(e):
-            raise HTTPException(409, "Boss này đã có một bot account cho nền tảng đó")
-        raise HTTPException(409, "Tài khoản (provider + handle) đã tồn tại")
+            raise HTTPException(409, "This boss already has a bot account for that platform")
+        raise HTTPException(409, "Account (provider + handle) already exists")
     return {"id": new_id}
 
 
@@ -506,7 +506,7 @@ async def patch_bot_account(
     # Chỉ cho superadmin bật/tắt thủ công giữa active/paused; banned/logged_out
     # là trạng thái hệ thống tự đặt, không cho set tay.
     if body.status is not None and body.status not in ("active", "paused"):
-        raise HTTPException(status_code=422, detail="status chỉ nhận active | paused")
+        raise HTTPException(status_code=422, detail="status accepts only active | paused")
 
     async with db.acquire() as c:
         existing = await c.fetchrow(
@@ -855,10 +855,10 @@ async def bot_account_qr_login_start(
     if provider is None:
         raise HTTPException(404, "bot account not found")
     if provider != "zalo":
-        raise HTTPException(422, "Chỉ kênh Zalo dùng đăng nhập QR")
+        raise HTTPException(422, "Only the Zalo channel uses QR login")
     manager = getattr(request.app.state, "zalo_qr_login", None)
     if manager is None:
-        raise HTTPException(503, "Zalo QR login chưa sẵn sàng")
+        raise HTTPException(503, "Zalo QR login is not ready")
     sess = await manager.start_for_account(account_id, actor_user_id=ctx.boss_id)
     return {"login_id": sess.login_id, "status": sess.status}
 
@@ -873,7 +873,7 @@ async def bot_account_qr_login_status(
     sess = manager.get_by_login_id(login_id) if manager else None
     # Chỉ trả phiên do superadmin mở (mode account_login) — không lộ phiên của boss
     if sess is None or sess.target_account_id is None:
-        raise HTTPException(404, "Phiên đăng nhập không tồn tại")
+        raise HTTPException(404, "Login session does not exist")
     return {
         "status": sess.status,
         "qr_image_b64": sess.qr_image_b64 if sess.status == "qr" else None,
@@ -1030,7 +1030,7 @@ async def test_proxy_sa(
         raise HTTPException(404, "proxy not found")
     url = proxy_pool.decrypt_url(blob)
     if not url:
-        raise HTTPException(500, "không giải mã được url proxy")
+        raise HTTPException(500, "could not decrypt proxy url")
     return await proxy_pool.test_proxy(url)
 
 
@@ -1794,8 +1794,8 @@ async def approve_subscription_request(
         db,
         req["boss_id"],
         kind="subscription",
-        title="Đăng ký gói đã được duyệt",
-        body=f"Gói {plan_label or ''} của bạn đã được kích hoạt.".strip(),
+        title="Plan subscription approved",
+        body=f"Your plan {plan_label or ''} has been activated.".strip(),
         link="/app/admin/subscription",
     )
     return {"status": "approved", "request_id": req_id}
@@ -1833,8 +1833,8 @@ async def reject_subscription_request(
         db,
         req["boss_id"],
         kind="subscription",
-        title="Yêu cầu đăng ký bị từ chối",
-        body=note or "Vui lòng kiểm tra lại thông tin thanh toán và gửi lại.",
+        title="Subscription request rejected",
+        body=note or "Please double-check your payment details and submit again.",
         link="/app/admin/subscription",
     )
     return {"status": "rejected", "request_id": req_id}
@@ -2008,5 +2008,5 @@ async def delete_mcp_catalog(
             "SELECT COUNT(*) FROM mcp_servers WHERE catalog_id=$1", item_id
         )
         if used:
-            raise HTTPException(400, f"Đang có {used} boss dùng integration này")
+            raise HTTPException(400, f"{used} boss(es) are using this integration")
         await c.execute("DELETE FROM mcp_catalog WHERE id=$1", item_id)
