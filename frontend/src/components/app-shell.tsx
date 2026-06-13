@@ -146,7 +146,7 @@ export function AppShell({
             <button
               onClick={() => setMobileOpen(true)}
               className="md:hidden h-[30px] w-[30px] rounded-md border border-[hsl(var(--divider))] grid place-items-center"
-              aria-label="Mở menu"
+              aria-label={t('common.openMenu')}
             >
               <Menu className="h-4 w-4" />
             </button>

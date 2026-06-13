@@ -11,7 +11,7 @@ import { patchGeneral } from '@/modules/admin/features/settings/api';
 const LABELS: Record<Lang, string> = { vi: 'VI', en: 'EN' };
 
 export function LanguageToggle() {
-  const { lang, setLang } = useI18n();
+  const { lang, setLang, t } = useI18n();
 
   const pick = (l: Lang) => {
     setLang(l);
@@ -32,10 +32,10 @@ export function LanguageToggle() {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
         <DropdownMenuItem onClick={() => pick('vi')} className={lang === 'vi' ? 'font-medium' : ''}>
-          Tiếng Việt
+          {t('lang.vi')}
         </DropdownMenuItem>
         <DropdownMenuItem onClick={() => pick('en')} className={lang === 'en' ? 'font-medium' : ''}>
-          English
+          {t('lang.en')}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
