@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from src.repositories.base import BossContext
 from src.web.deps import get_db, require_boss
+from src.web.i18n import tr
 from src.web.security import verify_json_csrf
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -1491,7 +1492,7 @@ async def connect_channel(
             provider,
         )
         if existing:
-            raise HTTPException(409, "This channel is already connected")
+            raise HTTPException(409, tr(ctx, vi="Kênh này đã được kết nối", en="This channel is already connected"))
 
         limits = await get_effective_limits(db, ctx.boss_id)
         if limits.max_active_channels is not None:
@@ -1505,7 +1506,11 @@ async def connect_channel(
             if active >= limits.max_active_channels:
                 raise HTTPException(
                     400,
-                    f"Reached the {limits.max_active_channels}-channel limit of the current plan",
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {limits.max_active_channels} kênh của gói hiện tại",
+                        en=f"Reached the {limits.max_active_channels}-channel limit of the current plan",
+                    ),
                 )
 
     registry = getattr(request.app.state, "channel_registry", None)
@@ -1518,7 +1523,11 @@ async def connect_channel(
     except NoCapacityError:
         raise HTTPException(
             409,
-            "No bot account is available for this channel right now — please contact an administrator",
+            tr(
+                ctx,
+                vi="Hiện chưa có tài khoản bot khả dụng cho kênh này — vui lòng liên hệ quản trị viên",
+                en="No bot account is available for this channel right now — please contact an administrator",
+            ),
         )
     await svc.accept(ctx.boss_id, provider)
 
@@ -1550,7 +1559,7 @@ async def _check_channel_slot(db, ctx, provider: str) -> None:
             provider,
         )
         if existing:
-            raise HTTPException(409, "This channel is already connected")
+            raise HTTPException(409, tr(ctx, vi="Kênh này đã được kết nối", en="This channel is already connected"))
         limits = await get_effective_limits(db, ctx.boss_id)
         if limits.max_active_channels is not None:
             active = await c.fetchval(
@@ -1563,7 +1572,11 @@ async def _check_channel_slot(db, ctx, provider: str) -> None:
             if active >= limits.max_active_channels:
                 raise HTTPException(
                     400,
-                    f"Reached the {limits.max_active_channels}-channel limit of the current plan",
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {limits.max_active_channels} kênh của gói hiện tại",
+                        en=f"Reached the {limits.max_active_channels}-channel limit of the current plan",
+                    ),
                 )
 
 
@@ -1577,7 +1590,7 @@ async def zalo_qr_login_start(
     await _check_channel_slot(db, ctx, "zalo")
     manager = getattr(request.app.state, "zalo_qr_login", None)
     if manager is None:
-        raise HTTPException(503, "Zalo QR login is not ready")
+        raise HTTPException(503, tr(ctx, vi="Zalo QR login chưa sẵn sàng", en="Zalo QR login is not ready"))
     sess = await manager.start(ctx.boss_id)
     return {"login_id": sess.login_id, "status": sess.status}
 
@@ -1591,7 +1604,7 @@ async def zalo_qr_login_status(
     manager = getattr(request.app.state, "zalo_qr_login", None)
     sess = manager.get(ctx.boss_id, login_id) if manager else None
     if sess is None:
-        raise HTTPException(404, "Login session does not exist")
+        raise HTTPException(404, tr(ctx, vi="Phiên đăng nhập không tồn tại", en="Login session does not exist"))
     return {
         "status": sess.status,
         "qr_image_b64": sess.qr_image_b64 if sess.status == "qr" else None,
@@ -1859,7 +1872,7 @@ async def create_subscription_request(
             prices = json.loads(prices)
         prices = prices or {}
         if prices and str(billing_months) not in prices:
-            raise HTTPException(422, "The plan does not support this billing cycle")
+            raise HTTPException(422, tr(ctx, vi="Gói không hỗ trợ chu kỳ thanh toán này", en="The plan does not support this billing cycle"))
         proof_path = await save_upload(payment_proof, "payment_proofs")
         try:
             row = await c.fetchrow(
@@ -1983,7 +1996,11 @@ async def toggle_tool(
             if count >= lim.max_active_tools:
                 raise HTTPException(
                     400,
-                    f"Limit reached: max {lim.max_active_tools} active tools on your plan",
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.max_active_tools} tool của gói hiện tại",
+                        en=f"Limit reached: max {lim.max_active_tools} active tools on your plan",
+                    ),
                 )
         await c.execute(
             "INSERT INTO boss_active_tools (boss_id, tool_name) VALUES ($1, $2)",
@@ -2264,7 +2281,11 @@ async def toggle_group_active(
             if count >= lim.max_active_groups:
                 raise HTTPException(
                     400,
-                    f"Reached the {lim.max_active_groups}-active-group limit of the current plan",
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.max_active_groups} nhóm active của gói hiện tại",
+                        en=f"Reached the {lim.max_active_groups}-active-group limit of the current plan",
+                    ),
                 )
         await c.execute(
             "UPDATE group_notes SET is_active=TRUE WHERE id=$1", group_id
@@ -2767,14 +2788,18 @@ async def add_mcp_server(
             )
             if used >= lim.mcp_slots:
                 raise HTTPException(
-                    400, f"Reached the {lim.mcp_slots}-integration limit of the current plan"
+                    400, tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.mcp_slots} integration của gói hiện tại",
+                        en=f"Reached the {lim.mcp_slots}-integration limit of the current plan",
+                    )
                 )
         dup = await c.fetchval(
             "SELECT 1 FROM mcp_servers WHERE boss_id=$1 AND catalog_id=$2",
             ctx.boss_id, catalog_id,
         )
         if dup:
-            raise HTTPException(409, "This integration is already added")
+            raise HTTPException(409, tr(ctx, vi="Integration này đã được thêm", en="This integration is already added"))
         sid = await c.fetchval(
             """
             INSERT INTO mcp_servers (boss_id, catalog_id, name, url, enabled)
@@ -2812,7 +2837,11 @@ async def toggle_mcp_server(
             )
             if used >= lim.mcp_slots:
                 raise HTTPException(
-                    400, f"Reached the {lim.mcp_slots}-integration limit of the current plan"
+                    400, tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.mcp_slots} integration của gói hiện tại",
+                        en=f"Reached the {lim.mcp_slots}-integration limit of the current plan",
+                    )
                 )
         await c.execute("UPDATE mcp_servers SET enabled=TRUE WHERE id=$1", server_id)
         return {"id": server_id, "enabled": True}

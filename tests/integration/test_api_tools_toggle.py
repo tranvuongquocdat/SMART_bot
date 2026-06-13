@@ -117,7 +117,7 @@ def test_toggle_respects_plan_limit(client, logged_in_boss, clean_db):
         headers=_csrf_headers(client),
     )
     assert r.status_code == 400
-    assert "limit" in r.json()["detail"].lower()
+    assert "giới hạn" in r.json()["detail"].lower()
 
 
 def test_enable_all_tools(client, logged_in_boss, clean_db):
