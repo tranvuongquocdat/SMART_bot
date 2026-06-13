@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { meQuery } from '@/lib/auth';
+import { useI18n } from '@/lib/i18n';
 import { bossesQuery, deleteBoss } from './api';
 import type { Boss } from './api';
 import { BossDrawer } from './boss-drawer';
@@ -60,6 +61,7 @@ function DeleteDialog({
   boss: Boss | null;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const open = boss !== null;
 
@@ -67,32 +69,32 @@ function DeleteDialog({
     mutationFn: () => deleteBoss(boss!.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bosses'] });
-      toast.success('Đã xoá boss');
+      toast.success(t('sa.boss.deleted'));
       onClose();
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('sa.common.deleteError')),
   });
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Xoá boss</DialogTitle>
+          <DialogTitle>{t('sa.boss.deleteTitle')}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground py-2">
-          Bạn chắc chắn muốn xoá{' '}
-          <strong>{boss?.name ?? boss?.email}</strong>? Hành động này không thể hoàn tác.
+          {t('sa.boss.deleteConfirmPre')}
+          <strong>{boss?.name ?? boss?.email}</strong>{t('sa.boss.deleteConfirmPost')}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             variant="destructive"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang xoá...' : 'Xoá'}
+            {mutation.isPending ? t('sa.common.deleting') : t('sa.common.delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -105,6 +107,8 @@ function DeleteDialog({
 // ---------------------------------------------------------------------------
 
 export default function BossesPage() {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const bosses = useQuery(bossesQuery);
   const me = useQuery(meQuery);
 
@@ -117,7 +121,7 @@ export default function BossesPage() {
 
   const columns: ColumnDef<Boss>[] = [
     {
-      header: 'Tên / Email',
+      header: t('sa.boss.colNameEmail'),
       accessorKey: 'name',
       cell: ({ row }) => (
         <div>
@@ -131,12 +135,12 @@ export default function BossesPage() {
       ),
     },
     {
-      header: 'Vai trò',
+      header: t('sa.boss.colRole'),
       accessorKey: 'role',
       cell: ({ row }) => <RoleChip role={row.original.role} />,
     },
     {
-      header: 'Gói',
+      header: t('sa.boss.colPlan'),
       accessorKey: 'plan_label',
       cell: ({ row }) => (
         <div>
@@ -148,7 +152,7 @@ export default function BossesPage() {
       ),
     },
     {
-      header: 'Hết hạn',
+      header: t('sa.boss.colExpiry'),
       accessorKey: 'subscription_expiry',
       cell: ({ row }) => {
         const d = row.original.subscription_expiry;
@@ -156,28 +160,28 @@ export default function BossesPage() {
         const expired = new Date(d) < new Date();
         return (
           <span className={`text-sm ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
-            {new Date(d).toLocaleDateString('vi-VN')}
+            {new Date(d).toLocaleDateString(locale)}
           </span>
         );
       },
     },
     {
-      header: 'Đang dùng',
+      header: t('sa.boss.colUsing'),
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground tabular-nums">
-          {row.original.active_groups} nhóm · {row.original.active_channels} kênh
+          {t('sa.boss.usingValue', { g: row.original.active_groups, c: row.original.active_channels })}
         </span>
       ),
     },
     {
-      header: 'Hoạt động cuối',
+      header: t('sa.boss.colLastActive'),
       accessorKey: 'last_message_at',
       cell: ({ row }) => {
         const d = row.original.last_message_at;
         if (!d) return <span className="text-sm text-muted-foreground">—</span>;
         return (
           <span className="text-sm text-muted-foreground">
-            {new Date(d).toLocaleDateString('vi-VN')}
+            {new Date(d).toLocaleDateString(locale)}
           </span>
         );
       },
@@ -197,17 +201,17 @@ export default function BossesPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
                 <DropdownMenuItem onClick={() => setDetailTarget(row.original)}>
-                  Chi tiết
+                  {t('sa.common.detail')}
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
-                  Sửa
+                  {t('sa.common.edit')}
                 </DropdownMenuItem>
                 {!isSelf && (
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
                     onClick={() => setDeleteTarget(row.original)}
                   >
-                    Xoá
+                    {t('sa.common.delete')}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -221,12 +225,12 @@ export default function BossesPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Boss"
-        subtitle="Tài khoản người dùng có quyền boss/super-admin trong hệ thống."
+        title={t('nav.sa.bosses')}
+        subtitle={t('sa.boss.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Thêm boss
+            {t('sa.boss.addBtn')}
           </Button>
         }
       />
@@ -243,8 +247,8 @@ export default function BossesPage() {
             empty={
               <EmptyState
                 icon={UserCog}
-                title="Chưa có boss nào"
-                action={{ label: '+ Thêm boss', onClick: () => setCreateOpen(true) }}
+                title={t('sa.boss.empty')}
+                action={{ label: t('sa.boss.emptyAction'), onClick: () => setCreateOpen(true) }}
               />
             }
           />

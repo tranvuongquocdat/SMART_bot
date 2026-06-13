@@ -25,11 +25,12 @@ import {
   patchBossAiKey,
   type BossAiSettings,
 } from './api';
+import { useT } from '@/lib/i18n';
 
-const SLOT_LABELS: Record<string, string> = {
-  smart: 'Smart (suy luận sâu)',
-  fast: 'Fast (phản hồi nhanh)',
-  vision: 'Vision (đọc ảnh)',
+const SLOT_LABEL_KEYS: Record<string, string> = {
+  smart: 'sa.boss.slotSmart',
+  fast: 'sa.boss.slotFast',
+  vision: 'sa.boss.slotVision',
 };
 
 const PROVIDERS = ['openai', 'groq', 'gemini'] as const;
@@ -58,6 +59,7 @@ function SlotRow({
   modelId: number | null;
   models: BossAiSettings['models'];
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const tierModels =
     slot === 'vision'
@@ -71,14 +73,14 @@ function SlotRow({
       patchBossAi(bossId, { slot, model_id: newId }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'boss', bossId, 'ai'] });
-      toast.success('Đã lưu slot');
+      toast.success(t('sa.boss.slotSaved'));
     },
-    onError: (e) => toast.error(errDetail(e, 'Lưu slot thất bại')),
+    onError: (e) => toast.error(errDetail(e, t('sa.boss.slotSaveError'))),
   });
 
   return (
     <div className="flex items-center gap-3">
-      <span className="text-sm w-44 shrink-0">{SLOT_LABELS[slot]}</span>
+      <span className="text-sm w-44 shrink-0">{SLOT_LABEL_KEYS[slot] ? t(SLOT_LABEL_KEYS[slot]) : slot}</span>
       <Select
         value={modelId != null ? String(modelId) : 'default'}
         onValueChange={(v) => mut.mutate(v === 'default' ? null : Number(v))}
@@ -88,9 +90,9 @@ function SlotRow({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="default">— mặc định nền tảng —</SelectItem>
+          <SelectItem value="default">{t('sa.boss.platformDefault')}</SelectItem>
           <SelectGroup>
-            <SelectLabel>Model được cấp</SelectLabel>
+            <SelectLabel>{t('sa.boss.grantedModels')}</SelectLabel>
             {platform.map((m) => (
               <SelectItem key={m.id} value={String(m.id)}>
                 {m.provider} / {m.name}
@@ -99,7 +101,7 @@ function SlotRow({
           </SelectGroup>
           {own.length > 0 && (
             <SelectGroup>
-              <SelectLabel>Model riêng của boss</SelectLabel>
+              <SelectLabel>{t('sa.boss.ownModels')}</SelectLabel>
               {own.map((m) => (
                 <SelectItem key={m.id} value={String(m.id)}>
                   {m.provider} / {m.name}
@@ -124,6 +126,7 @@ function KeyRow({
   present: boolean;
   last4?: string;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [val, setVal] = useState('');
 
@@ -135,18 +138,18 @@ function KeyRow({
     onSuccess: () => {
       setVal('');
       invalidate();
-      toast.success(`Key ${PROVIDER_LABELS[provider]} hợp lệ — đã lưu hộ boss.`);
+      toast.success(t('sa.boss.keyValid', { provider: PROVIDER_LABELS[provider] }));
     },
-    onError: (e) => toast.error(errDetail(e, 'Lưu key thất bại')),
+    onError: (e) => toast.error(errDetail(e, t('sa.boss.keySaveError'))),
   });
 
   const clearMut = useMutation({
     mutationFn: () => patchBossAiKey(bossId, { provider, clear: true }),
     onSuccess: () => {
       invalidate();
-      toast.success(`Đã xoá key ${PROVIDER_LABELS[provider]}.`);
+      toast.success(t('sa.boss.keyDeleted', { provider: PROVIDER_LABELS[provider] }));
     },
-    onError: () => toast.error('Xoá key thất bại'),
+    onError: () => toast.error(t('sa.boss.keyDeleteError')),
   });
 
   return (
@@ -157,7 +160,7 @@ function KeyRow({
       <Input
         type="password"
         className="col-span-7 h-8 text-sm"
-        placeholder={present ? `(đã có — **** ${last4 ?? ''})` : 'nhập key của boss…'}
+        placeholder={present ? t('sa.boss.keyPresent', { last4: last4 ?? '' }) : t('sa.boss.keyPlaceholder')}
         value={val}
         onChange={(e) => setVal(e.target.value)}
       />
@@ -167,7 +170,7 @@ function KeyRow({
         disabled={!val || saveMut.isPending}
         onClick={() => saveMut.mutate()}
       >
-        {saveMut.isPending ? 'Đang kiểm tra…' : 'Lưu'}
+        {saveMut.isPending ? t('sa.boss.keyChecking') : t('sa.common.save')}
       </Button>
       {present && (
         <Button
@@ -177,7 +180,7 @@ function KeyRow({
           disabled={clearMut.isPending}
           onClick={() => clearMut.mutate()}
         >
-          Xoá
+          {t('sa.common.delete')}
         </Button>
       )}
     </div>
@@ -185,6 +188,7 @@ function KeyRow({
 }
 
 function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
+  const t = useT();
   const qc = useQueryClient();
   const own = data.models.filter((m) => m.is_own);
 
@@ -203,10 +207,10 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
     setLoading(true);
     try {
       const res = await listBossProviderModels(bossId, provider);
-      if (!res.ok) toast.error(res.message ?? 'Không tải được danh sách');
+      if (!res.ok) toast.error(res.message ?? t('sa.boss.loadListFail'));
       setAvailable(res.models);
     } catch {
-      toast.error('Không tải được danh sách model');
+      toast.error(t('sa.boss.loadModelsFail'));
     } finally {
       setLoading(false);
     }
@@ -217,24 +221,24 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
     onSuccess: () => {
       setName('');
       invalidate();
-      toast.success('Đã thêm model cho boss.');
+      toast.success(t('sa.boss.modelAdded'));
     },
-    onError: (e) => toast.error(errDetail(e, 'Thêm model thất bại')),
+    onError: (e) => toast.error(errDetail(e, t('sa.boss.modelAddError'))),
   });
 
   const delMut = useMutation({
     mutationFn: (id: number) => deleteBossOwnModel(bossId, id),
     onSuccess: () => {
       invalidate();
-      toast.success('Đã xoá model.');
+      toast.success(t('sa.boss.modelDeleted'));
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('sa.common.deleteError')),
   });
 
   return (
     <section className="space-y-3">
       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-        Model riêng của boss (BYO)
+        {t('sa.boss.ownModelsTitle')}
       </p>
       {own.length > 0 && (
         <ul className="space-y-2">
@@ -256,7 +260,7 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
                 disabled={delMut.isPending}
                 onClick={() => delMut.mutate(m.id)}
               >
-                Xoá
+                {t('sa.common.delete')}
               </Button>
             </li>
           ))}
@@ -292,7 +296,7 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
             {available.length > 0 ? (
               <Select value={name || undefined} onValueChange={setName}>
                 <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Chọn model…" />
+                  <SelectValue placeholder={t('sa.boss.chooseModel')} />
                 </SelectTrigger>
                 <SelectContent className="max-h-72">
                   {available.map((m) => (
@@ -305,14 +309,14 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
             ) : (
               <Input
                 className="h-8 text-sm"
-                placeholder="vd: llama-3.3-70b-versatile"
+                placeholder={t('sa.boss.modelNamePlaceholder')}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
             )}
           </div>
           <Button size="sm" variant="outline" className="h-8 text-xs" disabled={loading} onClick={load}>
-            {loading ? 'Đang tải…' : 'Tải danh sách'}
+            {loading ? t('sa.common.loading') : t('sa.boss.loadList')}
           </Button>
           <div className="space-y-1">
             <Label className="text-xs">Slot</Label>
@@ -333,12 +337,12 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
             disabled={!name.trim() || !hasKey || addMut.isPending}
             onClick={() => addMut.mutate()}
           >
-            Thêm
+            {t('sa.boss.add')}
           </Button>
         </div>
         {!hasKey && (
           <p className="text-xs text-amber-600 dark:text-amber-500">
-            Boss chưa có key {PROVIDER_LABELS[provider]} — nhập key hộ ở mục trên trước.
+            {t('sa.boss.noKeyWarn', { provider: PROVIDER_LABELS[provider] })}
           </p>
         )}
       </div>
@@ -347,6 +351,7 @@ function OwnModels({ bossId, data }: { bossId: number; data: BossAiSettings }) {
 }
 
 export function BossAiTab({ bossId }: { bossId: number }) {
+  const t = useT();
   const qc = useQueryClient();
   const ai = useQuery(bossAiQuery(bossId));
   const [cap, setCap] = useState<string | null>(null);
@@ -355,9 +360,9 @@ export function BossAiTab({ bossId }: { bossId: number }) {
     mutationFn: (v: number) => patchBossAi(bossId, { cost_cap_usd_daily: v }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'boss', bossId] });
-      toast.success('Đã lưu cost cap');
+      toast.success(t('sa.boss.capSaved'));
     },
-    onError: () => toast.error('Lưu cost cap thất bại'),
+    onError: () => toast.error(t('sa.boss.capSaveError')),
   });
 
   if (ai.isLoading || !ai.data) return <Skeleton className="h-60 w-full" />;
@@ -383,7 +388,7 @@ export function BossAiTab({ bossId }: { bossId: number }) {
 
       <section className="space-y-2">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-          Cost cap (USD / ngày)
+          {t('sa.boss.costCapTitle')}
         </p>
         <div className="flex gap-2">
           <Input
@@ -400,14 +405,14 @@ export function BossAiTab({ bossId }: { bossId: number }) {
             disabled={capMut.isPending}
             onClick={() => capMut.mutate(parseFloat(capVal))}
           >
-            Lưu
+            {t('sa.common.save')}
           </Button>
         </div>
       </section>
 
       <section className="space-y-3">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-          API keys của boss (BYO)
+          {t('sa.boss.apiKeysTitle')}
         </p>
         {PROVIDERS.map((p) => {
           const info = data.keys[p] ?? { present: false };

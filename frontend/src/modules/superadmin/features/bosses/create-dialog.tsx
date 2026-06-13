@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { createBoss } from './api';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   open: boolean;
@@ -32,6 +33,7 @@ const INITIAL = {
 };
 
 export function CreateDialog({ open, onOpenChange }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState(INITIAL);
 
@@ -44,13 +46,13 @@ export function CreateDialog({ open, onOpenChange }: Props) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bosses'] });
-      toast.success('Đã tạo boss');
+      toast.success(t('sa.boss.created'));
       setForm(INITIAL);
       onOpenChange(false);
     },
     onError: (err: unknown) => {
       const msg =
-        err instanceof Error ? err.message : 'Tạo thất bại';
+        err instanceof Error ? err.message : t('sa.boss.createError');
       toast.error(msg);
     },
   });
@@ -62,7 +64,7 @@ export function CreateDialog({ open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>Thêm boss</DialogTitle>
+          <DialogTitle>{t('sa.boss.addTitle')}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -77,16 +79,16 @@ export function CreateDialog({ open, onOpenChange }: Props) {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Tên hiển thị</Label>
+            <Label>{t('sa.boss.fieldName')}</Label>
             <Input
-              placeholder="VD: Nguyễn Văn A"
+              placeholder={t('sa.boss.namePlaceholder')}
               value={form.name}
               onChange={e => set('name', e.target.value)}
             />
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Vai trò</Label>
+            <Label>{t('sa.boss.role')}</Label>
             <Select value={form.role} onValueChange={v => set('role', v)}>
               <SelectTrigger>
                 <SelectValue />
@@ -101,13 +103,13 @@ export function CreateDialog({ open, onOpenChange }: Props) {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             disabled={!valid || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang tạo...' : 'Tạo'}
+            {mutation.isPending ? t('sa.common.creating') : t('sa.common.create')}
           </Button>
         </DialogFooter>
       </DialogContent>
