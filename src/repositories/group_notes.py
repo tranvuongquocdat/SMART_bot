@@ -106,6 +106,57 @@ class GroupNotesRepo(BossScopedRepo):
         assert got is not None
         return got
 
+    async def ensure_tracked(
+        self,
+        provider: str,
+        chat_id: str,
+        group_name: str | None = None,
+    ) -> None:
+        """Đánh dấu nhóm được track cho boss hiện tại (gọi khi sếp nói câu đầu).
+
+        - Chưa có row  -> tạo (is_active=TRUE, status='active').
+        - status='left' -> reactivate (sếp quay lại nhóm).
+        - status khác (vd 'paused' do tự tắt) -> GIỮ nguyên, không bật lại.
+        """
+        async with self.pool.acquire() as c:
+            await c.execute(
+                """
+                INSERT INTO group_notes (boss_id, provider, chat_id, group_name)
+                VALUES ($1, $2, $3, $4)
+                ON CONFLICT (boss_id, provider, chat_id) DO UPDATE SET
+                  is_active = CASE WHEN group_notes.status='left' THEN TRUE
+                                   ELSE group_notes.is_active END,
+                  status    = CASE WHEN group_notes.status='left' THEN 'active'
+                                   ELSE group_notes.status END,
+                  group_name = COALESCE(EXCLUDED.group_name, group_notes.group_name)
+                """,
+                self.ctx.boss_id, provider, chat_id, group_name,
+            )
+
+    async def bosses_tracking(self, provider: str, chat_id: str) -> list[int]:
+        """Cross-boss: các boss đang track (is_active) nhóm này. Dùng bởi InboundIngest."""
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT boss_id FROM group_notes
+                WHERE provider=$1 AND chat_id=$2 AND is_active
+                ORDER BY boss_id
+                """,
+                provider, chat_id,
+            )
+        return [r["boss_id"] for r in rows]
+
+    async def mark_left(self, boss_id: int, provider: str, chat_id: str) -> None:
+        """Cross-boss: sếp rời nhóm -> deactivate (status='left'). Dùng bởi re-verify job."""
+        async with self.pool.acquire() as c:
+            await c.execute(
+                """
+                UPDATE group_notes SET is_active=FALSE, status='left', updated_at=NOW()
+                WHERE boss_id=$1 AND provider=$2 AND chat_id=$3
+                """,
+                boss_id, provider, chat_id,
+            )
+
     async def update_after_note_rebuild(
         self,
         group_note_id: int,
