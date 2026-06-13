@@ -35,7 +35,7 @@ class MessagesRepo(BossScopedRepo):
                                       sender_provider_id, sender_name, text, media_kind,
                                       media_url, media_text, ts)
                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-                ON CONFLICT (provider, chat_id, provider_msg_id) DO NOTHING
+                ON CONFLICT (boss_id, provider, chat_id, provider_msg_id) DO NOTHING
                 RETURNING id
                 """,
                 self.ctx.boss_id,
