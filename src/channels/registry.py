@@ -3,8 +3,10 @@
 Each channel package (``src/channels/<provider>/``) exposes a ``setup(ctx)``
 callable in its ``__init__.py`` that:
   1. constructs the channel's adapter (implementing ``ChannelAdapter``),
-  2. subscribes the inbound normalizer to ``inbound.raw.<provider>``,
-  3. returns the adapter so the registry can store it.
+  2. returns the adapter so the registry can store it.
+
+Inbound đi qua wrapper chung ``InboundIngest`` (đăng ký một lần ở app
+lifespan) — adapter chỉ emit ``inbound.normalized``, không tự wire normalizer.
 
 Discovery walks the channels directory at startup and invokes every
 ``setup`` it finds — adding a new channel is a drop-folder operation,

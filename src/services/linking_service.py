@@ -5,10 +5,10 @@ Flow (Zalo example):
      get a token. Web shows ``/start <token>`` to the boss.
   2. Boss DMs the bot_account on Zalo with the literal message
      ``/start <token>``.
-  3. The Zalo normalizer (``src/channels/zalo/normalizer.py``) intercepts
-     the message and calls ``consume(token, sender_uid, bot_account_id)``.
+  3. ``InboundIngest`` (``src/channels/ingest.py``) intercepts the DM and
+     calls ``consume(token, sender_uid, bot_account_id)``.
   4. On valid token: insert ``account_links`` row + delete token + return
-     ``boss_id``. The normalizer then emits an outbound ack.
+     ``boss_id``. Ingest then emits an outbound ack.
 
 Tokens are 16-byte url-safe secrets with a 10-minute TTL. Used-once: the
 ``consume`` call deletes the row whether it was a valid match or not (to
