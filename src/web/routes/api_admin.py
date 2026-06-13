@@ -716,7 +716,11 @@ async def patch_settings_ai_keys(
             await boss_ai_config.clear_api_key(db, ctx.boss_id, provider)
         else:
             await boss_ai_config.set_api_key(
-                db, ctx.boss_id, provider, payload.get("api_key") or ""
+                db,
+                ctx.boss_id,
+                provider,
+                payload.get("api_key") or "",
+                base_url=payload.get("base_url"),
             )
     except AiConfigError as e:
         raise _ai_err(e)

@@ -32,6 +32,40 @@ PROVIDER_DEFAULTS = {
     "gemini": ("gemini", None),
 }
 
+# Provider tuỳ chỉnh / self-hosted (vLLM, Ollama, OpenRouter, ...) — luôn nói
+# OpenAI-compatible; base_url do boss/superadmin nhập, lưu ở users.ai_provider_urls.
+CUSTOM_ENDPOINT_KIND = "openai_compat"
+
+
+def _norm_provider(p: str) -> str:
+    return (p or "").strip().lower()
+
+
+def _is_builtin(provider: str) -> bool:
+    return provider in PROVIDER_DEFAULTS
+
+
+def _parse_urls(raw) -> dict:
+    """ai_provider_urls (JSONB) → dict. asyncpg trả JSONB dạng str (no codec)."""
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw or "{}")
+        except json.JSONDecodeError:
+            return {}
+    return dict(raw or {})
+
+
+async def resolve_provider_url(pool, boss_id: int, provider: str) -> str | None:
+    """base_url của provider: built-in → default; custom → giá trị boss đã lưu."""
+    if _is_builtin(provider):
+        return PROVIDER_DEFAULTS[provider][1]
+    async with pool.acquire() as c:
+        raw = await c.fetchval(
+            "SELECT ai_provider_urls FROM users WHERE id=$1", boss_id
+        )
+    return _parse_urls(raw).get(provider)
+
+
 SLOT_COLUMNS = {
     "smart": "smart_model_id",
     "fast": "fast_model_id",
@@ -175,8 +209,14 @@ async def set_cost_cap(pool, boss_id: int, cap: float) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
-    """Gọi 1 request nhẹ kiểm tra key sống. Trả (ok, message)."""
+async def test_provider_key(
+    provider: str, api_key: str, base_url: str | None = None
+) -> tuple[bool, str]:
+    """Gọi 1 request nhẹ kiểm tra key sống. Trả (ok, message).
+
+    Custom/self-hosted (có base_url): gọi ``{base_url}/models`` kiểu OpenAI.
+    """
+    provider = _norm_provider(provider)
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             if provider == "openai":
@@ -194,6 +234,11 @@ async def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
                     "https://generativelanguage.googleapis.com/v1beta/models",
                     params={"key": api_key},
                 )
+            elif base_url:
+                r = await client.get(
+                    f"{base_url.rstrip('/')}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                )
             else:
                 return False, "Invalid provider"
     except httpx.RequestError:
@@ -206,42 +251,62 @@ async def test_provider_key(provider: str, api_key: str) -> tuple[bool, str]:
 
 
 async def set_api_key(
-    pool, boss_id: int, provider: str, api_key: str, validate: bool = False
+    pool,
+    boss_id: int,
+    provider: str,
+    api_key: str,
+    validate: bool = False,
+    base_url: str | None = None,
 ) -> None:
-    provider = provider.strip().lower()
-    if provider not in PROVIDERS:
+    provider = _norm_provider(provider)
+    if not provider:
         raise AiConfigError(422, "unknown provider")
+    base_url = (base_url or "").strip().rstrip("/") or None
+    is_custom = not _is_builtin(provider)
+    if is_custom and not base_url:
+        raise AiConfigError(422, "Custom provider cần base_url")
     api_key = api_key.strip()
     if not api_key:
         raise AiConfigError(422, "api_key required")
     if validate:
-        ok, message = await test_provider_key(provider, api_key)
+        ok, message = await test_provider_key(provider, api_key, base_url=base_url)
         if not ok:
             raise AiConfigError(422, message)
 
     async with pool.acquire() as c:
-        blob = await c.fetchval("SELECT api_keys_enc FROM users WHERE id=$1", boss_id)
-        keys = _decrypt_keys(blob)
+        row = await c.fetchrow(
+            "SELECT api_keys_enc, ai_provider_urls FROM users WHERE id=$1", boss_id
+        )
+        keys = _decrypt_keys(row["api_keys_enc"])
         keys[provider] = api_key
+        urls = _parse_urls(row["ai_provider_urls"])
+        if is_custom:
+            urls[provider] = base_url
         await c.execute(
-            "UPDATE users SET api_keys_enc=$2 WHERE id=$1",
+            "UPDATE users SET api_keys_enc=$2, ai_provider_urls=$3::jsonb WHERE id=$1",
             boss_id,
             _fernet().encrypt(json.dumps(keys).encode()),
+            json.dumps(urls),
         )
 
 
 async def clear_api_key(pool, boss_id: int, provider: str) -> None:
-    provider = provider.strip().lower()
-    if provider not in PROVIDERS:
+    provider = _norm_provider(provider)
+    if not provider:
         raise AiConfigError(422, "unknown provider")
     async with pool.acquire() as c:
-        blob = await c.fetchval("SELECT api_keys_enc FROM users WHERE id=$1", boss_id)
-        keys = _decrypt_keys(blob)
+        row = await c.fetchrow(
+            "SELECT api_keys_enc, ai_provider_urls FROM users WHERE id=$1", boss_id
+        )
+        keys = _decrypt_keys(row["api_keys_enc"])
         keys.pop(provider, None)
+        urls = _parse_urls(row["ai_provider_urls"])
+        urls.pop(provider, None)
         await c.execute(
-            "UPDATE users SET api_keys_enc=$2 WHERE id=$1",
+            "UPDATE users SET api_keys_enc=$2, ai_provider_urls=$3::jsonb WHERE id=$1",
             boss_id,
             _fernet().encrypt(json.dumps(keys).encode()),
+            json.dumps(urls),
         )
 
 
@@ -275,12 +340,16 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
 
     from src.repositories.models import ModelsRepo
 
-    provider = (payload.get("provider") or "").strip().lower()
+    provider = _norm_provider(payload.get("provider"))
     name = (payload.get("name") or "").strip()
     tier = (payload.get("tier") or "smart").strip().lower()
 
-    if provider not in PROVIDER_DEFAULTS:
-        raise AiConfigError(422, "unknown provider")
+    is_custom = not _is_builtin(provider)
+    custom_url = None
+    if is_custom:
+        custom_url = await resolve_provider_url(pool, boss_id, provider)
+        if not custom_url:
+            raise AiConfigError(422, "unknown provider")
     if not name or len(name) > 200:
         raise AiConfigError(422, "invalid model name")
     if tier not in SLOT_COLUMNS:
@@ -290,7 +359,10 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
             409, f"Save the boss's {provider} API key before adding a custom model"
         )
 
-    endpoint_kind, base_url = PROVIDER_DEFAULTS[provider]
+    if is_custom:
+        endpoint_kind, base_url = CUSTOM_ENDPOINT_KIND, custom_url
+    else:
+        endpoint_kind, base_url = PROVIDER_DEFAULTS[provider]
     capabilities = ["vision"] if (tier == "vision" or payload.get("vision")) else []
 
     repo = ModelsRepo(pool, ctx)
@@ -341,9 +413,13 @@ async def list_provider_models(pool, boss_id: int, provider: str) -> dict:
 
     Trả {ok, models: [{id}], message?} — không bao giờ lộ key.
     """
-    provider = provider.strip().lower()
-    if provider not in PROVIDERS:
-        return {"ok": False, "models": [], "message": "Invalid provider"}
+    provider = _norm_provider(provider)
+    is_custom = not _is_builtin(provider)
+    custom_url = None
+    if is_custom:
+        custom_url = await resolve_provider_url(pool, boss_id, provider)
+        if not custom_url:
+            return {"ok": False, "models": [], "message": "Invalid provider"}
     key = await resolve_key(pool, boss_id, provider)
     if not key:
         return {"ok": False, "models": [], "message": f"No {provider} API key yet"}
@@ -356,11 +432,12 @@ async def list_provider_models(pool, boss_id: int, provider: str) -> dict:
                     params={"key": key, "pageSize": 1000},
                 )
             else:
-                base = (
-                    "https://api.openai.com/v1"
-                    if provider == "openai"
-                    else "https://api.groq.com/openai/v1"
-                )
+                if is_custom:
+                    base = custom_url.rstrip("/")
+                elif provider == "openai":
+                    base = "https://api.openai.com/v1"
+                else:
+                    base = "https://api.groq.com/openai/v1"
                 r = await client.get(
                     f"{base}/models", headers={"Authorization": f"Bearer {key}"}
                 )

@@ -21,10 +21,14 @@ async def test_key(
     request: Request,
     provider: str = Form(...),
     api_key: str = Form(...),
+    base_url: str = Form(""),
     csrf_field: str = Form("", alias="_csrf"),
     ctx=Depends(get_current_boss),
 ):
     """Send a single 1-token completion request to verify the key works.
+
+    Custom/self-hosted (provider ngoài openai/groq/gemini): cần ``base_url``
+    OpenAI-compatible — gọi ``{base_url}/models``.
 
     Returns a small JSON `{ok, status, message}`. Never logs the key value.
     """
@@ -35,7 +39,9 @@ async def test_key(
     await rate_check(request, f"test_key:{ctx.boss_id}", limit=60, window_sec=60)
 
     provider = provider.lower().strip()
-    if provider not in ("openai", "groq", "gemini"):
+    base_url = (base_url or "").strip().rstrip("/")
+    is_custom = provider not in ("openai", "groq", "gemini")
+    if is_custom and not base_url:
         return {"ok": False, "status": "invalid_provider", "message": tr(ctx, vi="Provider không hợp lệ", en="Invalid provider")}
 
     try:
@@ -50,10 +56,15 @@ async def test_key(
                     "https://api.groq.com/openai/v1/models",
                     headers={"Authorization": f"Bearer {api_key}"},
                 )
-            else:  # gemini
+            elif provider == "gemini":
                 r = await client.get(
                     "https://generativelanguage.googleapis.com/v1beta/models",
                     params={"key": api_key},
+                )
+            else:  # custom / self-hosted (OpenAI-compatible)
+                r = await client.get(
+                    f"{base_url}/models",
+                    headers={"Authorization": f"Bearer {api_key}"},
                 )
     except httpx.RequestError as e:
         logger.warning("test_key network err provider=%s: %s", provider, e)
