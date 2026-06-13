@@ -182,8 +182,9 @@ với mỗi (boss B, provider, chat_id) active:
         UPDATE group_notes SET is_active=FALSE, status='left'  (boss rời/bị kick)
 ```
 
-- Kênh không hỗ trợ `list_members` (Tele/Mess sau này) → bỏ qua re-verify, dựa fallback khác khi
-  thêm kênh. Zalo/Web có `list_members` sẵn (`adapter.list_members`).
+- Gate bằng `caps_for(provider)["member.list_api"]` (đã có `capabilities.py`): kênh khai báo
+  `False`/thiếu → bỏ qua re-verify (degrade gracefully), không cần biết tên provider. Zalo khai
+  `"partial"`, Web có member thật.
 - Đây là chỗ DUY NHẤT dùng `list_members` — để tắt, không phải để bật. Bật vẫn là boss-spoke.
 - Tần suất: cấu hình ở job (mặc định đề xuất ~hằng giờ); rẻ vì chỉ quét nhóm đã track.
 - **Deactivate KHÔNG xoá dữ liệu.** Tin cũ trong `messages` + note đã tổng hợp được giữ nguyên,
