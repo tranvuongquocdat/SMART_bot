@@ -18,8 +18,8 @@ import json
 
 import pytest
 
+from src.channels.base import InboundMessage
 from src.channels.registry import ChannelRegistry
-from src.channels.zalo import normalizer as zalo_normalizer
 from src.channels.zalo.adapter import ZaloAdapter
 from src.channels.zalo.inbound_filter import should_drop
 from src.channels.zalo.markdown_strip import strip_markdown
@@ -104,10 +104,10 @@ def test_markdown_strip_removes_bold_and_links():
 
 
 @pytest.mark.asyncio
-async def test_adapter_publishes_inbound_raw_zalo():
+async def test_adapter_emits_inbound_normalized():
     bus = InMemoryEventBus()
     seen: list[dict] = []
-    bus.subscribe("inbound.raw.zalo", lambda p: seen.append(p) or _noop())
+    bus.subscribe("inbound.normalized", lambda p: seen.append(p) or _noop())
 
     adapter = ZaloAdapter(bus, bot_accounts_repo=None)
 
@@ -155,8 +155,12 @@ async def test_adapter_publishes_inbound_raw_zalo():
         pass
 
     assert len(seen) == 1
-    assert seen[0]["bot_account_id"] == 123
-    assert seen[0]["data"]["text"] == "hi"
+    msg = seen[0]["message"]
+    assert isinstance(msg, InboundMessage)
+    assert msg.bot_account_id == 123
+    assert msg.text == "hi"
+    assert msg.chat_type == "dm"
+    assert msg.sender_provider_id == "user-1"
 
 
 async def _noop():
@@ -204,117 +208,7 @@ async def test_adapter_list_members_request_reply():
     assert members == ["a", "b", "c"]
 
 
-# --- normalizer integration: inbound.raw.zalo → message.captured + DB row ---
-
-
-@pytest.mark.asyncio
-async def test_normalizer_dm_inserts_and_publishes(db_pool, boss_user):
-    bus = InMemoryEventBus()
-    zalo_normalizer.register(bus, db_pool)
-    boss_id = boss_user["id"]
-
-    # Seed: bot_account, assignment, account_link
-    async with db_pool.acquire() as c:
-        bot_acc_id = await c.fetchval(
-            """
-            INSERT INTO bot_accounts
-              (provider, provider_user_id, account_kind, ownership, status, display_name)
-            VALUES ('zalo','platform-bot-1','personal','platform','active','PlatBot')
-            RETURNING id
-            """
-        )
-        await c.execute(
-            """
-            INSERT INTO bot_account_assignments
-              (boss_id, provider, bot_account_id, assignment_kind, status)
-            VALUES ($1, 'zalo', $2, 'platform_assigned', 'active')
-            """,
-            boss_id,
-            bot_acc_id,
-        )
-        await c.execute(
-            """
-            INSERT INTO account_links (boss_id, provider, provider_user_id)
-            VALUES ($1, 'zalo', 'sender-uid-1')
-            """,
-            boss_id,
-        )
-
-    captured: list[dict] = []
-    bus.subscribe("message.captured", lambda p: captured.append(p) or _noop())
-
-    await bus.publish(
-        "inbound.raw.zalo",
-        {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "platform-bot-1",
-            "data": {
-                "type": 0,
-                "threadId": "sender-uid-1",
-                "uidFrom": "sender-uid-1",
-                "dName": "Boss DM",
-                "msgId": "msg-100",
-                "ts": 1700000001000,
-                "text": "hello bot",
-                "content": "hello bot",
-                "mentions": [],
-                "is_mentioned": False,
-                "content_type": "text",
-                "media_url": None,
-            },
-        },
-    )
-
-    assert len(captured) == 1
-    assert captured[0]["boss_id"] == boss_id
-    assert captured[0]["chat_type"] == "dm"
-    assert captured[0]["sender_is_boss"] is True
-    assert captured[0]["text"] == "hello bot"
-
-    async with db_pool.acquire() as c:
-        row = await c.fetchrow(
-            "SELECT * FROM messages WHERE boss_id=$1 AND provider_msg_id='msg-100'",
-            boss_id,
-        )
-    assert row is not None
-    assert row["text"] == "hello bot"
-
-
-@pytest.mark.asyncio
-async def test_normalizer_unlinked_dm_dropped(db_pool, boss_user):
-    bus = InMemoryEventBus()
-    zalo_normalizer.register(bus, db_pool)
-
-    async with db_pool.acquire() as c:
-        bot_acc_id = await c.fetchval(
-            """
-            INSERT INTO bot_accounts
-              (provider, provider_user_id, account_kind, ownership, status)
-            VALUES ('zalo','platform-bot-2','personal','platform','active')
-            RETURNING id
-            """
-        )
-
-    captured: list[dict] = []
-    bus.subscribe("message.captured", lambda p: captured.append(p) or _noop())
-
-    await bus.publish(
-        "inbound.raw.zalo",
-        {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "platform-bot-2",
-            "data": {
-                "type": 0,
-                "threadId": "unknown-uid",
-                "uidFrom": "unknown-uid",
-                "dName": "?",
-                "msgId": "msg-unknown",
-                "ts": 1700000002000,
-                "text": "hi",
-            },
-        },
-    )
-    assert captured == []
+# --- outbound integration ----------------------------------------------------
 
 
 @pytest.mark.asyncio

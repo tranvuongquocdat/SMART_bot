@@ -28,6 +28,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from datetime import datetime, timezone
+
+from src.channels.base import BaseChannelAdapter, InboundMessage
 from src.channels.zalo.markdown_strip import strip_markdown
 from src.events.bus import EventBus
 from src.services.bot_account_session import decrypt_credentials
@@ -38,11 +41,11 @@ BRIDGE_DIR = Path(__file__).parent / "bridge"
 BRIDGE_SCRIPT = BRIDGE_DIR / "bridge.js"
 
 
-class ZaloAdapter:
+class ZaloAdapter(BaseChannelAdapter):
     provider = "zalo"
 
     def __init__(self, bus: EventBus, bot_accounts_repo: Any = None):
-        self.bus = bus
+        super().__init__(bus)
         self.repo = bot_accounts_repo
         self._procs: dict[int, asyncio.subprocess.Process] = {}
         self._req_seq: dict[int, int] = {}
@@ -224,13 +227,8 @@ class ZaloAdapter:
         ev = obj.get("event")
         data = obj.get("data") or {}
         if ev == "message":
-            await self.bus.publish(
-                "inbound.raw.zalo",
-                {
-                    "bot_account_id": bot_acc.id,
-                    "data": data,
-                    "own_uid": obj.get("own_uid"),
-                },
+            await self._emit_inbound(
+                self._to_inbound(bot_acc, data, obj.get("own_uid"))
             )
         elif ev == "ready":
             log.info(
@@ -256,6 +254,37 @@ class ZaloAdapter:
                     "reason": data.get("reason"),
                 },
             )
+
+    def _to_inbound(self, bot_acc, data: dict, own_uid) -> InboundMessage:
+        text = data.get("text") or data.get("content") or ""
+        if not isinstance(text, str):
+            text = ""
+        mentions = data.get("mentions") or []
+        mentions_bot = bool(data.get("is_mentioned")) or any(
+            m.get("uid") == own_uid for m in mentions
+        )
+        ms = data.get("ts") or data.get("ts_ms") or 0
+        try:
+            ts = datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc)
+        except Exception:
+            ts = datetime.now(tz=timezone.utc)
+        reply = data.get("reply_to") or {}
+        return InboundMessage(
+            bot_account_id=bot_acc.id,
+            provider="zalo",
+            chat_id=str(data.get("threadId") or data.get("thread_id") or ""),
+            chat_type="dm" if data.get("type") == 0 else "group",
+            provider_msg_id=(str(data.get("msgId") or data.get("msg_id") or "") or None),
+            sender_provider_id=str(data.get("uidFrom") or data.get("sender_uid") or ""),
+            sender_name=data.get("dName") or data.get("sender_name"),
+            text=text,
+            mentions_bot=mentions_bot,
+            reply_to_provider_msg_id=(reply.get("msg_id") or None),
+            media_kind=data.get("content_type") or "text",
+            media_url=data.get("media_url"),
+            ts=ts,
+            raw=data,
+        )
 
     def _handle_reply(self, bot_acc, obj: dict) -> None:
         req_id = obj.get("id")
