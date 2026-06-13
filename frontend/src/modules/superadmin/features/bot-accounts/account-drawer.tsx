@@ -16,6 +16,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { StatusDot } from '@/components/status-dot';
 import { drawerBackdrop, drawerPanel, tabFade } from '@/lib/motion';
 import { formatNumber } from '@/lib/format';
+import { useT, useI18n } from '@/lib/i18n';
 import {
   accountQrLoginStatus,
   botAccountDailyStatsQuery,
@@ -32,9 +33,9 @@ const DEFAULT_W = 640;
 const POLL_MS = 1500;
 
 const TABS = [
-  { key: 'overview', label: 'Tổng quan' },
-  { key: 'connect', label: 'Kết nối' },
-  { key: 'messages', label: 'Tin nhắn' },
+  { key: 'overview', labelKey: 'sa.acct.tabOverview' },
+  { key: 'connect', labelKey: 'sa.acct.tabConnect' },
+  { key: 'messages', labelKey: 'sa.acct.tabMessages' },
 ] as const;
 export type AccountTabKey = (typeof TABS)[number]['key'];
 
@@ -52,6 +53,7 @@ const fmtCountdown = (s: number) =>
 // ------------------------------------------------------------- Tổng quan
 
 function ActiveToggle({ d }: { d: BotAccountDetail }) {
+  const t = useT();
   const qc = useQueryClient();
   const isActive = d.status === 'active';
   // banned/logged_out là trạng thái hệ thống — không cho bật/tắt tay.
@@ -61,17 +63,17 @@ function ActiveToggle({ d }: { d: BotAccountDetail }) {
     mutationFn: () => patchBotAccount(d.id, { status: isActive ? 'paused' : 'active' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bot-accounts'] });
-      toast.success(isActive ? 'Đã tạm dừng bot' : 'Đã kích hoạt bot');
+      toast.success(isActive ? t('sa.acct.paused') : t('sa.acct.activated'));
     },
-    onError: () => toast.error('Đổi trạng thái thất bại'),
+    onError: () => toast.error(t('sa.acct.toggleError')),
   });
 
   return (
     <div className="rounded-lg border bg-card px-3 py-2.5 flex items-center justify-between">
       <div>
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Hoạt động</p>
+        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">{t('sa.acct.activity')}</p>
         <p className="text-sm font-medium">
-          {isActive ? 'Đang chạy' : locked ? d.status : 'Đã tạm dừng'}
+          {isActive ? t('sa.acct.running') : locked ? d.status : t('sa.acct.pausedState')}
         </p>
       </div>
       <button
@@ -94,13 +96,16 @@ function ActiveToggle({ d }: { d: BotAccountDetail }) {
 }
 
 function OverviewTab({ d }: { d: BotAccountDetail }) {
+  const t = useT();
+  const { lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   return (
     <div className="space-y-5">
       <ActiveToggle d={d} />
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div className="rounded-lg border bg-card px-3 py-2.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Tổng tin đã nhận
+            {t('sa.acct.totalReceived')}
           </p>
           <p className="text-lg font-semibold tabular-nums">
             {formatNumber(d.msgs_received_total)}
@@ -108,7 +113,7 @@ function OverviewTab({ d }: { d: BotAccountDetail }) {
         </div>
         <div className="rounded-lg border bg-card px-3 py-2.5">
           <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-            Tổng tin đã gửi
+            {t('sa.acct.totalSent')}
           </p>
           <p className="text-lg font-semibold tabular-nums">
             {formatNumber(d.msgs_sent_total)}
@@ -118,7 +123,7 @@ function OverviewTab({ d }: { d: BotAccountDetail }) {
 
       <div className="text-sm space-y-1.5">
         <p>
-          <span className="text-muted-foreground">Trạng thái:</span>{' '}
+          <span className="text-muted-foreground">{t('sa.acct.statusLabel')}</span>{' '}
           <StatusDot status={ACCOUNT_STATUS_DOT[d.status] ?? 'idle'} label={d.status} />
           {d.status_reason && (
             <span className="text-xs text-muted-foreground ml-2">({d.status_reason})</span>
@@ -129,21 +134,21 @@ function OverviewTab({ d }: { d: BotAccountDetail }) {
           <span className="font-mono text-xs">{d.provider_user_id}</span>
         </p>
         <p>
-          <span className="text-muted-foreground">Phân bổ:</span>{' '}
-          {d.ownership === 'boss_owned' ? `Riêng của boss #${d.owner_boss_id}` : 'Pool nền tảng'}
-          {' · '}tối đa {d.max_assigned_bosses} boss
+          <span className="text-muted-foreground">{t('sa.acct.allocation')}</span>{' '}
+          {d.ownership === 'boss_owned' ? t('sa.acct.bossOwned', { id: d.owner_boss_id ?? '' }) : t('sa.acct.platformPool')}
+          {' · '}{t('sa.acct.maxBosses', { n: d.max_assigned_bosses })}
         </p>
         <p>
-          <span className="text-muted-foreground">Hoạt động cuối:</span>{' '}
-          {d.last_seen_at ? new Date(d.last_seen_at).toLocaleString('vi-VN') : 'Chưa có'}
+          <span className="text-muted-foreground">{t('sa.acct.lastActive')}</span>{' '}
+          {d.last_seen_at ? new Date(d.last_seen_at).toLocaleString(locale) : t('sa.acct.noneYet')}
         </p>
         <p>
-          <span className="text-muted-foreground">Đăng nhập:</span>{' '}
+          <span className="text-muted-foreground">{t('sa.acct.loginLabel')}</span>{' '}
           {d.has_credentials ? (
-            <Badge variant="secondary" className="text-[10px]">Đã có session</Badge>
+            <Badge variant="secondary" className="text-[10px]">{t('sa.acct.hasSession')}</Badge>
           ) : (
             <Badge variant="outline" className="text-[10px] text-destructive border-destructive/40">
-              Chưa đăng nhập
+              {t('sa.acct.noSession')}
             </Badge>
           )}
         </p>
@@ -151,10 +156,10 @@ function OverviewTab({ d }: { d: BotAccountDetail }) {
 
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          Boss đang dùng account này
+          {t('sa.acct.bossesUsing')}
         </p>
         {d.assignments.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Chưa gán cho boss nào.</p>
+          <p className="text-sm text-muted-foreground">{t('sa.acct.noBoss')}</p>
         ) : (
           <ul className="space-y-1.5">
             {d.assignments.map((a) => (
@@ -184,6 +189,7 @@ function OverviewTab({ d }: { d: BotAccountDetail }) {
 // --------------------------------------------------------------- Kết nối
 
 function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => void }) {
+  const t = useT();
   const [state, setState] = useState<QrLoginStatus | null>(null);
   const [running, setRunning] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
@@ -203,8 +209,8 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
   // Đếm ngược mượt 1s giữa các lần poll (poll đồng bộ lại giá trị từ server)
   useEffect(() => {
     if (countdown == null || countdown <= 0) return;
-    const t = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
+    return () => clearTimeout(timer);
   }, [countdown]);
 
   async function begin() {
@@ -214,7 +220,7 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
       const { login_id } = await startAccountQrLogin(d.id);
       loginIdRef.current = login_id;
     } catch {
-      toast.error('Không mở được phiên đăng nhập.');
+      toast.error(t('sa.acct.qrStartError'));
       setRunning(false);
       return;
     }
@@ -227,7 +233,7 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
         setCountdown(s.status === 'qr' || s.status === 'scanned' ? s.expires_in_s : null);
         if (s.status === 'success') {
           stopPolling();
-          toast.success('Đã đăng nhập — listener đã khởi động lại.');
+          toast.success(t('sa.acct.loggedIn'));
           onLoggedIn();
         } else if (s.status === 'error') {
           stopPolling();
@@ -238,7 +244,7 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
           status: 'error',
           qr_image_b64: null,
           display_name: null,
-          error: 'Phiên đăng nhập đã hết hạn.',
+          error: t('sa.acct.qrExpired'),
           bot_account_id: null,
           expires_in_s: 0,
         });
@@ -250,11 +256,10 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
     return (
       <div className="text-sm text-muted-foreground space-y-2">
         <p>
-          Kênh <span className="capitalize font-medium text-foreground">{d.provider}</span> không
-          dùng đăng nhập QR.
+          {t('sa.acct.notQrPre')}<span className="capitalize font-medium text-foreground">{d.provider}</span>{t('sa.acct.notQrPost')}
         </p>
         {d.provider === 'telegram' && (
-          <p>Telegram bot kết nối bằng token (cấu hình khi tạo bot với @BotFather).</p>
+          <p>{t('sa.acct.telegramToken')}</p>
         )}
       </div>
     );
@@ -265,35 +270,34 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Quét QR bằng app Zalo của tài khoản <strong>{d.display_name ?? d.provider_user_id}</strong>{' '}
-        (Cài đặt → Quét mã QR). Dùng cho đăng nhập lần đầu hoặc đăng nhập lại khi session hết hạn.
+        {t('sa.acct.qrInstructPre')}<strong>{d.display_name ?? d.provider_user_id}</strong>{t('sa.acct.qrInstructPost')}
       </p>
 
       <div className="rounded-lg border bg-card min-h-[280px] flex flex-col items-center justify-center gap-3 p-4">
         {!running && !state && (
           <Button onClick={begin}>
             <QrCode className="h-4 w-4 mr-1.5" />
-            {d.has_credentials ? 'Đăng nhập lại (QR)' : 'Đăng nhập QR'}
+            {d.has_credentials ? t('sa.acct.loginAgainQr') : t('sa.acct.loginQr')}
           </Button>
         )}
         {running && (!status || status === 'starting') && (
           <>
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <p className="text-sm text-muted-foreground">Đang tạo mã QR…</p>
+            <p className="text-sm text-muted-foreground">{t('sa.acct.creatingQr')}</p>
           </>
         )}
         {status === 'qr' && state?.qr_image_b64 && (
           <>
             <img
               src={`data:image/png;base64,${state.qr_image_b64}`}
-              alt="QR đăng nhập Zalo"
+              alt={t('zaloqr.qrAlt')}
               className="h-56 w-56 rounded-lg border bg-white p-2"
             />
             <p className="text-xs text-muted-foreground">
-              Mã tự làm mới khi hết hạn
+              {t('zaloqr.autoRefresh')}
               {countdown != null && (
                 <>
-                  {' '}— phiên còn{' '}
+                  {' '}{t('zaloqr.sessionLeft')}{' '}
                   <span className="font-mono font-medium text-foreground tabular-nums">
                     {fmtCountdown(countdown)}
                   </span>
@@ -306,19 +310,18 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
           <>
             <Smartphone className="h-10 w-10 text-primary" />
             <p className="text-sm text-center">
-              Đã quét{state?.display_name ? ` bởi ${state.display_name}` : ''} — xác nhận trên
-              điện thoại.
+              {t('sa.acct.scanned', { by: state?.display_name ? t('zaloqr.by', { name: state.display_name }) : '' })}
             </p>
           </>
         )}
         {status === 'error' && (
           <>
             <p className="text-sm text-destructive text-center">
-              {state?.error ?? 'Đăng nhập thất bại.'}
+              {state?.error ?? t('zaloqr.loginFailed')}
             </p>
             <Button size="sm" variant="outline" onClick={begin}>
               <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              Thử lại
+              {t('zaloqr.retry')}
             </Button>
           </>
         )}
@@ -330,6 +333,9 @@ function ConnectTab({ d, onLoggedIn }: { d: BotAccountDetail; onLoggedIn: () => 
 // --------------------------------------------------------------- Tin nhắn
 
 function MessagesTab({ accountId }: { accountId: number }) {
+  const t = useT();
+  const { lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const [days, setDays] = useState(30);
   const stats = useQuery(botAccountDailyStatsQuery(accountId, days));
   const recent = useQuery(botAccountMessagesQuery(accountId));
@@ -341,16 +347,16 @@ function MessagesTab({ accountId }: { accountId: number }) {
       <section>
         <div className="flex items-center justify-between mb-2">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-            Tin nhắn theo ngày
+            {t('sa.acct.msgsByDay')}
           </p>
           <Select value={String(days)} onValueChange={(v) => setDays(Number(v))}>
             <SelectTrigger className="h-7 text-xs w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="7">7 ngày</SelectItem>
-              <SelectItem value="30">30 ngày</SelectItem>
-              <SelectItem value="90">90 ngày</SelectItem>
+              <SelectItem value="7">{t('sa.acct.days', { n: 7 })}</SelectItem>
+              <SelectItem value="30">{t('sa.acct.days', { n: 30 })}</SelectItem>
+              <SelectItem value="90">{t('sa.acct.days', { n: 90 })}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -361,9 +367,9 @@ function MessagesTab({ accountId }: { accountId: number }) {
             <table className="w-full text-[13px]">
               <thead className="bg-[hsl(var(--bg-subtle))]">
                 <tr className="text-left text-[11px] uppercase tracking-wide text-muted-foreground">
-                  <th className="px-3 py-2 font-medium">Ngày</th>
-                  <th className="px-3 py-2 font-medium text-right">Nhận</th>
-                  <th className="px-3 py-2 font-medium text-right">Gửi</th>
+                  <th className="px-3 py-2 font-medium">{t('sa.acct.thDate')}</th>
+                  <th className="px-3 py-2 font-medium text-right">{t('sa.acct.thReceived')}</th>
+                  <th className="px-3 py-2 font-medium text-right">{t('sa.acct.thSent')}</th>
                   <th className="px-3 py-2 font-medium w-[40%]"></th>
                 </tr>
               </thead>
@@ -371,7 +377,7 @@ function MessagesTab({ accountId }: { accountId: number }) {
                 {(stats.data ?? []).map((s) => (
                   <tr key={s.date} className="border-t border-border">
                     <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">
-                      {new Date(s.date).toLocaleDateString('vi-VN', {
+                      {new Date(s.date).toLocaleDateString(locale, {
                         weekday: 'short',
                         day: '2-digit',
                         month: '2-digit',
@@ -403,20 +409,20 @@ function MessagesTab({ accountId }: { accountId: number }) {
         )}
         <p className="text-[11px] text-muted-foreground mt-1.5">
           <span className="inline-block h-2 w-3 rounded-sm bg-primary/70 mr-1 align-middle" />
-          nhận
+          {t('sa.acct.legendReceived')}
           <span className="inline-block h-2 w-3 rounded-sm bg-primary/30 ml-3 mr-1 align-middle" />
-          gửi
+          {t('sa.acct.legendSent')}
         </p>
       </section>
 
       <section>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          Tin nhắn gần đây
+          {t('sa.acct.recentMsgs')}
         </p>
         {recent.isLoading ? (
           <Skeleton className="h-32 w-full" />
         ) : (recent.data ?? []).length === 0 ? (
-          <p className="text-sm text-muted-foreground">Chưa có tin nhắn nào được ghi nhận.</p>
+          <p className="text-sm text-muted-foreground">{t('sa.acct.msgsEmpty')}</p>
         ) : (
           <div className="rounded-lg border divide-y max-h-72 overflow-y-auto">
             {(recent.data ?? []).map((m, i) => (
@@ -445,6 +451,7 @@ export function AccountDrawer({
   initialTab?: AccountTabKey;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const detail = useQuery(botAccountDetailQuery(accountId));
   const [tab, setTab] = useState<AccountTabKey>(initialTab);
@@ -534,14 +541,14 @@ export function AccountDrawer({
             <button
               className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
               onClick={() => setFullscreen((f) => !f)}
-              aria-label={fullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}
+              aria-label={fullscreen ? t('sa.acct.minimize') : t('sa.acct.fullscreen')}
             >
               {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
             </button>
             <button
               className="text-muted-foreground hover:text-foreground transition-colors p-1.5"
               onClick={onClose}
-              aria-label="Đóng"
+              aria-label={t('sa.common.close')}
             >
               <X className="h-4 w-4" />
             </button>
@@ -550,17 +557,17 @@ export function AccountDrawer({
 
         {/* Tabs */}
         <div className="flex gap-1 px-5 pt-3 border-b shrink-0">
-          {TABS.map((t) => (
+          {TABS.map((tabItem) => (
             <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
+              key={tabItem.key}
+              onClick={() => setTab(tabItem.key)}
               className={`px-3 pb-2 text-sm transition-colors border-b-2 -mb-px ${
-                tab === t.key
+                tab === tabItem.key
                   ? 'border-primary text-foreground font-medium'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
               }`}
             >
-              {t.label}
+              {t(tabItem.labelKey)}
             </button>
           ))}
         </div>
