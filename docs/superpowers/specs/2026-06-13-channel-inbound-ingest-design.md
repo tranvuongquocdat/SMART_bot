@@ -79,22 +79,26 @@ nhiệm duy nhất: dịch payload wire-format của kênh → `InboundMessage`,
   `web/routes.py`) build `InboundMessage` ngay trong route handler rồi publish cùng topic đó. Hai
   kiểu khác nhau về nơi parse, giống nhau ở điểm ra: cùng một envelope, cùng một wrapper.
 
-### 3.2 Bảng mới `group_boss_link`
+### 3.2 Sổ đăng ký nhóm — TÁI DÙNG `group_notes` (không thêm bảng mới)
 
-Single source of truth cho "sếp B được xác nhận có mặt trong nhóm G".
+`group_notes` đã là entity per-`(boss_id, provider, chat_id)` (`UNIQUE (boss_id, provider,
+chat_id)`, cột `is_active` từ migration 0005), và `is_group_active` + `list_groups` + UI đều đọc
+nó. Vì vậy **không tạo bảng `group_boss_link`** — dùng chính `group_notes` làm "sổ các nhóm sếp
+đang track".
 
-```sql
-CREATE TABLE group_boss_link (
-  provider        TEXT    NOT NULL,
-  chat_id         TEXT    NOT NULL,
-  boss_id         INTEGER NOT NULL REFERENCES users(id),
-  bot_account_id  BIGINT  REFERENCES bot_accounts(id),  -- acc đã thấy sếp ở nhóm này
-  first_seen_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  last_boss_msg_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  PRIMARY KEY (provider, chat_id, boss_id)
-);
-CREATE INDEX idx_gbl_provider_chat ON group_boss_link(provider, chat_id);
-```
+- **"Nhóm G được track cho sếp B"** ⇔ tồn tại row `group_notes(boss_id=B, provider, chat_id=G)`
+  với `is_active=TRUE`.
+- Row này được tạo bằng `GroupNotesRepo.get_or_create(provider, chat_id)` (đã có,
+  `group_notes.py:89`) tại thời điểm **sếp nói câu đầu** trong nhóm (content rỗng, note tổng hợp
+  điền sau qua `NoteService`).
+- **Gate ≠ `is_group_active`.** `is_group_active` trả `True` cho nhóm *chưa có row* (coi như chưa
+  bị tắt) — KHÔNG dùng làm điều kiện capture. Điều kiện capture là **row PHẢI tồn tại và
+  `is_active=TRUE`**. Sếp tắt nhóm = `is_active=FALSE` ⇒ ngừng capture.
+- Quy tắc khi sếp nói mà row đã tồn tại & đang paused (`is_active=FALSE`): **giữ nguyên paused**
+  (tôn trọng lựa chọn thủ công), không tự reactivate.
+
+Cần thêm: một query cross-boss `SELECT boss_id FROM group_notes WHERE provider=$1 AND chat_id=$2
+AND is_active` (kèm index `(provider, chat_id)`) cho bước gate — tương tự `account_links.lookup`.
 
 ### 3.3 Thuật toán gate cho tin nhắn NHÓM (thay `normalizer.py:128`)
 
@@ -108,10 +112,9 @@ Trong `InboundIngest`, với mỗi `InboundMessage` có `chat_type='group'`:
                  None như hiện tại.)
 2. sender_boss = boss trong candidates mà account_links khớp msg.sender_provider_id (nếu có).
 3. Nếu sender_boss tồn tại:
-      UPSERT group_boss_link(provider, chat_id, sender_boss, bot_account_id)
-      → refresh last_boss_msg_at  (đây là bước "sếp nói → xác nhận membership")
-4. tracked = các boss có row group_boss_link cho (provider, chat_id)
-             (giao với candidates).
+      GroupNotesRepo(boss=sender_boss).get_or_create(provider, chat_id)
+      → tạo row nếu chưa có (đây là bước "sếp nói → track nhóm"); nếu row đang paused thì giữ.
+4. tracked = các boss có row group_notes active cho (provider, chat_id), giao với candidates.
 5. Nếu tracked rỗng → DROP, không lưu.
 6. Với mỗi boss B trong tracked:
       insert message (scope boss=B), publish message.captured
@@ -119,7 +122,8 @@ Trong `InboundIngest`, với mỗi `InboundMessage` có `chat_type='group'`:
 ```
 
 Hệ quả: bỏ `LIMIT 1` (vá P1-5); 2 sếp cùng nhóm được xử lý độc lập (đúng spec §3.5); không cần
-member API.
+member API. **Phụ thuộc đổi unique của `messages` (xem 3.6)** — nếu không, bước 6 với nhiều sếp
+sẽ bị `ON CONFLICT DO NOTHING` nuốt mất bản của sếp thứ hai.
 
 ### 3.4 Tin nhắn DM (giữ tinh thần, dọn lại)
 
@@ -144,6 +148,42 @@ làm DM của sếp sống lại (vá P0-3) và là nguồn duy nhất ghi `acco
 > Lưu ý: QR flow tạo acc bot vẫn giữ, nhưng **không** còn tự ý insert account_links cho acc đó.
 > account_links chỉ đến từ handshake acc chính.
 
+### 3.6 Thay đổi schema (migration mới)
+
+1. **`messages` unique theo boss** *(bắt buộc cho multi-boss)*: đổi
+   `UNIQUE (provider, chat_id, provider_msg_id)` → `UNIQUE (boss_id, provider, chat_id,
+   provider_msg_id)`. Cập nhật `ON CONFLICT` trong `MessagesRepo.insert` cho khớp. Lý do: mô
+   hình tenant vốn là mỗi sếp một bản sao (`messages.boss_id NOT NULL`, `idx_messages_chat`
+   boss-first, `group_notes` đã unique theo boss). Không đổi thì nhóm nhiều sếp mất tin của sếp
+   thứ hai.
+2. **`group_notes` index tra cứu cross-boss**: thêm `CREATE INDEX ON group_notes(provider,
+   chat_id) WHERE is_active` phục vụ bước gate (4 trong §3.3).
+3. **Không tạo bảng mới** (đã bỏ `group_boss_link` — xem §3.2).
+
+### 3.7 Đăng ký wrapper (wiring)
+
+`InboundIngest.register(bus, pool, outbound_service, admin_repo)` gọi **một lần** lúc startup
+(trong `registry.discover_and_load` hoặc app lifespan, sau khi bus sẵn sàng) — subscribe đúng
+một handler vào `inbound.normalized`. `setup(ctx)` của từng kênh **bỏ** dòng `normalizer.register`;
+nó chỉ còn dựng adapter (+ wire route với Web). Thêm kênh mới ⇒ không phải đụng phần định danh/gate.
+
+### 3.8 Re-verify rời nhóm (auto deactivate)
+
+Scheduler job định kỳ (reuse `src/scheduler/jobs/`) quét các nhóm đang track (`group_notes`
+active) theo từng provider hỗ trợ `list_members`:
+
+```
+với mỗi (boss B, provider, chat_id) active:
+    members = adapter.list_members(bot_acc, chat_id)
+    nếu account_links UID của B KHÔNG nằm trong members:
+        UPDATE group_notes SET is_active=FALSE  (boss rời/bị kick)
+```
+
+- Kênh không hỗ trợ `list_members` (Tele/Mess sau này) → bỏ qua re-verify, dựa fallback khác khi
+  thêm kênh. Zalo/Web có `list_members` sẵn (`adapter.list_members`).
+- Đây là chỗ DUY NHẤT dùng `list_members` — để tắt, không phải để bật. Bật vẫn là boss-spoke.
+- Tần suất: cấu hình ở job (mặc định đề xuất ~hằng giờ); rẻ vì chỉ quét nhóm đã track.
+
 ## 4. Vá kèm (cùng vùng, không phình scope)
 
 - **P1-6:** Bỏ `classify_thread_kind` đoán theo độ dài. `InboundMessage`/`message.captured` đã
@@ -152,23 +192,30 @@ làm DM của sếp sống lại (vá P0-3) và là nguồn duy nhất ghi `acco
 - **P2-7:** Khi `provider_msg_id` rỗng, dedup theo khóa thay thế
   `(provider, chat_id, sender_provider_id, ts, hash(text))` thay vì để NULL.
 - **P0-2:** `is_group_active` giữ default-true nhưng giờ chỉ còn ý nghĩa "tạm tắt một nhóm đã
-  track"; phanh chính là `group_boss_link` (không có row → không lưu).
+  track"; phanh chính là **sự tồn tại của row `group_notes` active** (không có row → không lưu).
 
 ## 5. Phạm vi đợt này
 
-- Tạo `InboundIngest` + `BaseChannelAdapter._emit_inbound` + topic `inbound.normalized`.
-- Tạo bảng `group_boss_link` (migration mới).
-- **Migrate cả Zalo lẫn Web** sang wrapper chung trong đợt này: chuyển phần parse vào adapter,
-  xóa 2 normalizer cũ ở vai trò resolve/publish.
+- Tạo `InboundIngest` + `BaseChannelAdapter._emit_inbound` + topic `inbound.normalized`; đăng ký
+  một lần lúc startup (§3.7).
+- Migration: đổi unique `messages` theo boss + index tra cứu `group_notes(provider, chat_id)`
+  (§3.6). **Không** tạo bảng mới.
+- Dùng `group_notes` làm sổ track nhóm (§3.2); thêm query cross-boss cho gate.
+- **Migrate cả Zalo lẫn Web** sang wrapper chung: chuyển phần parse vào adapter (Zalo: vòng đọc
+  stdout; Web: route handler), xóa 2 normalizer cũ ở vai trò resolve/publish. Web điền
+  `bot_account_id` thật.
 - Nối UI handshake `/start <token>` cho định danh acc chính (Zalo trước; cùng component dùng lại
   cho kênh khác).
+- Migrate path admin-inject (`api_admin.py:2175`) + các test đang dựa `inbound.raw.*` /
+  publish `message.captured` per-provider (`test_zalo_adapter`, `test_linking_flow`,
+  `test_web_normalizer`) sang envelope/đường mới.
+- Job re-verify rời nhóm → auto deactivate (§3.8).
 - Vá kèm mục 4.
 
 ## 6. Không làm (YAGNI)
 
-- Không build phát hiện membership bằng member-list (đã chọn boss-spoke). `list_members` của
-  adapter vẫn giữ cho mục đích khác, nhưng không nằm trong đường gate.
-- Không build cron re-verify "sếp đã rời nhóm". Tạm cho tắt nhóm thủ công.
+- Không dùng member-list để **bắt đầu** track (đã chọn boss-spoke). `list_members` chỉ dùng cho
+  re-verify rời nhóm (§3.8), không nằm trong đường gate vào.
 - Không kéo lịch sử nhóm trước thời điểm sếp nói câu đầu (kênh không hỗ trợ). Bù bằng hướng dẫn.
 - Không đụng Telegram/Messenger/Lark (chưa có adapter) — nhưng wrapper đảm bảo khi thêm thì
   chúng tự chạy đúng cơ chế.
@@ -176,10 +223,10 @@ làm DM của sếp sống lại (vá P0-3) và là nguồn duy nhất ghi `acco
 ## 7. Edge cases
 
 - **Tin nhóm trước khi sếp nói câu đầu** → mất (chấp nhận; có hướng dẫn sếp).
-- **Sếp rời nhóm** → tin người khác vẫn bị gán (stale `group_boss_link`) → để bước re-verify
-  sau, hoặc sếp tắt nhóm thủ công.
+- **Sếp rời nhóm → auto deactivate** (xem §3.8): re-verify định kỳ phát hiện UID sếp không còn
+  trong nhóm → set `group_notes.is_active=FALSE` → ngừng nhận tin ngay. Không chờ thủ công.
 - **Bot skip self** (`bridge.js:154`) vẫn đúng vì bot là acc riêng, không phải acc sếp.
-- **Nhiều sếp cùng nhóm, cùng/khác bot acc** → mỗi sếp một row `group_boss_link`, xử lý độc lập.
+- **Nhiều sếp cùng nhóm, cùng/khác bot acc** → mỗi sếp một row `group_notes`, xử lý độc lập.
 - **Token sai bot account** → `LinkingService.consume` từ chối, không tạo link (đã đúng).
 
 ## 8. Kiểm thử
@@ -187,8 +234,9 @@ làm DM của sếp sống lại (vá P0-3) và là nguồn duy nhất ghi `acco
 - Unit `InboundIngest`:
   - DM `/start` hợp lệ → tạo account_links, ack, không lưu message.
   - DM từ sếp đã link → captured, `sender_is_boss=True`. DM từ người lạ → drop.
-  - Group: sếp chưa nói → drop toàn bộ. Sếp nói 1 câu → tạo `group_boss_link`, tin đó + tin
-    sau của người khác đều captured. Nhóm sếp không có mặt → drop.
+  - Group: sếp chưa nói → drop toàn bộ. Sếp nói 1 câu → tạo row `group_notes` active, tin đó +
+    tin sau của người khác đều captured. Nhóm sếp không có mặt → drop.
+  - Re-verify: sếp rời nhóm → job set `is_active=FALSE` → tin tiếp theo bị drop.
   - 2 sếp cùng nhóm → 2 `message.captured` độc lập, `sender_is_boss` đúng từng sếp.
   - Dedup: tin trùng msgId → 1 lần; tin thiếu msgId → khóa thay thế chặn trùng.
 - Adapter Zalo/Web: parse wire-format → `InboundMessage` đúng; chỉ gọi `_emit_inbound`, không tự
