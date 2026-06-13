@@ -1060,15 +1060,20 @@ async def platform_usage(
         )
         daily = await c.fetch(
             """
-            SELECT DATE(called_at AT TIME ZONE 'UTC') AS day,
-                   SUM(tokens_in + tokens_out)::bigint AS tokens,
-                   COUNT(*)::bigint                    AS calls,
-                   SUM(cost_usd)::float                AS cost_usd
-            FROM token_usage
-            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
-            GROUP BY day ORDER BY day DESC
+            SELECT d::date AS day,
+                   COALESCE(SUM(t.tokens_in + t.tokens_out), 0)::bigint AS tokens,
+                   COUNT(t.id)::bigint                                  AS calls,
+                   COALESCE(SUM(t.cost_usd), 0.0)::float                AS cost_usd
+            FROM generate_series(
+                   (NOW() AT TIME ZONE 'UTC')::date - ($1::int - 1),
+                   (NOW() AT TIME ZONE 'UTC')::date,
+                   INTERVAL '1 day'
+                 ) d
+            LEFT JOIN token_usage t
+                   ON DATE(t.called_at AT TIME ZONE 'UTC') = d::date
+            GROUP BY d ORDER BY d DESC
             """,
-            str(days),
+            days,
         )
         by_boss = await c.fetch(
             """

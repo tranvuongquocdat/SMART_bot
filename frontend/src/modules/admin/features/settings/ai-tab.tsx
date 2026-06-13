@@ -1,7 +1,9 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { motion } from 'framer-motion';
 import { toast } from 'sonner';
 import { ApiError } from '@/lib/api';
+import { fadeUp, staggerContainer } from '@/lib/motion';
 import { useT } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -44,6 +46,28 @@ const PROVIDER_LABELS: Record<string, string> = {
   custom: 'Custom / Self-hosted',
 };
 
+// Khung section nhất quán cho cả trang (card + tiêu đề + mô tả + animation).
+function Section({
+  title,
+  desc,
+  children,
+}: {
+  title: string;
+  desc?: string;
+  children: ReactNode;
+}) {
+  return (
+    <motion.section
+      variants={fadeUp}
+      className="rounded-[14px] surface-section bg-card-grad p-5"
+    >
+      <h2 className="text-[13.5px] font-semibold tracking-tight">{title}</h2>
+      {desc && <p className="text-xs text-muted-foreground mt-0.5">{desc}</p>}
+      <div className="mt-4">{children}</div>
+    </motion.section>
+  );
+}
+
 function SlotCard({
   slot,
   currentModelId,
@@ -73,7 +97,7 @@ function SlotCard({
   const dirty = selected !== (currentModelId?.toString() ?? '');
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
+    <div className="rounded-lg border bg-card p-4 space-y-3 transition-all hover:border-[hsl(var(--border-strong))] hover:shadow-sm">
       <p className="text-sm font-semibold">{t(SLOT_LABELS[slot.slot])}</p>
       <Select
         value={selected || 'default'}
@@ -342,10 +366,7 @@ function OwnModelsSection({
   });
 
   return (
-    <section>
-      <h2 className="text-sm font-semibold mb-1">{t('aitab.yourModels')}</h2>
-      <p className="text-xs text-muted-foreground mb-3">{t('aitab.yourModelsDesc')}</p>
-
+    <Section title={t('aitab.yourModels')} desc={t('aitab.yourModelsDesc')}>
       {ownModels.length > 0 && (
         <ul className="mb-4 space-y-2">
           {ownModels.map((m) => (
@@ -373,7 +394,7 @@ function OwnModelsSection({
         </ul>
       )}
 
-      <div className="rounded-lg border bg-card p-4 space-y-3">
+      <div className="rounded-lg border border-dashed bg-[hsl(var(--bg-subtle))] p-4 space-y-3">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div className="space-y-1.5">
             <Label className="text-xs">Provider</Label>
@@ -487,7 +508,7 @@ function OwnModelsSection({
           </p>
         )}
       </div>
-    </section>
+    </Section>
   );
 }
 
@@ -525,10 +546,14 @@ export default function AiTab() {
   if (!data) return null;
 
   return (
-    <div className="space-y-6 max-w-2xl">
-      {/* Model slots */}
-      <section>
-        <h2 className="text-sm font-semibold mb-3">{t('aitab.modelSlots')}</h2>
+    <motion.div
+      className="space-y-5 max-w-2xl"
+      variants={staggerContainer(0.07)}
+      initial="hidden"
+      animate="show"
+    >
+      {/* 1 — Model cho từng việc (slots) */}
+      <Section title={t('aitab.modelSlots')} desc={t('aitab.slotsDesc')}>
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {data.slots.map((slot) => (
             <SlotCard
@@ -541,35 +566,10 @@ export default function AiTab() {
             />
           ))}
         </div>
-      </section>
+      </Section>
 
-      {/* Cost cap */}
-      <section className="space-y-2 max-w-xs">
-        <Label htmlFor="cost-cap">{t('aitab.costCap')}</Label>
-        <div className="flex gap-2">
-          <Input
-            id="cost-cap"
-            type="number"
-            step="0.01"
-            min="0"
-            value={cap}
-            onChange={(e) => setCap(e.target.value)}
-            className="w-32"
-          />
-          <Button
-            size="sm"
-            disabled={capMut.isPending}
-            onClick={() => capMut.mutate()}
-          >
-            {capMut.isPending ? t('common.saving') : t('common.save')}
-          </Button>
-        </div>
-      </section>
-
-      {/* BYO API keys */}
-      <section>
-        <h2 className="text-sm font-semibold mb-1">{t('aitab.byoTitle')}</h2>
-        <p className="text-xs text-muted-foreground mb-3">{t('aitab.byoDesc')}</p>
+      {/* 2 — API key (BYO) */}
+      <Section title={t('aitab.byoTitle')} desc={t('aitab.byoDesc')}>
         <div className="space-y-3">
           {PROVIDERS.map((prov) => {
             const info = data.keys[prov] ?? { present: false };
@@ -584,15 +584,38 @@ export default function AiTab() {
             );
           })}
         </div>
-      </section>
+      </Section>
 
-      {/* Own (BYO) models */}
+      {/* 3 — Model riêng (BYO) */}
       <OwnModelsSection
         models={data.models}
         keysPresent={Object.fromEntries(
           PROVIDERS.map((p) => [p, data.keys[p]?.present ?? false])
         )}
       />
-    </div>
+
+      {/* 4 — Trần chi phí */}
+      <Section title={t('aitab.costCap')} desc={t('aitab.costCapDesc')}>
+        <div className="flex gap-2 max-w-xs">
+          <Input
+            id="cost-cap"
+            type="number"
+            step="0.01"
+            min="0"
+            value={cap}
+            onChange={(e) => setCap(e.target.value)}
+            className="w-32 h-8 text-sm"
+          />
+          <Button
+            size="sm"
+            className="h-8"
+            disabled={capMut.isPending}
+            onClick={() => capMut.mutate()}
+          >
+            {capMut.isPending ? t('common.saving') : t('common.save')}
+          </Button>
+        </div>
+      </Section>
+    </motion.div>
   );
 }

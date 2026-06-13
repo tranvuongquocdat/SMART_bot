@@ -54,21 +54,30 @@ function UsageContent({ range }: { range: RangeValue }) {
         />
       </div>
 
-      {/* Daily cost chart */}
-      <div className="rounded-[12px] bg-card-grad surface-section p-4">
-        <p className="text-[10px] uppercase tracking-[0.07em] text-[hsl(var(--dim))] font-medium mb-3">
-          {t('usage.chart.dailyCost')}
-        </p>
-        <BarChart
-          data={[...data.daily]
-            .reverse()
-            .map((r) => {
-              const [, m, d] = r.date.split('-');
-              return { label: `${d}/${m}`, value: r.cost_usd, title: `${r.date}: $${fmt(r.cost_usd)}` };
-            })}
-          emptyText={t('usage.chart.empty')}
-        />
-      </div>
+      {/* Daily cost chart — full range, idle days = 0 */}
+      {(() => {
+        const asc = [...data.daily].reverse();
+        const dm = (s: string) => { const [, m, d] = s.split('-'); return `${d}/${m}`; };
+        const rangeLabel = asc.length ? `${dm(asc[0].date)} – ${dm(asc[asc.length - 1].date)}` : '';
+        return (
+          <div className="rounded-[12px] bg-card-grad surface-section p-4">
+            <div className="flex items-baseline justify-between mb-3">
+              <p className="text-[10px] uppercase tracking-[0.07em] text-[hsl(var(--dim))] font-medium">
+                {t('usage.chart.dailyCost')}
+              </p>
+              <p className="text-[11px] text-muted-foreground tabular-nums">{rangeLabel}</p>
+            </div>
+            <BarChart
+              data={asc.map((r) => ({
+                label: dm(r.date),
+                value: r.cost_usd,
+                title: `${r.date}: $${fmt(r.cost_usd)}`,
+              }))}
+              emptyText={t('usage.chart.empty')}
+            />
+          </div>
+        );
+      })()}
 
       {/* Cost by model */}
       <div className="rounded-[12px] bg-card-grad surface-section p-4">

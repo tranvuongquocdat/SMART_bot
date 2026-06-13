@@ -1663,23 +1663,29 @@ async def get_usage(
     days = max(1, min(days, 365))
 
     async with db.acquire() as c:
-        # Per-day breakdown for DataTable / chart
+        # Per-day breakdown — gap-fill đủ N ngày (ngày không dùng = 0) để chart
+        # hiển thị trọn khoảng đã chọn.
         daily_rows = await c.fetch(
             """
-            SELECT DATE(called_at AT TIME ZONE 'UTC') AS day,
-                   SUM(tokens_in)   AS tokens_in,
-                   SUM(tokens_out)  AS tokens_out,
-                   SUM(tokens_in + tokens_out) AS tokens_total,
-                   COUNT(*)         AS messages,
-                   SUM(cost_usd)    AS cost_usd
-            FROM token_usage
-            WHERE boss_id = $1
-              AND called_at > NOW() - ($2 || ' days')::INTERVAL
-            GROUP BY day
-            ORDER BY day DESC
+            SELECT d::date AS day,
+                   COALESCE(SUM(t.tokens_in), 0)::bigint            AS tokens_in,
+                   COALESCE(SUM(t.tokens_out), 0)::bigint           AS tokens_out,
+                   COALESCE(SUM(t.tokens_in + t.tokens_out), 0)::bigint AS tokens_total,
+                   COUNT(t.id)::bigint                              AS messages,
+                   COALESCE(SUM(t.cost_usd), 0.0)                   AS cost_usd
+            FROM generate_series(
+                   (NOW() AT TIME ZONE 'UTC')::date - ($2::int - 1),
+                   (NOW() AT TIME ZONE 'UTC')::date,
+                   INTERVAL '1 day'
+                 ) d
+            LEFT JOIN token_usage t
+                   ON DATE(t.called_at AT TIME ZONE 'UTC') = d::date
+                  AND t.boss_id = $1
+            GROUP BY d
+            ORDER BY d DESC
             """,
             ctx.boss_id,
-            str(days),
+            days,
         )
 
         # Summary totals
