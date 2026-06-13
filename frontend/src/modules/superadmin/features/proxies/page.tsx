@@ -25,6 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { errorMessage } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import {
   proxiesQuery,
   createProxy,
@@ -59,6 +60,7 @@ function ProxyModal({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState<FormState>(empty());
   const isEdit = !!proxy;
@@ -100,11 +102,11 @@ function ProxyModal({
       });
     },
     onSuccess: () => {
-      toast.success(isEdit ? 'Đã cập nhật proxy' : 'Đã thêm proxy');
+      toast.success(isEdit ? t('sa.proxy.updated') : t('sa.proxy.added'));
       qc.invalidateQueries({ queryKey: ['superadmin', 'proxies'] });
       onClose();
     },
-    onError: (e) => toast.error(errorMessage(e, 'Lưu proxy thất bại')),
+    onError: (e) => toast.error(errorMessage(e, t('sa.proxy.saveError'))),
   });
 
   const valid = form.label.trim() && (isEdit || form.url.trim());
@@ -113,36 +115,36 @@ function ProxyModal({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="sm:max-w-[460px]">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Sửa proxy' : 'Thêm proxy'}</DialogTitle>
+          <DialogTitle>{isEdit ? t('sa.proxy.editTitle') : t('sa.proxy.addTitle')}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
-            <Label>Nhãn</Label>
+            <Label>{t('sa.proxy.label')}</Label>
             <Input
-              placeholder="VD: VN-HN-01"
+              placeholder={t('sa.proxy.labelPlaceholder')}
               value={form.label}
               onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
             />
           </div>
           <div className="grid gap-1.5">
-            <Label>URL {isEdit && <span className="text-xs text-muted-foreground">(để trống = giữ nguyên)</span>}</Label>
+            <Label>URL {isEdit && <span className="text-xs text-muted-foreground">{t('sa.proxy.urlKeep')}</span>}</Label>
             <Input
-              placeholder="http://user:pass@host:port hoặc socks5://…"
+              placeholder={t('sa.proxy.urlPlaceholder')}
               value={form.url}
               onChange={(e) => setForm((f) => ({ ...f, url: e.target.value }))}
             />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="grid gap-1.5">
-              <Label>Vùng</Label>
+              <Label>{t('sa.proxy.region')}</Label>
               <Input
-                placeholder="VN / VN-HN / VN-HCM"
+                placeholder={t('sa.proxy.regionPlaceholder')}
                 value={form.region}
                 onChange={(e) => setForm((f) => ({ ...f, region: e.target.value }))}
               />
             </div>
             <div className="grid gap-1.5">
-              <Label>Cap khách (max_bosses)</Label>
+              <Label>{t('sa.proxy.cap')}</Label>
               <Input
                 type="number"
                 min="1"
@@ -152,7 +154,7 @@ function ProxyModal({
             </div>
           </div>
           <div className="grid gap-1.5">
-            <Label>Ghi chú</Label>
+            <Label>{t('sa.proxy.notes')}</Label>
             <Input
               value={form.notes}
               onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
@@ -160,9 +162,9 @@ function ProxyModal({
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Huỷ</Button>
+          <Button variant="outline" onClick={onClose}>{t('sa.common.cancel')}</Button>
           <Button disabled={!valid || mut.isPending} onClick={() => mut.mutate()}>
-            {mut.isPending ? 'Đang lưu...' : isEdit ? 'Lưu' : 'Thêm'}
+            {mut.isPending ? t('sa.common.saving') : isEdit ? t('sa.common.save') : t('sa.proxy.add')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -171,6 +173,7 @@ function ProxyModal({
 }
 
 export default function ProxiesPage() {
+  const t = useT();
   const qc = useQueryClient();
   const proxies = useQuery(proxiesQuery);
   const [createOpen, setCreateOpen] = useState(false);
@@ -181,17 +184,17 @@ export default function ProxiesPage() {
     mutationFn: (id: number) => deleteProxy(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'proxies'] });
-      toast.success('Đã xoá proxy');
+      toast.success(t('sa.proxy.deleted'));
     },
-    onError: (e) => toast.error(errorMessage(e, 'Xoá proxy thất bại')),
+    onError: (e) => toast.error(errorMessage(e, t('sa.proxy.deleteError'))),
   });
 
   async function runTest(p: Proxy) {
     setTesting(p.id);
     try {
       const res = await testProxy(p.id);
-      if (res.ok) toast.success(`Proxy sống — IP ra: ${res.ip}`);
-      else toast.error(`Proxy lỗi: ${res.message}`);
+      if (res.ok) toast.success(t('sa.proxy.testOk', { ip: res.ip ?? '' }));
+      else toast.error(t('sa.proxy.testFail', { message: res.message ?? '' }));
     } finally {
       setTesting(null);
     }
@@ -211,14 +214,14 @@ export default function ProxiesPage() {
       ),
     },
     {
-      header: 'Vùng',
+      header: t('sa.proxy.region'),
       accessorKey: 'region',
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground">{row.original.region ?? '—'}</span>
       ),
     },
     {
-      header: 'Gán',
+      header: t('sa.proxy.colAssigned'),
       cell: ({ row }) => (
         <span className="text-sm tabular-nums">
           {row.original.assigned_count}/{row.original.max_bosses}
@@ -226,7 +229,7 @@ export default function ProxiesPage() {
       ),
     },
     {
-      header: 'Trạng thái',
+      header: t('sa.proxy.colStatus'),
       cell: ({ row }) => (
         <StatusDot status={STATUS_DOT[row.original.status] ?? 'warn'} label={row.original.status} />
       ),
@@ -244,14 +247,14 @@ export default function ProxiesPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem disabled={testing === row.original.id} onClick={() => runTest(row.original)}>
-                {testing === row.original.id ? 'Đang test…' : 'Test kết nối'}
+                {testing === row.original.id ? t('sa.proxy.testing') : t('sa.proxy.testConn')}
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => setEditTarget(row.original)}>Sửa</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => setEditTarget(row.original)}>{t('sa.common.edit')}</DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 onClick={() => delMut.mutate(row.original.id)}
               >
-                Xoá
+                {t('sa.common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -263,12 +266,12 @@ export default function ProxiesPage() {
   return (
     <PageWrap className="max-w-[860px]">
       <PageHeader
-        title="Proxy"
-        subtitle="Pool IP dân cư gán cho từng khách — mọi kênh (Zalo, Messenger) của khách đi qua proxy được gán."
+        title={t('nav.sa.proxies')}
+        subtitle={t('sa.proxy.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Thêm proxy
+            {t('sa.proxy.addBtn')}
           </Button>
         }
       />
@@ -285,9 +288,9 @@ export default function ProxiesPage() {
             empty={
               <EmptyState
                 icon={Network}
-                title="Chưa có proxy nào"
-                description="Thêm proxy dân cư vào pool rồi gán cho từng khách trong trang Boss."
-                action={{ label: '+ Thêm proxy', onClick: () => setCreateOpen(true) }}
+                title={t('sa.proxy.empty')}
+                description={t('sa.proxy.emptyDesc')}
+                action={{ label: t('sa.proxy.emptyAction'), onClick: () => setCreateOpen(true) }}
               />
             }
           />
