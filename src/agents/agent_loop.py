@@ -46,6 +46,30 @@ def _bot_language_directive(language: str | None) -> str | None:
     }.get((language or "").lower())
 
 
+def _current_time_directive(tz: str | None) -> str:
+    """Mốc thời gian hiện tại theo tz của boss — để agent suy luận 'hôm nay',
+    'ngày mai', 'cuối tuần', '2 tiếng nữa'… mà không phải gọi tool, và không bao
+    giờ nói 'tôi không biết ngày giờ'."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    zone = tz or "Asia/Ho_Chi_Minh"
+    try:
+        now = datetime.now(ZoneInfo(zone))
+    except Exception:
+        zone = "Asia/Ho_Chi_Minh"
+        now = datetime.now(ZoneInfo(zone))
+    weekday = [
+        "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"
+    ][now.weekday()]
+    return (
+        f"Bối cảnh thời gian hiện tại: {weekday}, {now:%d/%m/%Y %H:%M} "
+        f"(múi giờ {zone}). Dùng đúng mốc này cho mọi suy luận thời gian "
+        "(hôm nay, ngày mai, cuối tuần, '2 tiếng nữa'…). Tuyệt đối KHÔNG nói "
+        "rằng bạn không biết ngày giờ hiện tại."
+    )
+
+
 def _format_memory(semantic, episodic, reminders, action_items) -> str:
     lines: list[str] = []
     if semantic:
@@ -152,6 +176,10 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     lang_directive = _bot_language_directive(getattr(ctx.boss, "language", None))
     if lang_directive:
         system_prompt = f"{system_prompt}\n\n{lang_directive}"
+    # Luôn cấp mốc thời gian hiện tại (theo tz boss) — bot vốn không biết "now".
+    system_prompt = (
+        f"{system_prompt}\n\n{_current_time_directive(getattr(ctx.boss, 'tz', None))}"
+    )
 
     # 2. Memory recall (semantic + episodic + prospective when configured)
     semantic: list[Any] = []
