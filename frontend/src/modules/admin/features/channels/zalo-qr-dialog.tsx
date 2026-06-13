@@ -11,6 +11,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { ApiError } from '@/lib/api';
+import { useT } from '@/lib/i18n';
 import { startZaloQrLogin, zaloQrLoginStatus, type ZaloQrStatus } from './api';
 
 const POLL_MS = 1500;
@@ -25,6 +26,7 @@ export function ZaloQrDialog({
   open: boolean;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [state, setState] = useState<ZaloQrStatus | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
@@ -35,8 +37,8 @@ export function ZaloQrDialog({
   // Đếm ngược mượt 1s giữa các lần poll (poll đồng bộ lại từ server)
   useEffect(() => {
     if (countdown == null || countdown <= 0) return;
-    const t = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
-    return () => clearTimeout(t);
+    const timer = setTimeout(() => setCountdown((c) => (c == null ? null : c - 1)), 1000);
+    return () => clearTimeout(timer);
   }, [countdown]);
 
   async function begin() {
@@ -49,7 +51,7 @@ export function ZaloQrDialog({
       const detail =
         e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
           ? (e.body as { detail: string }).detail
-          : 'Không mở được phiên đăng nhập. Thử lại sau.';
+          : t('zaloqr.startError');
       setStartError(detail);
     }
   }
@@ -70,7 +72,7 @@ export function ZaloQrDialog({
         if (s.status === 'success') {
           stoppedRef.current = true;
           toast.success(
-            `Đã kết nối Zalo${s.display_name ? ` — ${s.display_name}` : ''}.`
+            t('zaloqr.connected', { name: s.display_name ? ` — ${s.display_name}` : '' })
           );
           qc.invalidateQueries({ queryKey: ['admin', 'channels'] });
           onClose();
@@ -84,7 +86,7 @@ export function ZaloQrDialog({
           status: 'error',
           qr_image_b64: null,
           display_name: null,
-          error: 'Phiên đăng nhập đã hết hạn.',
+          error: t('zaloqr.expired'),
           bot_account_id: null,
           expires_in_s: 0,
         });
@@ -104,10 +106,9 @@ export function ZaloQrDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Kết nối Zalo</DialogTitle>
+          <DialogTitle>{t('zaloqr.title')}</DialogTitle>
           <DialogDescription>
-            Dùng tài khoản Zalo <strong>phụ</strong> (acc nghe ngóng của bạn) để quét — không
-            dùng acc Zalo chính. Mở Zalo trên điện thoại → Cài đặt → Quét mã QR.
+            {t('zaloqr.descPre')}<strong>{t('zaloqr.descBold')}</strong>{t('zaloqr.descPost')}
           </DialogDescription>
         </DialogHeader>
 
@@ -117,21 +118,21 @@ export function ZaloQrDialog({
               <p className="text-sm text-destructive text-center">{startError}</p>
               <Button size="sm" variant="outline" onClick={begin}>
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                Thử lại
+                {t('zaloqr.retry')}
               </Button>
             </>
           ) : status === 'qr' && state?.qr_image_b64 ? (
             <>
               <img
                 src={`data:image/png;base64,${state.qr_image_b64}`}
-                alt="QR đăng nhập Zalo"
+                alt={t('zaloqr.qrAlt')}
                 className="h-56 w-56 rounded-lg border bg-white p-2"
               />
               <p className="text-xs text-muted-foreground">
-                Mã tự làm mới khi hết hạn
+                {t('zaloqr.autoRefresh')}
                 {countdown != null && (
                   <>
-                    {' '}— phiên còn{' '}
+                    {' '}{t('zaloqr.sessionLeft')}{' '}
                     <span className="font-mono font-medium text-foreground tabular-nums">
                       {fmtCountdown(countdown)}
                     </span>
@@ -143,24 +144,23 @@ export function ZaloQrDialog({
             <>
               <Smartphone className="h-10 w-10 text-primary" />
               <p className="text-sm text-center">
-                Đã quét{state?.display_name ? ` bởi ${state.display_name}` : ''} — xác nhận
-                đăng nhập trên điện thoại.
+                {t('zaloqr.scanned', { by: state?.display_name ? t('zaloqr.by', { name: state.display_name }) : '' })}
               </p>
             </>
           ) : status === 'error' ? (
             <>
               <p className="text-sm text-destructive text-center">
-                {state?.error ?? 'Đăng nhập thất bại.'}
+                {state?.error ?? t('zaloqr.loginFailed')}
               </p>
               <Button size="sm" variant="outline" onClick={begin}>
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-                Thử lại
+                {t('zaloqr.retry')}
               </Button>
             </>
           ) : (
             <>
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Đang tạo mã QR…</p>
+              <p className="text-sm text-muted-foreground">{t('zaloqr.creating')}</p>
             </>
           )}
         </div>

@@ -1,17 +1,20 @@
 import { User, Calendar } from 'lucide-react';
 import { relativeTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import type { Item } from './api';
 
-const TAG_STYLE: Record<Item['type'], { label: string; cls: string }> = {
-  task: { label: 'Tác vụ', cls: 'text-[hsl(var(--info))] bg-[hsl(var(--info)/0.1)]' },
-  reminder: { label: 'Nhắc lịch', cls: 'text-[hsl(var(--warn))] bg-[hsl(var(--warn)/0.1)]' },
-  decision: { label: 'Quyết định', cls: 'text-primary bg-[hsl(var(--primary)/0.1)]' },
+const TAG_STYLE: Record<Item['type'], { labelKey: string; cls: string }> = {
+  task: { labelKey: 'grp.itemType.task', cls: 'text-[hsl(var(--info))] bg-[hsl(var(--info)/0.1)]' },
+  reminder: { labelKey: 'grp.itemType.reminder', cls: 'text-[hsl(var(--warn))] bg-[hsl(var(--warn)/0.1)]' },
+  decision: { labelKey: 'grp.itemType.decision', cls: 'text-primary bg-[hsl(var(--primary)/0.1)]' },
 };
 
 export function ItemsList({ items }: { items: Item[] }) {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   if (items.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">Hôm nay chưa trích xuất mục nào.</p>;
+    return <p className="text-sm text-muted-foreground py-8 text-center">{t('grp.empty.itemsToday')}</p>;
   }
   return (
     <div className="flex flex-col gap-1.5">
@@ -23,7 +26,7 @@ export function ItemsList({ items }: { items: Item[] }) {
             <div className="flex-1 min-w-0">
               <p className="text-[13.5px] tracking-tight mb-1">{it.text}</p>
               <div className="text-xs text-muted-foreground flex items-center gap-2.5 flex-wrap">
-                <span className={cn('text-[10.5px] py-px px-1.5 rounded font-medium uppercase tracking-wide', tag.cls)}>{tag.label}</span>
+                <span className={cn('text-[10.5px] py-px px-1.5 rounded font-medium uppercase tracking-wide', tag.cls)}>{t(tag.labelKey)}</span>
                 {it.assignee && (
                   <span className="inline-flex items-center gap-1"><User className="h-3 w-3" />{it.assignee}</span>
                 )}
@@ -32,7 +35,7 @@ export function ItemsList({ items }: { items: Item[] }) {
                 )}
               </div>
             </div>
-            <span className="text-[11px] text-[hsl(var(--dim))] shrink-0 mt-0.5">{new Date(it.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}</span>
+            <span className="text-[11px] text-[hsl(var(--dim))] shrink-0 mt-0.5">{new Date(it.created_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}</span>
           </div>
         );
       })}
