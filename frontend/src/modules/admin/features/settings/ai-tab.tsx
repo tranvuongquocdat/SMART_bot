@@ -1,15 +1,13 @@
-import { useState, useEffect, useCallback, type ReactNode } from 'react';
+import { useState, useEffect, type ReactNode } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { ApiError } from '@/lib/api';
 import { fadeUp, staggerContainer } from '@/lib/motion';
 import { useT } from '@/lib/i18n';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -25,12 +23,11 @@ import {
   patchAiCap,
   patchAiKey,
   testAiKey,
-  listProviderModels,
-  addOwnModel,
   deleteOwnModel,
   type ModelOption,
   type SlotInfo,
 } from './api';
+import { OwnModelDrawer } from './own-model-drawer';
 
 const SLOT_LABELS: Record<string, string> = {
   smart: 'aitab.slot.smart',
@@ -278,6 +275,60 @@ function KeyRow({
   );
 }
 
+function ModelCard({
+  m,
+  onEdit,
+  onDelete,
+}: {
+  m: ModelOption;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  const t = useT();
+  const hasCost = m.cost_per_1m_input_usd > 0 || m.cost_per_1m_output_usd > 0;
+  return (
+    <div className="rounded-lg border bg-card p-3 transition-all hover:border-[hsl(var(--border-strong))] hover:shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <p className="font-medium text-sm truncate">{m.name}</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {m.provider}
+            <Badge variant="secondary" className="ml-1.5 text-[9px] uppercase">{m.tier}</Badge>
+          </p>
+        </div>
+        <div className="flex items-center gap-0.5 shrink-0">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} aria-label={t('aitab.editModel')}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={onDelete}
+            aria-label={t('common.delete')}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
+      {m.capabilities.length > 0 && (
+        <div className="flex flex-wrap gap-1 mt-2">
+          {m.capabilities.map((c) => (
+            <span key={c} className="px-1.5 py-px rounded text-[10px] bg-muted text-muted-foreground">
+              {c}
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="text-[11px] text-muted-foreground tabular-nums mt-2">
+        {hasCost
+          ? `$${m.cost_per_1m_input_usd}/1M in · $${m.cost_per_1m_output_usd}/1M out`
+          : t('usage.byModel.noCost')}
+      </p>
+    </div>
+  );
+}
+
 function OwnModelsSection({
   models,
   keysPresent,
@@ -288,73 +339,7 @@ function OwnModelsSection({
   const t = useT();
   const qc = useQueryClient();
   const ownModels = models.filter((m) => m.is_own);
-
-  const [provider, setProvider] = useState<string>('groq');
-  const [available, setAvailable] = useState<{ id: string }[]>([]);
-  const [name, setName] = useState('');
-  const [tier, setTier] = useState('smart');
-  const [vision, setVision] = useState(false);
-  const [costIn, setCostIn] = useState('');
-  const [costOut, setCostOut] = useState('');
-  const [loadingList, setLoadingList] = useState(false);
-
-  const hasKey = keysPresent[provider];
-
-  const loadModels = useCallback(
-    async (opts?: { silent?: boolean }) => {
-      setLoadingList(true);
-      try {
-        const res = await listProviderModels(provider);
-        if (!res.ok) {
-          if (!opts?.silent) toast.error(res.message ?? t('aitab.loadModelsError'));
-          setAvailable([]);
-        } else {
-          setAvailable(res.models);
-          if (res.models.length === 0 && !opts?.silent) toast.info(t('aitab.noProviderModels'));
-        }
-      } catch {
-        if (!opts?.silent) toast.error(t('aitab.loadModelsError'));
-      } finally {
-        setLoadingList(false);
-      }
-    },
-    [provider, t],
-  );
-
-  // Tự tải danh sách model ngay khi chọn provider (nếu đã có key) — không cần bấm.
-  useEffect(() => {
-    if (hasKey) {
-      void loadModels({ silent: true });
-    } else {
-      setAvailable([]);
-    }
-  }, [provider, hasKey, loadModels]);
-
-  const addMut = useMutation({
-    mutationFn: () =>
-      addOwnModel({
-        provider,
-        name: name.trim(),
-        tier,
-        vision,
-        cost_per_1m_input_usd: costIn.trim() ? Number(costIn) : null,
-        cost_per_1m_output_usd: costOut.trim() ? Number(costOut) : null,
-      }),
-    onSuccess: () => {
-      setName('');
-      setCostIn('');
-      setCostOut('');
-      qc.invalidateQueries({ queryKey: aiQuery.queryKey });
-      toast.success(t('aitab.modelAdded'));
-    },
-    onError: (e) => {
-      const detail =
-        e instanceof ApiError && e.body && typeof e.body === 'object'
-          ? (e.body as { detail?: string }).detail
-          : undefined;
-      toast.error(detail ?? t('aitab.modelAddError'));
-    },
-  });
+  const [drawer, setDrawer] = useState<{ model: ModelOption | null } | null>(null);
 
   const delMut = useMutation({
     mutationFn: (id: number) => deleteOwnModel(id),
@@ -367,147 +352,39 @@ function OwnModelsSection({
 
   return (
     <Section title={t('aitab.yourModels')} desc={t('aitab.yourModelsDesc')}>
-      {ownModels.length > 0 && (
-        <ul className="mb-4 space-y-2">
+      <div className="flex justify-end mb-3">
+        <Button size="sm" onClick={() => setDrawer({ model: null })}>
+          <Plus className="h-3.5 w-3.5 mr-1" />
+          {t('aitab.addModel')}
+        </Button>
+      </div>
+
+      {ownModels.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-2">{t('aitab.noOwnModels')}</p>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {ownModels.map((m) => (
-            <li
+            <ModelCard
               key={m.id}
-              className="flex items-center justify-between rounded-md border bg-card px-3 py-2"
-            >
-              <span className="text-sm">
-                {m.provider} / {m.name}
-                <Badge variant="secondary" className="ml-2 text-[10px] uppercase">
-                  {m.tier}
-                </Badge>
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-7 text-xs text-destructive hover:text-destructive"
-                disabled={delMut.isPending}
-                onClick={() => delMut.mutate(m.id)}
-              >
-                {t('common.delete')}
-              </Button>
-            </li>
+              m={m}
+              onEdit={() => setDrawer({ model: m })}
+              onDelete={() => {
+                if (confirm(t('aitab.deleteConfirm', { name: m.name }))) delMut.mutate(m.id);
+              }}
+            />
           ))}
-        </ul>
+        </div>
       )}
 
-      <div className="rounded-lg border border-dashed bg-[hsl(var(--bg-subtle))] p-4 space-y-3">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs">Provider</Label>
-            <Select
-              value={provider}
-              onValueChange={(v) => {
-                setProvider(v);
-                setAvailable([]);
-                setName('');
-              }}
-            >
-              <SelectTrigger className="h-8 text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {PROVIDERS.map((p) => (
-                  <SelectItem key={p} value={p}>
-                    {p === 'custom' ? t('aitab.providerCustom') : PROVIDER_LABELS[p]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label className="text-xs">Model</Label>
-            <div className="flex gap-2">
-              {available.length > 0 ? (
-                <Select value={name || undefined} onValueChange={setName}>
-                  <SelectTrigger className="h-8 text-sm flex-1">
-                    <SelectValue placeholder={t('aitab.chooseModel')} />
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72">
-                    {available.map((m) => (
-                      <SelectItem key={m.id} value={m.id}>
-                        {m.id}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  className="h-8 text-sm flex-1"
-                  placeholder="vd: llama-3.3-70b-versatile"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                />
-              )}
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 text-xs shrink-0"
-                disabled={loadingList}
-                onClick={() => loadModels()}
-              >
-                {loadingList ? t('common.loading') : t('aitab.loadList')}
-              </Button>
-            </div>
-          </div>
-        </div>
-        <div className="flex flex-wrap items-end gap-4">
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('aitab.useForSlot')}</Label>
-            <Select value={tier} onValueChange={setTier}>
-              <SelectTrigger className="h-8 text-sm w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="smart">Smart</SelectItem>
-                <SelectItem value="fast">Fast</SelectItem>
-                <SelectItem value="vision">Vision</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('aitab.costIn')}</Label>
-            <Input
-              type="number" min="0" step="0.01"
-              className="h-8 text-sm w-28"
-              placeholder="—"
-              value={costIn}
-              onChange={(e) => setCostIn(e.target.value)}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className="text-xs">{t('aitab.costOut')}</Label>
-            <Input
-              type="number" min="0" step="0.01"
-              className="h-8 text-sm w-28"
-              placeholder="—"
-              value={costOut}
-              onChange={(e) => setCostOut(e.target.value)}
-            />
-          </div>
-          <label className="flex items-center gap-2 pb-1.5 text-xs text-muted-foreground">
-            <Checkbox checked={vision} onCheckedChange={(v) => setVision(v === true)} />
-            {t('aitab.visionSupport')}
-          </label>
-          <Button
-            size="sm"
-            className="h-8 ml-auto"
-            disabled={!name.trim() || addMut.isPending || !hasKey}
-            onClick={() => addMut.mutate()}
-          >
-            {addMut.isPending ? t('aitab.adding') : t('aitab.addModel')}
-          </Button>
-        </div>
-        <p className="text-[11px] text-muted-foreground">{t('aitab.costHint')}</p>
-        {!hasKey && (
-          <p className="text-xs text-amber-600 dark:text-amber-500">
-            {t('aitab.needKey', { provider: PROVIDER_LABELS[provider] })}
-          </p>
+      <AnimatePresence>
+        {drawer && (
+          <OwnModelDrawer
+            model={drawer.model}
+            keysPresent={keysPresent}
+            onClose={() => setDrawer(null)}
+          />
         )}
-      </div>
+      </AnimatePresence>
     </Section>
   );
 }

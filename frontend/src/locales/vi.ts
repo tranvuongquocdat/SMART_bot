@@ -399,6 +399,14 @@ export const vi: Record<string, string> = {
   'aitab.costIn': 'Giá in ($/1M)',
   'aitab.costOut': 'Giá out ($/1M)',
   'aitab.costHint': 'Giá $/1M token để tính chi phí ở phần Sử dụng. Bỏ trống nếu không rõ — sẽ hiện "chưa cấu hình giá".',
+  'aitab.capabilities': 'Khả năng',
+  'aitab.editModel': 'Sửa model',
+  'aitab.editModelHint': 'Chỉnh slot, khả năng và chi phí của model',
+  'aitab.addModelHint': 'Chọn provider, model và nhập chi phí',
+  'aitab.modelUpdated': 'Đã cập nhật model',
+  'aitab.modelUpdateError': 'Cập nhật model thất bại',
+  'aitab.noOwnModels': 'Chưa có model riêng. Bấm "Thêm model" để thêm.',
+  'aitab.deleteConfirm': 'Xoá model "{name}"?',
 
   // nhóm
   'grp.title': 'Nhóm',

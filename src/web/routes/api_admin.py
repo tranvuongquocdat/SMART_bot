@@ -755,6 +755,23 @@ async def create_own_model(
     return {"id": new_id}
 
 
+@router.patch("/settings/ai/models/{model_id}", dependencies=[Depends(verify_json_csrf)])
+async def patch_own_model(
+    model_id: int,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Sửa thông số model riêng: tier, capabilities, cost, ctx_max."""
+    from src.services import boss_ai_config
+
+    try:
+        await boss_ai_config.patch_own_model(db, ctx.boss_id, model_id, payload)
+    except AiConfigError as e:
+        raise _ai_err(e)
+    return {"updated": 1}
+
+
 @router.delete("/settings/ai/models/{model_id}", dependencies=[Depends(verify_json_csrf)])
 async def delete_own_model(
     model_id: int,

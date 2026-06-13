@@ -431,6 +431,25 @@ async def create_boss_own_model(
     return {"id": new_id}
 
 
+@router.patch("/{boss_id}/ai/models/{model_id}", dependencies=[Depends(verify_json_csrf)])
+async def patch_boss_own_model(
+    boss_id: int,
+    model_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    actor: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import boss_ai_config
+
+    await _require_boss_user(db, boss_id)
+    try:
+        await boss_ai_config.patch_own_model(db, boss_id, model_id, payload)
+    except AiConfigError as e:
+        raise _ai_err(e)
+    await _audit(db, actor, "boss.own_model_updated", boss_id, {"model_id": model_id})
+    return {"updated": 1}
+
+
 @router.delete("/{boss_id}/ai/models/{model_id}", dependencies=[Depends(verify_json_csrf)])
 async def delete_boss_own_model(
     boss_id: int,

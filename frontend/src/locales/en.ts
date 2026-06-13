@@ -399,6 +399,14 @@ export const en: Record<string, string> = {
   'aitab.costIn': 'In price ($/1M)',
   'aitab.costOut': 'Out price ($/1M)',
   'aitab.costHint': 'Price per 1M tokens, used to compute cost on the Usage page. Leave empty if unknown — it will show "price not set".',
+  'aitab.capabilities': 'Capabilities',
+  'aitab.editModel': 'Edit model',
+  'aitab.editModelHint': "Edit the model's slot, capabilities and cost",
+  'aitab.addModelHint': 'Pick a provider, model and enter cost',
+  'aitab.modelUpdated': 'Model updated',
+  'aitab.modelUpdateError': 'Failed to update model',
+  'aitab.noOwnModels': 'No own models yet. Click "Add model" to add one.',
+  'aitab.deleteConfirm': 'Delete model "{name}"?',
 
   // groups
   'grp.title': 'Groups',

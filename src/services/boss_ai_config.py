@@ -45,6 +45,23 @@ def _is_builtin(provider: str) -> bool:
     return provider in PROVIDER_DEFAULTS
 
 
+# Khả năng (capabilities) hợp lệ cho model. 'text' ngầm định nhưng vẫn cho chọn.
+ALLOWED_CAPS = ("text", "vision", "thinking", "tools", "audio")
+
+
+def _norm_caps(raw) -> list[str]:
+    """Chuẩn hoá list capability về tập hợp lệ, giữ thứ tự ALLOWED_CAPS, không trùng."""
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            raw = [raw]
+    items = {str(x).strip().lower() for x in (raw or [])}
+    return [c for c in ALLOWED_CAPS if c in items]
+
+
 def _parse_cost(raw) -> float | None:
     """Giá $/1M token tự nhập → float ≥ 0, hoặc None nếu trống/không hợp lệ."""
     if raw is None or raw == "":
@@ -134,7 +151,7 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
             raise AiConfigError(404, "boss not found")
         models = await c.fetch(
             """
-            SELECT id, name, provider, tier, capabilities,
+            SELECT id, name, provider, tier, capabilities, ctx_max,
                    cost_per_1m_input_usd, cost_per_1m_output_usd, is_platform_default,
                    owner_boss_id
             FROM models
@@ -169,6 +186,7 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
                 "provider": m["provider"],
                 "tier": m["tier"],
                 "capabilities": _caps(m["capabilities"]),
+                "ctx_max": int(m["ctx_max"] or 0),
                 "cost_per_1m_input_usd": float(m["cost_per_1m_input_usd"] or 0),
                 "cost_per_1m_output_usd": float(m["cost_per_1m_output_usd"] or 0),
                 "is_platform_default": bool(m["is_platform_default"]),
@@ -375,7 +393,11 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
         endpoint_kind, base_url = CUSTOM_ENDPOINT_KIND, custom_url
     else:
         endpoint_kind, base_url = PROVIDER_DEFAULTS[provider]
-    capabilities = ["vision"] if (tier == "vision" or payload.get("vision")) else []
+    # capabilities: ưu tiên list FE gửi; fallback cờ vision (tương thích cũ).
+    if payload.get("capabilities") is not None:
+        capabilities = _norm_caps(payload.get("capabilities"))
+    else:
+        capabilities = ["vision"] if (tier == "vision" or payload.get("vision")) else []
 
     # Giá tự nhập ($/1M token) — để usage tính được chi phí cho model BYO/không
     # tra được giá. Bỏ trống = None (usage hiển thị "chưa tính được giá").
@@ -399,6 +421,52 @@ async def create_own_model(pool, ctx, boss_id: int, payload: dict) -> int:
         )
     except asyncpg.UniqueViolationError:
         raise AiConfigError(409, "This model is already in the boss's list")
+
+
+async def patch_own_model(pool, boss_id: int, model_id: int, payload: dict) -> None:
+    """Sửa thông số model riêng của boss (tier, capabilities, cost, ctx_max).
+
+    Provider/name/endpoint cố định khi tạo — chỉ chỉnh các thông số 'mềm'.
+    """
+    async with pool.acquire() as c:
+        owned = await c.fetchval(
+            "SELECT 1 FROM models WHERE id=$1 AND owner_boss_id=$2", model_id, boss_id
+        )
+        if not owned:
+            raise AiConfigError(404, "model not found")
+
+        sets: list[str] = []
+        vals: list = []
+        i = 1
+        if payload.get("tier"):
+            tier = str(payload["tier"]).strip().lower()
+            if tier not in SLOT_COLUMNS:
+                raise AiConfigError(422, "invalid tier")
+            sets.append(f"tier=${i}")
+            vals.append(tier)
+            i += 1
+        if "capabilities" in payload:
+            sets.append(f"capabilities=${i}::jsonb")
+            vals.append(json.dumps(_norm_caps(payload.get("capabilities"))))
+            i += 1
+        if "cost_per_1m_input_usd" in payload:
+            sets.append(f"cost_per_1m_input_usd=${i}")
+            vals.append(_parse_cost(payload.get("cost_per_1m_input_usd")))
+            i += 1
+        if "cost_per_1m_output_usd" in payload:
+            sets.append(f"cost_per_1m_output_usd=${i}")
+            vals.append(_parse_cost(payload.get("cost_per_1m_output_usd")))
+            i += 1
+        if payload.get("ctx_max"):
+            sets.append(f"ctx_max=${i}")
+            vals.append(int(payload["ctx_max"]))
+            i += 1
+        if not sets:
+            return
+        vals.append(model_id)
+        await c.execute(
+            f"UPDATE models SET {', '.join(sets)} WHERE id=${i}", *vals
+        )
 
 
 async def delete_own_model(pool, boss_id: int, model_id: int) -> None:

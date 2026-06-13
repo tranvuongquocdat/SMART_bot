@@ -20,6 +20,7 @@ export type ModelOption = {
   provider: string;
   tier: string;
   capabilities: string[];
+  ctx_max: number;
   cost_per_1m_input_usd: number;
   cost_per_1m_output_usd: number;
   is_platform_default: boolean;
@@ -97,11 +98,27 @@ export const addOwnModel = (body: {
   name: string;
   tier: string;
   vision?: boolean;
+  capabilities?: string[];
   cost_per_1m_input_usd?: number | null;
   cost_per_1m_output_usd?: number | null;
 }) =>
   api<{ id: number }>('/api/v1/admin/settings/ai/models', {
     method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const patchOwnModel = (
+  id: number,
+  body: {
+    tier?: string;
+    capabilities?: string[];
+    cost_per_1m_input_usd?: number | null;
+    cost_per_1m_output_usd?: number | null;
+    ctx_max?: number;
+  },
+) =>
+  api(`/api/v1/admin/settings/ai/models/${id}`, {
+    method: 'PATCH',
     body: JSON.stringify(body),
   });
 
