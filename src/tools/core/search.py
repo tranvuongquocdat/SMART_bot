@@ -2,7 +2,9 @@
 
 from datetime import datetime
 
+from src.memory.knowledge_index import KnowledgeIndex
 from src.repositories.base import BossContext
+from src.repositories.knowledge import KnowledgeRepo
 from src.repositories.messages import MessagesRepo
 from src.retrieval.base import RetrievalContext
 from src.tools.base import ToolResult
@@ -174,6 +176,78 @@ async def find_exact_quote(
                 "full_text": m.text,
                 "context_before": [b.text for b in before],
                 "context_after": [a.text for a in after],
+            }
+        )
+    return ToolResult(content=out)
+
+
+@tool(
+    name="search_knowledge",
+    description=(
+        "Tìm trong KHO TRI THỨC đã chưng cất (decision/fact/note/risk) — DÙNG TRƯỚC "
+        "search_history khi câu hỏi về việc đã chốt / thông tin dự án / quyết định. "
+        "Hybrid (vector+FTS), scope theo nhóm + thời gian. Trả item kèm source_message_ids "
+        "(để dẫn nguồn 'ai nói')."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string"},
+            "group_id": {"type": "string", "description": "Lọc 1 nhóm; null = tất cả nhóm của sếp"},
+            "kind": {
+                "type": "string",
+                "enum": ["decision", "fact", "note", "risk"],
+                "description": (
+                    "HIẾM khi cần — ĐỂ TRỐNG cho hầu hết câu hỏi (ai phụ trách việc gì, "
+                    "deadline, đã chốt gì, rủi ro…). Phân công/ownership thường nằm trong "
+                    "'decision' chứ không phải 'fact', nên đừng đoán loại. Chỉ set khi sếp "
+                    "yêu cầu rõ đúng MỘT loại tri thức."
+                ),
+            },
+            "after": {"type": "string", "description": "ISO date — tri thức ghi từ thời điểm này"},
+            "before": {"type": "string", "description": "ISO date — tri thức ghi trước thời điểm này"},
+        },
+        "required": ["query"],
+    },
+    feature="qa_with_search",
+    cost_class="medium",
+    available_to={"dm_responder", "in_group_responder"},
+    rate_limit="search:{boss_id}:30/min",
+    parallel_safe=True,
+    timeout_s=15,
+)
+async def search_knowledge(
+    ctx,
+    query: str,
+    group_id: str | None = None,
+    kind: str | None = None,
+    after: str | None = None,
+    before: str | None = None,
+) -> ToolResult:
+    # Scope mặc định = nhóm hiện tại (khi sếp tag bot trong 1 nhóm, câu hỏi gần như
+    # luôn về nhóm đó). Model không truyền group_id → tự lấy chat_id hiện tại nếu đang
+    # ở group; muốn nhóm khác thì truyền group_id tường minh. DM/web → None = mọi nhóm.
+    if group_id is None and ctx.chat_type == "group" and ctx.chat_id:
+        group_id = ctx.chat_id
+    repo = KnowledgeRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
+    index = KnowledgeIndex(ctx.pool, ctx.qdrant, ctx.llm)
+    items = await index.search(
+        repo, query, boss_id=ctx.boss_id, chat_id=group_id,
+        after=_parse_iso(after), before=_parse_iso(before), k=15,
+    )
+    if kind:
+        items = [it for it in items if it.kind == kind]
+    out = []
+    for it in items[:10]:
+        prov = await repo.provenance(it.id)
+        out.append(
+            {
+                "id": it.id,
+                "kind": it.kind,
+                "title": it.title,
+                "content": it.content,
+                "importance": it.importance,
+                "source_message_ids": prov[:5],
             }
         )
     return ToolResult(content=out)

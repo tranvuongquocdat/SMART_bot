@@ -22,7 +22,10 @@ from src.tools.base import ToolContext
 from src.tools.dispatcher import ToolDispatcher
 from src.tools.registry import _REGISTRY as _TOOL_REGISTRY
 
+import structlog
+
 log = logging.getLogger(__name__)
+_slog = structlog.get_logger()
 
 
 _FALLBACK_REPLY = "Em xin lỗi, hệ thống đang gặp trục trặc — sếp thử lại sau ít phút."
@@ -110,25 +113,21 @@ async def _allowed_tools(cfg, ctx) -> set[str]:
     plugin is true, *all* of that plugin's registered tools are added to
     the allowlist for this boss.
     """
+    # Core/built-in tools (cfg.tools, từ _REGISTRY): LUÔN bật cho MỌI boss —
+    # không tắt được, không tính vào cap. Đây là bộ lõi để bot vận hành
+    # (search_knowledge, read/refresh note, set/list reminder, action items,
+    # find_exact_quote, remember, current_time…). Cap chỉ áp cho integration.
+    # (Trước đây intersect với boss_active_tools + cap max_active_tools khiến
+    # boss trial chỉ có 5 tool ngẫu nhiên theo thứ tự registry → mất cả
+    # search_knowledge, không dùng được tính năng lõi.)
     base: set[str] = set(cfg.tools or set())
     db = getattr(ctx, "db", None)
     boss = getattr(ctx, "boss", None)
     if db is None or boss is None:
         return base
-    # Strict intersect with boss's active tools: chỉ chạy tool có row trong
-    # boss_active_tools (mọi đường tạo boss đều seed mặc định — boss 0 rows
-    # nghĩa là đã tắt hết, không phải "chưa cấu hình").
-    try:
-        async with db.acquire() as c:
-            active_rows = await c.fetch(
-                "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", boss.id
-            )
-        base = base & {r["tool_name"] for r in active_rows}
-    except Exception:
-        log.exception("boss_active_tools query failed — skipping filter")
 
-    # Plugin tools cộng SAU intersect: bật/tắt theo boss_integrations
-    # (per-integration), không theo từng tool.
+    # Plugin/integration tools cộng thêm theo boss_integrations (bật/tắt + cap
+    # riêng — mcp_slots), namespaced ``<plugin_id>_<tool_name>``.
     try:
         async with db.acquire() as c:
             rows = await c.fetch(
@@ -151,8 +150,9 @@ async def _allowed_tools(cfg, ctx) -> set[str]:
     return base
 
 
-def _build_tool_ctx(ctx, op_name: str) -> ToolContext:
+def _build_tool_ctx(ctx, op_name: str, event: dict | None = None) -> ToolContext:
     trace = current_trace()
+    event = event or {}
     return ToolContext(
         boss_id=ctx.boss.id,
         boss_role="boss",
@@ -164,6 +164,9 @@ def _build_tool_ctx(ctx, op_name: str) -> ToolContext:
         llm=ctx.llm,
         trace_id=(trace.trace_id if trace else "no-trace"),
         span_id=(trace.span_id if trace else "no-span"),
+        chat_id=event.get("chat_id"),
+        provider=event.get("provider"),
+        chat_type=event.get("chat_type"),
     )
 
 
@@ -230,7 +233,7 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     allowed = await _allowed_tools(cfg, ctx)
     tools = [_to_toolspec(t) for t in registry.filter_for_op(op_name, allowed=allowed)]
     dispatcher = ToolDispatcher(ctx.db)
-    tool_ctx = _build_tool_ctx(ctx, op_name=op_name)
+    tool_ctx = _build_tool_ctx(ctx, op_name=op_name, event=event)
 
     # 4. Loop
     for _ in range(max_iters):
@@ -264,11 +267,15 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
                 tool_calls=resp.tool_calls,
             )
         )
+        for tc in resp.tool_calls:
+            _slog.info("agent_tool_call", op=op_name, name=tc.name, args=tc.arguments)
         results = await dispatcher.call_batch(resp.tool_calls, tool_ctx)
         for call_id, r in results:
             payload = (
                 str(r.content) if r.error is None else f"ERROR: {r.error}"
             )
+            _slog.info("agent_tool_result", op=op_name,
+                       result=payload[:800], err=r.error)
             msgs.append(
                 ChatMessage(role="tool", tool_call_id=call_id, content=payload)
             )

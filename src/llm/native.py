@@ -154,7 +154,10 @@ class NativeGateway:
         last: LLMResponse | None = None
         for fb in route.fallback_chain:
             try:
-                tier = fb.get("tier")
+                # fallback_chain entries: chấp nhận cả "fast" (string, seed SQL) lẫn
+                # {"tier":"fast",...} (dict, seed yaml) — nếu không sẽ AttributeError
+                # → fallback chết âm thầm.
+                tier = fb if isinstance(fb, str) else fb.get("tier")
                 slot_map = {
                     "smart": boss.smart_model_id,
                     "fast": boss.fast_model_id,

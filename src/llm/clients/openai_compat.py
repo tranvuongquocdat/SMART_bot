@@ -33,7 +33,10 @@ class OpenAICompatibleClient:
                 messages=msgs,
                 tools=tools,
                 temperature=req.temperature,
-                max_tokens=req.max_output_tokens,
+                # max_completion_tokens (không phải max_tokens cũ): models OpenAI đời
+                # mới (gpt-5.x, o-series) TỪ CHỐI max_tokens. Param mới được cả gpt-4o
+                # lẫn Groq chấp nhận → dùng chung an toàn.
+                max_completion_tokens=req.max_output_tokens,
             )
         except OpenAIError as e:
             return LLMResponse(

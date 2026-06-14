@@ -157,6 +157,26 @@ class GroupNotesRepo(BossScopedRepo):
                 boss_id, provider, chat_id,
             )
 
+    async def get_last_extracted(self, provider: str, chat_id: str) -> int:
+        """Cursor cho knowledge write-pipeline (tách khỏi last_seen của note)."""
+        async with self.pool.acquire() as c:
+            v = await c.fetchval(
+                "SELECT last_extracted_message_id FROM group_notes "
+                "WHERE boss_id=$1 AND provider=$2 AND chat_id=$3",
+                self.ctx.boss_id, provider, chat_id,
+            )
+        return int(v) if v else 0
+
+    async def set_last_extracted(
+        self, provider: str, chat_id: str, message_id: int
+    ) -> None:
+        async with self.pool.acquire() as c:
+            await c.execute(
+                "UPDATE group_notes SET last_extracted_message_id=$4 "
+                "WHERE boss_id=$1 AND provider=$2 AND chat_id=$3",
+                self.ctx.boss_id, provider, chat_id, message_id,
+            )
+
     async def update_after_note_rebuild(
         self,
         group_note_id: int,

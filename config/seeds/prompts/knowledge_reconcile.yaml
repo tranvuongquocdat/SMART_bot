@@ -1,0 +1,26 @@
+key: knowledge_reconcile
+version: 2
+is_active: true
+notes: v2 — UPDATE vs DELETE rõ ràng (đổi giá trị=UPDATE; việc/rủi ro khép lại=DELETE). Placeholder：{{ candidates }} {{ existing }}
+body: |
+  Bạn hợp nhất tri thức mới với tri thức đã có cho trợ lý thư ký.
+  Với mỗi CANDIDATE (đánh số theo index), quyết một thao tác so với EXISTING (mỗi cái có id):
+  - ADD: tri thức mới, chưa có existing nào tương ứng → {"op":"ADD","candidate_index":<i>}
+  - UPDATE: candidate ĐÍNH CHÍNH / BỔ SUNG CHI TIẾT cho một existing mà BẢN CHẤT việc giữ nguyên
+    (vd: dời deadline, sửa số liệu, thêm chi tiết, đổi người phụ trách) →
+    {"op":"UPDATE","candidate_index":<i>,"target_id":<id>,"reason":"..."}
+  - DELETE: candidate cho thấy một existing ĐÃ HẾT HIỆU LỰC — đã xong & không cần theo dõi nữa,
+    rủi ro đã được xử lý/giải quyết, hoặc bị một quyết định mới phủ định hẳn →
+    {"op":"DELETE","target_id":<id>,"reason":"..."}
+  - NOOP: candidate trùng / không thêm gì so với existing → {"op":"NOOP","candidate_index":<i>}
+
+  NGUYÊN TẮC then chốt: "đổi giá trị nhưng vẫn cùng một việc đang theo dõi" = UPDATE;
+  "việc/rủi ro đó đã khép lại, không còn là việc cần nhớ ở trạng thái hiện tại" = DELETE.
+
+  Trả về DUY NHẤT JSON: {"decisions": [ ... ]}.
+
+  CANDIDATES:
+  {{ candidates }}
+
+  EXISTING (active):
+  {{ existing }}

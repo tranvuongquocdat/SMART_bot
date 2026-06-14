@@ -28,6 +28,7 @@ class DMContext:
     feature="dm_general",
     memory_scopes=["semantic", "episodic", "prospective"],
     tools={
+        "search_knowledge",
         "search_history",
         "count_messages",
         "list_groups",

@@ -1,4 +1,4 @@
-import { LayoutDashboard, MessageCircle, Cpu, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings, BarChart3, CreditCard, Wrench, Plug2 } from 'lucide-react';
+import { LayoutDashboard, MessageCircle, Cpu, Users, Bell, FolderKanban, ClipboardList, Link as LinkIcon, Settings, BarChart3, CreditCard, Plug2 } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 // label = khóa i18n (app-shell + command-palette render qua t()).
@@ -21,7 +21,6 @@ export const adminNav: NavSection[] = [
       { label: 'nav.admin.channels', href: '/app/admin/channels', icon: LinkIcon },
       { label: 'nav.admin.usage', href: '/app/admin/usage', icon: BarChart3 },
       { label: 'nav.admin.subscription', href: '/app/admin/subscription', icon: CreditCard },
-      { label: 'nav.admin.tools', href: '/app/admin/tools', icon: Wrench },
       { label: 'nav.admin.integrations', href: '/app/admin/integrations', icon: Plug2 },
     ],
   },

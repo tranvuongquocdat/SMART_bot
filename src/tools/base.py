@@ -14,6 +14,11 @@ class ToolContext:
     llm: Any  # LLMGateway
     trace_id: str
     span_id: str
+    # Bối cảnh hội thoại hiện tại (để tool scope đúng nơi đang nói — vd
+    # search_knowledge mặc định chỉ tra nhóm hiện tại thay vì mọi nhóm của sếp).
+    chat_id: str | None = None
+    provider: str | None = None
+    chat_type: str | None = None  # "group" | "dm"
 
 
 @dataclass

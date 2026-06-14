@@ -11,12 +11,21 @@ echo "→ Seeding LLM config (models, routes, budgets) …"
 PGPASSWORD=smart psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
 BEGIN;
 
--- Models: smart = gpt-4o (kèm vision), fast = groq llama (nhanh + rẻ)
+-- Models: smart = gpt-5.4-mini (primary cho mọi feature; rẻ + tool-call tốt + 400k ctx),
+--         fast = groq llama (CHỈ làm fallback cross-provider khi OpenAI lỗi).
+-- gpt-4o giữ active để A/B nhưng KHÔNG còn là platform default.
+INSERT INTO models (name, provider, endpoint_kind, base_url, tier, ctx_max,
+                    capabilities, cost_per_1m_input_usd, cost_per_1m_output_usd,
+                    is_platform_default, notes)
+SELECT 'gpt-5.4-mini', 'openai', 'openai_compat', NULL, 'smart', 400000,
+       '["text","vision","tools"]'::jsonb, 0.75, 4.50, TRUE, 'seed_llm.sh — primary'
+WHERE NOT EXISTS (SELECT 1 FROM models WHERE name='gpt-5.4-mini' AND provider='openai');
+
 INSERT INTO models (name, provider, endpoint_kind, base_url, tier, ctx_max,
                     capabilities, cost_per_1m_input_usd, cost_per_1m_output_usd,
                     is_platform_default, notes)
 SELECT 'gpt-4o', 'openai', 'openai_compat', NULL, 'smart', 128000,
-       '["text","vision","tools"]'::jsonb, 2.50, 10.00, TRUE, 'seed_llm.sh'
+       '["text","vision","tools"]'::jsonb, 2.50, 10.00, FALSE, 'seed_llm.sh — A/B, not default'
 WHERE NOT EXISTS (SELECT 1 FROM models WHERE name='gpt-4o' AND provider='openai');
 
 INSERT INTO models (name, provider, endpoint_kind, base_url, tier, ctx_max,
@@ -31,9 +40,11 @@ WHERE NOT EXISTS (SELECT 1 FROM models WHERE name='llama-3.3-70b-versatile' AND 
 INSERT INTO llm_routes (feature, target_tier, fallback_chain, weight, notes)
 SELECT v.feature, v.tier, v.fb::jsonb, 100, 'seed_llm.sh'
 FROM (VALUES
-  ('dm_general',     'smart', '["fast"]'),
-  ('note_update',    'fast',  '["smart"]'),
-  ('qa_with_search', 'smart', '["fast"]')
+  ('dm_general',          'smart', '["fast"]'),
+  ('note_update',         'smart', '["fast"]'),
+  ('qa_with_search',      'smart', '["fast"]'),
+  ('knowledge_extract',   'smart', '["fast"]'),
+  ('knowledge_reconcile', 'smart', '["fast"]')
 ) AS v(feature, tier, fb)
 WHERE NOT EXISTS (SELECT 1 FROM llm_routes r WHERE r.feature = v.feature);
 
@@ -41,9 +52,11 @@ WHERE NOT EXISTS (SELECT 1 FROM llm_routes r WHERE r.feature = v.feature);
 INSERT INTO feature_budgets (feature, max_input_tokens, max_output_tokens, trim_policy_json)
 SELECT v.feature, v.tin, v.tout, '{}'::jsonb
 FROM (VALUES
-  ('dm_general',     12000, 1000),
-  ('note_update',    16000, 2000),
-  ('qa_with_search', 16000, 1500)
+  ('dm_general',          12000, 1000),
+  ('note_update',         16000, 2000),
+  ('qa_with_search',      16000, 1500),
+  ('knowledge_extract',   16000, 2000),
+  ('knowledge_reconcile', 16000, 1500)
 ) AS v(feature, tin, tout)
 ON CONFLICT (feature) DO NOTHING;
 

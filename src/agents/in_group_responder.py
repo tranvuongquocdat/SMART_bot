@@ -32,6 +32,7 @@ _QUICK_ACK_THRESHOLD = 60  # chars
     feature="qa_with_search",
     memory_scopes=["semantic", "episodic", "prospective"],
     tools={
+        "search_knowledge",
         "search_history",
         "count_messages",
         "read_group_note",

@@ -1,10 +1,12 @@
+import { useState } from 'react';
 import { useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Blocks, Plug2, Trash2 } from 'lucide-react';
+import { Blocks, ChevronRight, Plug2, Trash2, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { ApiError } from '@/lib/api';
 import { useT } from '@/lib/i18n';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { toolsQuery } from '../tools/api';
 import {
   integrationsQuery, addMcpServer, toggleMcpServer, deleteMcpServer, togglePlugin,
 } from './api';
@@ -32,6 +34,8 @@ function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
 export default function IntegrationsPage() {
   const t = useT();
   const { data } = useSuspenseQuery(integrationsQuery());
+  const { data: coreTools } = useSuspenseQuery(toolsQuery());
+  const [showCore, setShowCore] = useState(false);
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: ['admin', 'integrations'] });
   const errDetail = (e: unknown): string =>
@@ -167,6 +171,44 @@ export default function IntegrationsPage() {
                   disabled={plugMut.isPending}
                   onClick={() => plugMut.mutate(p.plugin_id)}
                 />
+              </div>
+            ))}
+          </div>
+        )}
+      </PageSection>
+
+      {/* Công cụ lõi — luôn bật, không tắt được, không cap. Ưu tiên thấp:
+          để cuối, thu gọn, read-only; bấm mới hiện đủ. */}
+      <PageSection>
+        <button
+          type="button"
+          onClick={() => setShowCore((v) => !v)}
+          className="flex w-full items-center gap-2 text-left"
+          aria-expanded={showCore}
+        >
+          <ChevronRight
+            className={`h-4 w-4 text-muted-foreground transition-transform ${showCore ? 'rotate-90' : ''}`}
+          />
+          <span className="text-sm font-semibold text-muted-foreground">
+            {t('intg.core.title')}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            · {t('intg.core.count', { n: coreTools.length })}
+          </span>
+        </button>
+        <p className="mt-1 pl-6 text-xs text-muted-foreground">{t('intg.core.hint')}</p>
+        {showCore && (
+          <div className="mt-3 divide-y rounded-xl border">
+            {coreTools.map((tool) => (
+              <div key={tool.name} className="flex items-center gap-3 px-4 py-3">
+                <Wrench className="h-4 w-4 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">{tool.name}</p>
+                  <p className="text-xs text-muted-foreground truncate">{tool.description}</p>
+                </div>
+                <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground">
+                  {t('intg.core.alwaysOn')}
+                </span>
               </div>
             ))}
           </div>

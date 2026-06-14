@@ -37,7 +37,6 @@ export function adminRoutes(qc: QueryClient): RouteObject {
       { path: 'channels', lazy: async () => ({ Component: (await import('./features/channels/page')).default }), handle: { breadcrumb: 'nav.admin.channels' } },
       { path: 'usage', lazy: async () => ({ Component: (await import('./features/usage/page')).default }), handle: { breadcrumb: 'nav.admin.usage' } },
       { path: 'subscription', lazy: async () => ({ Component: (await import('./features/subscription/page')).default }), handle: { breadcrumb: 'nav.admin.subscription' } },
-      { path: 'tools', lazy: async () => ({ Component: (await import('./features/tools/page')).default }), handle: { breadcrumb: 'nav.admin.tools' } },
       { path: 'integrations', lazy: async () => ({ Component: (await import('./features/integrations/page')).default }), handle: { breadcrumb: 'nav.admin.integrations' } },
       { path: 'settings', lazy: async () => ({ Component: (await import('./features/settings/page')).default }), handle: { breadcrumb: 'nav.admin.settings' } },
     ],

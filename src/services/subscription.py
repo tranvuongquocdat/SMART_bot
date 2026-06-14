@@ -83,10 +83,6 @@ async def check_over_limit(pool: Any, boss_id: int) -> OverLimitItems:
             "SELECT COUNT(*) FROM group_notes WHERE boss_id=$1 AND is_active=TRUE",
             boss_id,
         )
-        active_tools = await c.fetchval(
-            "SELECT COUNT(*) FROM boss_active_tools WHERE boss_id=$1",
-            boss_id,
-        )
         active_channels = await c.fetchval(
             """
             SELECT COUNT(*) FROM bot_account_assignments
@@ -106,7 +102,9 @@ async def check_over_limit(pool: Any, boss_id: int) -> OverLimitItems:
 
     return OverLimitItems(
         groups=_over(active_groups, limits.max_active_groups),
-        tools=_over(active_tools, limits.max_active_tools),
+        # Core tools không bị cap (luôn bật) → không bao giờ "over". Cap nằm ở
+        # integration: mcp (mcp_slots) bên dưới. active_tools chỉ còn để hiển thị.
+        tools=0,
         channels=_over(active_channels, limits.max_active_channels),
         mcp=_over(active_mcp, limits.mcp_slots),
     )
@@ -206,30 +204,13 @@ async def _provision_new_boss_on_conn(c: Any, boss_id: int) -> None:
         """,
         boss_id,
     )
+    # Core tools (mọi tool trong _REGISTRY) LUÔN bật cho mọi boss — không cap,
+    # không tắt được. Cap chỉ dành cho integration (mcp_slots), không phải tool lõi.
+    # boss_active_tools giờ chỉ để hiển thị (runtime đã coi core là always-on);
+    # vẫn seed đầy đủ để bảng nhất quán.
     names = list(_REGISTRY.keys())
     if not names:
         return
-    row = await c.fetchrow(
-        """
-        SELECT COALESCE(p.limits_json, '{}'::jsonb) AS plan_limits,
-               u.plan_overrides_json
-        FROM users u
-        LEFT JOIN plans p ON p.id = u.plan_id
-        WHERE u.id = $1
-        """,
-        boss_id,
-    )
-    if row:
-        plan_limits = row["plan_limits"]
-        plan_overrides = row["plan_overrides_json"]
-        # asyncpg returns JSONB as str unless a codec is registered
-        if isinstance(plan_limits, str):
-            plan_limits = json.loads(plan_limits)
-        if isinstance(plan_overrides, str):
-            plan_overrides = json.loads(plan_overrides)
-        cap = {**plan_limits, **plan_overrides}.get("max_active_tools")
-        if cap is not None:
-            names = names[: int(cap)]
     await c.executemany(
         """
         INSERT INTO boss_active_tools (boss_id, tool_name)
