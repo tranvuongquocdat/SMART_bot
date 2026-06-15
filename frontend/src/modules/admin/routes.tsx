@@ -34,6 +34,7 @@ export function adminRoutes(qc: QueryClient): RouteObject {
       { path: 'reminders', lazy: async () => ({ Component: (await import('./features/reminders/page')).default }), handle: { breadcrumb: 'nav.admin.reminders' } },
       { path: 'projects', lazy: async () => ({ Component: (await import('./features/projects/page')).default }), handle: { breadcrumb: 'nav.admin.projects' } },
       { path: 'action-items', lazy: async () => ({ Component: (await import('./features/action-items/page')).default }), handle: { breadcrumb: 'nav.admin.actionItems' } },
+      { path: 'performance', lazy: async () => ({ Component: (await import('./features/performance/page')).default }), handle: { breadcrumb: 'nav.admin.performance' } },
       { path: 'channels', lazy: async () => ({ Component: (await import('./features/channels/page')).default }), handle: { breadcrumb: 'nav.admin.channels' } },
       { path: 'usage', lazy: async () => ({ Component: (await import('./features/usage/page')).default }), handle: { breadcrumb: 'nav.admin.usage' } },
       { path: 'subscription', lazy: async () => ({ Component: (await import('./features/subscription/page')).default }), handle: { breadcrumb: 'nav.admin.subscription' } },
