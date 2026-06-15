@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/lib/i18n';
 
 function EditBudgetDialog({
   budget,
@@ -33,6 +34,7 @@ function EditBudgetDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({
     max_input_tokens: budget.max_input_tokens,
@@ -50,10 +52,10 @@ function EditBudgetDialog({
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'feature-budgets'] });
-      toast.success('Đã cập nhật budget');
+      toast.success(t('sa.models.budgetUpdated'));
       onOpenChange(false);
     },
-    onError: () => toast.error('Cập nhật budget thất bại'),
+    onError: () => toast.error(t('sa.models.budgetUpdateError')),
   });
 
   const set = (k: keyof typeof form, v: unknown) =>
@@ -63,7 +65,7 @@ function EditBudgetDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Sửa budget — {budget.feature}</DialogTitle>
+          <DialogTitle>{t('sa.models.budgetEditTitle', { feature: budget.feature })}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3 mt-2">
           <div className="grid grid-cols-2 gap-3">
@@ -106,13 +108,13 @@ function EditBudgetDialog({
             <Input
               value={form.cache_prefix_hint}
               onChange={e => set('cache_prefix_hint', e.target.value)}
-              placeholder="Tùy chọn"
+              placeholder={t('sa.models.optional')}
             />
           </div>
         </div>
         <DialogFooter className="mt-4">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Huỷ</Button>
-          <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>Lưu</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('sa.common.cancel')}</Button>
+          <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>{t('sa.common.save')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -120,6 +122,7 @@ function EditBudgetDialog({
 }
 
 export function BudgetsTab() {
+  const t = useT();
   const budgets = useQuery(featureBudgetsQuery);
   const [editTarget, setEditTarget] = useState<FeatureBudget | null>(null);
 
@@ -189,12 +192,12 @@ export function BudgetsTab() {
       <div className="mb-3.5">
         <h2 className="text-[14.5px] font-semibold tracking-tight">Feature budgets</h2>
         <p className="text-[12.5px] text-muted-foreground mt-0.5">
-          Giới hạn token cho từng feature, chiến lược nén context.
+          {t('sa.models.budgetsDesc')}
         </p>
       </div>
       {budgets.data?.length === 0 && !budgets.isLoading ? (
         <div className="rounded-[10px] border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          Chưa có feature budgets nào. Seed dữ liệu hoặc thêm qua Jinja2 admin.
+          {t('sa.models.budgetsEmpty')}
         </div>
       ) : (
         <DataTable columns={columns} data={budgets.data ?? []} />

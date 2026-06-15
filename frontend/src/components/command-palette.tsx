@@ -11,6 +11,7 @@ import {
   CommandSeparator,
 } from '@/components/ui/command';
 import type { NavSection } from '@/components/app-shell';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   open: boolean;
@@ -21,6 +22,7 @@ type Props = {
 export function CommandPalette({ open, onOpenChange, nav }: Props) {
   const navigate = useNavigate();
   const { theme, setTheme } = useTheme();
+  const t = useT();
 
   const go = (href: string) => {
     onOpenChange(false);
@@ -29,21 +31,21 @@ export function CommandPalette({ open, onOpenChange, nav }: Props) {
 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange}>
-      <CommandInput placeholder="Tìm trang, hành động…" />
+      <CommandInput placeholder={t('cmd.placeholder')} />
       <CommandList>
-        <CommandEmpty>Không tìm thấy.</CommandEmpty>
+        <CommandEmpty>{t('cmd.empty')}</CommandEmpty>
         {nav.map((section) => (
-          <CommandGroup key={section.label} heading={section.label}>
+          <CommandGroup key={section.label} heading={t(section.label)}>
             {section.items.map((item) => (
               <CommandItem key={item.href} onSelect={() => go(item.href)}>
                 <item.icon className="h-4 w-4" />
-                <span>{item.label}</span>
+                <span>{t(item.label)}</span>
               </CommandItem>
             ))}
           </CommandGroup>
         ))}
         <CommandSeparator />
-        <CommandGroup heading="Hành động">
+        <CommandGroup heading={t('cmd.actions')}>
           <CommandItem
             onSelect={() => {
               setTheme(theme === 'light' ? 'dark' : 'light');
@@ -51,7 +53,7 @@ export function CommandPalette({ open, onOpenChange, nav }: Props) {
             }}
           >
             <SunMoon className="h-4 w-4" />
-            <span>Đổi chế độ sáng/tối</span>
+            <span>{t('cmd.toggleTheme')}</span>
           </CommandItem>
           <CommandItem
             onSelect={() => {
@@ -60,7 +62,7 @@ export function CommandPalette({ open, onOpenChange, nav }: Props) {
             }}
           >
             <LogOut className="h-4 w-4" />
-            <span>Đăng xuất</span>
+            <span>{t('cmd.logout')}</span>
           </CommandItem>
         </CommandGroup>
       </CommandList>

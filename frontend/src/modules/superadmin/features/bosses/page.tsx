@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { AnimatePresence } from 'framer-motion';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, MoreHorizontal, UserCog } from 'lucide-react';
 import { toast } from 'sonner';
@@ -22,8 +23,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { meQuery } from '@/lib/auth';
+import { useI18n } from '@/lib/i18n';
 import { bossesQuery, deleteBoss } from './api';
 import type { Boss } from './api';
+import { BossDrawer } from './boss-drawer';
 import { CreateDialog } from './create-dialog';
 import { EditDialog } from './edit-dialog';
 
@@ -58,6 +61,7 @@ function DeleteDialog({
   boss: Boss | null;
   onClose: () => void;
 }) {
+  const { t } = useI18n();
   const qc = useQueryClient();
   const open = boss !== null;
 
@@ -65,32 +69,32 @@ function DeleteDialog({
     mutationFn: () => deleteBoss(boss!.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bosses'] });
-      toast.success('Đã xoá boss');
+      toast.success(t('sa.boss.deleted'));
       onClose();
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('sa.common.deleteError')),
   });
 
   return (
     <Dialog open={open} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Xoá boss</DialogTitle>
+          <DialogTitle>{t('sa.boss.deleteTitle')}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground py-2">
-          Bạn chắc chắn muốn xoá{' '}
-          <strong>{boss?.name ?? boss?.email}</strong>? Hành động này không thể hoàn tác.
+          {t('sa.boss.deleteConfirmPre')}
+          <strong>{boss?.name ?? boss?.email}</strong>{t('sa.boss.deleteConfirmPost')}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             variant="destructive"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang xoá...' : 'Xoá'}
+            {mutation.isPending ? t('sa.common.deleting') : t('sa.common.delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -103,18 +107,21 @@ function DeleteDialog({
 // ---------------------------------------------------------------------------
 
 export default function BossesPage() {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const bosses = useQuery(bossesQuery);
   const me = useQuery(meQuery);
 
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<Boss | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Boss | null>(null);
+  const [detailTarget, setDetailTarget] = useState<Boss | null>(null);
 
   const meId = me.data?.id;
 
   const columns: ColumnDef<Boss>[] = [
     {
-      header: 'Tên / Email',
+      header: t('sa.boss.colNameEmail'),
       accessorKey: 'name',
       cell: ({ row }) => (
         <div>
@@ -128,35 +135,53 @@ export default function BossesPage() {
       ),
     },
     {
-      header: 'Vai trò',
+      header: t('sa.boss.colRole'),
       accessorKey: 'role',
       cell: ({ row }) => <RoleChip role={row.original.role} />,
     },
     {
-      header: 'Timezone',
-      accessorKey: 'tz',
+      header: t('sa.boss.colPlan'),
+      accessorKey: 'plan_label',
       cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground">{row.original.tz}</span>
+        <div>
+          <span className="text-sm">{row.original.plan_label ?? '—'}</span>
+          <span className="block text-[11px] text-muted-foreground capitalize">
+            {row.original.subscription_status}
+          </span>
+        </div>
       ),
     },
     {
-      header: 'Subscription',
-      accessorKey: 'subscription_status',
+      header: t('sa.boss.colExpiry'),
+      accessorKey: 'subscription_expiry',
+      cell: ({ row }) => {
+        const d = row.original.subscription_expiry;
+        if (!d) return <span className="text-sm text-muted-foreground">∞</span>;
+        const expired = new Date(d) < new Date();
+        return (
+          <span className={`text-sm ${expired ? 'text-destructive' : 'text-muted-foreground'}`}>
+            {new Date(d).toLocaleDateString(locale)}
+          </span>
+        );
+      },
+    },
+    {
+      header: t('sa.boss.colUsing'),
       cell: ({ row }) => (
-        <span className="text-sm text-muted-foreground capitalize">
-          {row.original.subscription_status}
+        <span className="text-sm text-muted-foreground tabular-nums">
+          {t('sa.boss.usingValue', { g: row.original.active_groups, c: row.original.active_channels })}
         </span>
       ),
     },
     {
-      header: 'Tạo lúc',
-      accessorKey: 'created_at',
+      header: t('sa.boss.colLastActive'),
+      accessorKey: 'last_message_at',
       cell: ({ row }) => {
-        const d = row.original.created_at;
-        if (!d) return <span className="text-muted-foreground">—</span>;
+        const d = row.original.last_message_at;
+        if (!d) return <span className="text-sm text-muted-foreground">—</span>;
         return (
           <span className="text-sm text-muted-foreground">
-            {new Date(d).toLocaleDateString('vi-VN')}
+            {new Date(d).toLocaleDateString(locale)}
           </span>
         );
       },
@@ -167,7 +192,7 @@ export default function BossesPage() {
       cell: ({ row }) => {
         const isSelf = row.original.id === meId;
         return (
-          <div className="text-right">
+          <div className="text-right" onClick={(e) => e.stopPropagation()}>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-[26px] w-[26px]">
@@ -175,15 +200,18 @@ export default function BossesPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => setDetailTarget(row.original)}>
+                  {t('sa.common.detail')}
+                </DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
-                  Sửa
+                  {t('sa.common.edit')}
                 </DropdownMenuItem>
                 {!isSelf && (
                   <DropdownMenuItem
                     className="text-destructive focus:text-destructive"
                     onClick={() => setDeleteTarget(row.original)}
                   >
-                    Xoá
+                    {t('sa.common.delete')}
                   </DropdownMenuItem>
                 )}
               </DropdownMenuContent>
@@ -197,12 +225,12 @@ export default function BossesPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Boss"
-        subtitle="Tài khoản người dùng có quyền boss/super-admin trong hệ thống."
+        title={t('nav.sa.bosses')}
+        subtitle={t('sa.boss.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Thêm boss
+            {t('sa.boss.addBtn')}
           </Button>
         }
       />
@@ -214,12 +242,13 @@ export default function BossesPage() {
           <DataTable
             columns={columns}
             data={bosses.data ?? []}
+            onRowClick={setDetailTarget}
             mobileLabel={col => (typeof col.header === 'string' ? col.header : '')}
             empty={
               <EmptyState
                 icon={UserCog}
-                title="Chưa có boss nào"
-                action={{ label: '+ Thêm boss', onClick: () => setCreateOpen(true) }}
+                title={t('sa.boss.empty')}
+                action={{ label: t('sa.boss.emptyAction'), onClick: () => setCreateOpen(true) }}
               />
             }
           />
@@ -229,6 +258,15 @@ export default function BossesPage() {
       <CreateDialog open={createOpen} onOpenChange={setCreateOpen} />
       <EditDialog boss={editTarget} onOpenChange={v => !v && setEditTarget(null)} />
       <DeleteDialog boss={deleteTarget} onClose={() => setDeleteTarget(null)} />
+      <AnimatePresence>
+        {detailTarget && (
+          <BossDrawer
+            key={detailTarget.id}
+            boss={detailTarget}
+            onClose={() => setDetailTarget(null)}
+          />
+        )}
+      </AnimatePresence>
     </PageWrap>
   );
 }

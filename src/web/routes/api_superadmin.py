@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from src.repositories.base import BossContext
@@ -459,20 +459,25 @@ async def create_bot_account(
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> dict:
-    async with db.acquire() as c:
-        new_id = await c.fetchval(
-            """
-            INSERT INTO bot_accounts
-              (provider, provider_user_id, display_name, account_kind, ownership, status)
-            VALUES ($1, $2, $3, $4, $5, 'active')
-            RETURNING id
-            """,
-            body.provider,
-            body.handle,
-            body.label,
-            body.account_kind,
-            body.ownership,
-        )
+    try:
+        async with db.acquire() as c:
+            new_id = await c.fetchval(
+                """
+                INSERT INTO bot_accounts
+                  (provider, provider_user_id, display_name, account_kind, ownership, status)
+                VALUES ($1, $2, $3, $4, $5, 'active')
+                RETURNING id
+                """,
+                body.provider,
+                body.handle,
+                body.label,
+                body.account_kind,
+                body.ownership,
+            )
+    except asyncpg.UniqueViolationError as e:
+        if "uq_boss_owned_one_per_provider" in str(e):
+            raise HTTPException(409, "This boss already has a bot account for that platform")
+        raise HTTPException(409, "Account (provider + handle) already exists")
     return {"id": new_id}
 
 
@@ -484,6 +489,7 @@ class PatchBotAccountBody(BaseModel):
     label: Optional[str] = None
     ownership: Optional[str] = None
     account_kind: Optional[str] = None
+    status: Optional[str] = None  # superadmin chỉ bật/tắt: active | paused
 
 
 @router.patch(
@@ -493,11 +499,19 @@ class PatchBotAccountBody(BaseModel):
 async def patch_bot_account(
     account_id: int,
     body: PatchBotAccountBody,
+    request: Request,
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> dict:
+    # Chỉ cho superadmin bật/tắt thủ công giữa active/paused; banned/logged_out
+    # là trạng thái hệ thống tự đặt, không cho set tay.
+    if body.status is not None and body.status not in ("active", "paused"):
+        raise HTTPException(status_code=422, detail="status accepts only active | paused")
+
     async with db.acquire() as c:
-        existing = await c.fetchrow("SELECT id FROM bot_accounts WHERE id = $1", account_id)
+        existing = await c.fetchrow(
+            "SELECT * FROM bot_accounts WHERE id = $1", account_id
+        )
         if not existing:
             raise HTTPException(status_code=404, detail="bot account not found")
         await c.execute(
@@ -506,6 +520,7 @@ async def patch_bot_account(
             SET display_name  = COALESCE($2, display_name),
                 ownership     = COALESCE($3, ownership),
                 account_kind  = COALESCE($4, account_kind),
+                status        = COALESCE($5, status),
                 updated_at    = NOW()
             WHERE id = $1
             """,
@@ -513,7 +528,27 @@ async def patch_bot_account(
             body.label,
             body.ownership,
             body.account_kind,
+            body.status,
         )
+
+    # Bật/tắt listener tương ứng (best-effort).
+    if body.status is not None and body.status != existing["status"]:
+        from src.repositories.bot_accounts import _row_to_bot_account
+
+        registry = getattr(request.app.state, "channel_registry", None)
+        adapters = {a.provider: a for a in registry.adapters()} if registry else {}
+        adapter = adapters.get(existing["provider"])
+        if adapter is not None:
+            async with db.acquire() as c:
+                row = await c.fetchrow("SELECT * FROM bot_accounts WHERE id=$1", account_id)
+            acc = _row_to_bot_account(row)
+            try:
+                if body.status == "paused":
+                    await adapter.stop_inbound(acc)
+                elif body.status == "active" and row["credentials_blob_enc"]:
+                    await adapter.start_inbound(acc)
+            except Exception:
+                pass
     return {"id": account_id, "ok": True}
 
 
@@ -550,10 +585,20 @@ async def list_bosses(
     async with db.acquire() as c:
         rows = await c.fetch(
             """
-            SELECT id, email, name, role, subscription_status, tz, created_at
-            FROM users
-            WHERE role IN ('boss', 'superadmin')
-            ORDER BY created_at DESC
+            SELECT u.id, u.email, u.name, u.role, u.subscription_status,
+                   u.subscription_expiry, u.tz, u.created_at,
+                   p.label AS plan_label, p.name AS plan_name,
+                   (SELECT COUNT(*) FROM group_notes g
+                     WHERE g.boss_id=u.id AND g.is_active=TRUE)        AS active_groups,
+                   (SELECT COUNT(*) FROM bot_account_assignments baa
+                     WHERE baa.boss_id=u.id AND baa.status='active'
+                       AND baa.provider <> 'web')                      AS active_channels,
+                   (SELECT MAX(m.ts) FROM messages m
+                     WHERE m.boss_id=u.id)                             AS last_message_at
+            FROM users u
+            LEFT JOIN plans p ON p.id = u.plan_id
+            WHERE u.role IN ('boss', 'superadmin')
+            ORDER BY u.created_at DESC
             """
         )
     return [
@@ -563,6 +608,16 @@ async def list_bosses(
             "name": r["name"],
             "role": r["role"],
             "subscription_status": r["subscription_status"],
+            "subscription_expiry": r["subscription_expiry"].isoformat()
+            if r["subscription_expiry"]
+            else None,
+            "plan_label": r["plan_label"],
+            "plan_name": r["plan_name"],
+            "active_groups": int(r["active_groups"]),
+            "active_channels": int(r["active_channels"]),
+            "last_message_at": r["last_message_at"].isoformat()
+            if r["last_message_at"]
+            else None,
             "tz": r["tz"],
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
         }
@@ -606,6 +661,10 @@ async def create_boss(
             body.name,
             body.role,
         )
+        if body.role == "boss":
+            from src.services.subscription import provision_new_boss
+
+            await provision_new_boss(c, new_id)
     return {"id": new_id}
 
 
@@ -676,13 +735,14 @@ async def delete_boss(
 
 # ---------------------------------------------------------------------------
 # GET /bot-accounts/:id/messages — recent messages for a bot account
-# Note: No dedicated per-account messages table exists yet; returns empty list.
+# Messages map to accounts qua bot_account_assignments (boss_id, provider) —
+# tin nhắn cũ trước khi đổi acc sẽ tính cho acc hiện tại (chấp nhận cho v1).
 # ---------------------------------------------------------------------------
 
 @router.get("/bot-accounts/{account_id}/messages")
 async def list_bot_account_messages(
     account_id: int,
-    limit: int = 50,
+    limit: int = Query(50, le=200),
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> list[dict]:
@@ -690,9 +750,378 @@ async def list_bot_account_messages(
         existing = await c.fetchrow("SELECT id FROM bot_accounts WHERE id = $1", account_id)
         if not existing:
             raise HTTPException(status_code=404, detail="bot account not found")
-        # No per-account messages table exists yet; return empty list.
-        # TODO(SP3+): query chat_messages or inbound_events filtered by bot_account_id.
-    return []
+        rows = await c.fetch(
+            """
+            SELECT m.id, m.boss_id, u.email AS boss_email,
+                   m.chat_id, m.chat_type, m.sender_name, m.text, m.ts
+            FROM messages m
+            JOIN bot_account_assignments baa
+              ON baa.boss_id = m.boss_id AND baa.provider = m.provider
+            JOIN users u ON u.id = m.boss_id
+            WHERE baa.bot_account_id = $1
+            ORDER BY m.ts DESC
+            LIMIT $2
+            """,
+            account_id,
+            limit,
+        )
+    return [
+        {
+            "id": r["id"],
+            "boss_id": r["boss_id"],
+            "boss_email": r["boss_email"],
+            "chat_id": r["chat_id"],
+            "chat_type": r["chat_type"],
+            "sender_name": r["sender_name"],
+            "text": r["text"],
+            "ts": r["ts"].isoformat(),
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Bot account: chi tiết, đăng nhập QR (Zalo), thống kê tin nhắn theo ngày
+#   GET  /bot-accounts/{id}/detail
+#   POST /bot-accounts/{id}/qr-login
+#   GET  /bot-accounts/qr-login/{login_id}
+#   GET  /bot-accounts/{id}/stats/daily?days=30
+#
+# Tin nhắn map về account qua bot_account_assignments (boss_id, provider) —
+# tin cũ trước khi đổi acc tính cho acc hiện tại (chấp nhận cho v1).
+# ---------------------------------------------------------------------------
+
+
+@router.get("/bot-accounts/{account_id}/detail")
+async def bot_account_detail(
+    account_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        acc = await c.fetchrow(
+            """
+            SELECT id, provider, provider_user_id, display_name, account_kind,
+                   ownership, owner_boss_id, status, status_reason,
+                   max_assigned_bosses, last_seen_at,
+                   msgs_received_total, msgs_sent_total, notes, created_at,
+                   (credentials_blob_enc IS NOT NULL) AS has_credentials
+            FROM bot_accounts WHERE id=$1
+            """,
+            account_id,
+        )
+        if not acc:
+            raise HTTPException(404, "bot account not found")
+        assignments = await c.fetch(
+            """
+            SELECT baa.boss_id, baa.status, baa.assigned_at,
+                   u.email AS boss_email, u.name AS boss_name
+            FROM bot_account_assignments baa
+            JOIN users u ON u.id = baa.boss_id
+            WHERE baa.bot_account_id = $1
+            ORDER BY baa.assigned_at DESC
+            """,
+            account_id,
+        )
+    d = dict(acc)
+    for f in ("last_seen_at", "created_at"):
+        if d.get(f):
+            d[f] = d[f].isoformat()
+    d["assignments"] = [
+        {
+            "boss_id": a["boss_id"],
+            "boss_email": a["boss_email"],
+            "boss_name": a["boss_name"],
+            "status": a["status"],
+            "assigned_at": a["assigned_at"].isoformat() if a["assigned_at"] else None,
+        }
+        for a in assignments
+    ]
+    return d
+
+
+@router.post("/bot-accounts/{account_id}/qr-login", dependencies=[Depends(verify_json_csrf)])
+async def bot_account_qr_login_start(
+    account_id: int,
+    request: Request,
+    db: asyncpg.Pool = Depends(get_db),
+    ctx: BossContext = Depends(require_superadmin),
+) -> dict:
+    """Mở phiên QR để đăng nhập acc Zalo cho bot account này (login mới / re-login)."""
+    async with db.acquire() as c:
+        provider = await c.fetchval(
+            "SELECT provider FROM bot_accounts WHERE id=$1", account_id
+        )
+    if provider is None:
+        raise HTTPException(404, "bot account not found")
+    if provider != "zalo":
+        raise HTTPException(422, "Only the Zalo channel uses QR login")
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    if manager is None:
+        raise HTTPException(503, "Zalo QR login is not ready")
+    sess = await manager.start_for_account(account_id, actor_user_id=ctx.boss_id)
+    return {"login_id": sess.login_id, "status": sess.status}
+
+
+@router.get("/bot-accounts/qr-login/{login_id}")
+async def bot_account_qr_login_status(
+    login_id: str,
+    request: Request,
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    sess = manager.get_by_login_id(login_id) if manager else None
+    # Chỉ trả phiên do superadmin mở (mode account_login) — không lộ phiên của boss
+    if sess is None or sess.target_account_id is None:
+        raise HTTPException(404, "Login session does not exist")
+    return {
+        "status": sess.status,
+        "qr_image_b64": sess.qr_image_b64 if sess.status == "qr" else None,
+        "display_name": sess.display_name,
+        "error": sess.error,
+        "bot_account_id": sess.bot_account_id,
+        "expires_in_s": sess.expires_in_s,
+    }
+
+
+@router.get("/bot-accounts/{account_id}/stats/daily")
+async def bot_account_daily_stats(
+    account_id: int,
+    days: int = Query(30, ge=1, le=365),
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    """Số tin nhận/gửi theo ngày (đủ ngày, kể cả ngày 0 tin), mới nhất trước."""
+    async with db.acquire() as c:
+        existing = await c.fetchval(
+            "SELECT 1 FROM bot_accounts WHERE id=$1", account_id
+        )
+        if not existing:
+            raise HTTPException(404, "bot account not found")
+        rows = await c.fetch(
+            """
+            WITH days AS (
+              SELECT (CURRENT_DATE - offs) AS day
+              FROM generate_series(0, $2 - 1) AS offs
+            ),
+            recv AS (
+              SELECT m.ts::date AS day, COUNT(*) AS n
+              FROM messages m
+              JOIN bot_account_assignments baa
+                ON baa.boss_id = m.boss_id AND baa.provider = m.provider
+              WHERE baa.bot_account_id = $1
+                AND m.ts >= CURRENT_DATE - ($2 - 1)
+              GROUP BY 1
+            ),
+            sent AS (
+              SELECT o.sent_at::date AS day, COUNT(*) AS n
+              FROM outbound_messages o
+              JOIN bot_account_assignments baa
+                ON baa.boss_id = o.boss_id AND baa.provider = o.provider
+              WHERE baa.bot_account_id = $1
+                AND o.status <> 'failed'
+                AND o.sent_at >= CURRENT_DATE - ($2 - 1)
+              GROUP BY 1
+            )
+            SELECT d.day,
+                   COALESCE(r.n, 0) AS received,
+                   COALESCE(s.n, 0) AS sent
+            FROM days d
+            LEFT JOIN recv r ON r.day = d.day
+            LEFT JOIN sent s ON s.day = d.day
+            ORDER BY d.day DESC
+            """,
+            account_id,
+            days,
+        )
+    return [
+        {
+            "date": r["day"].isoformat(),
+            "received": int(r["received"]),
+            "sent": int(r["sent"]),
+        }
+        for r in rows
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Proxy pool — IP dân cư gán per-boss
+#   GET/POST /proxies   PATCH/DELETE /proxies/{id}   POST /proxies/{id}/test
+# ---------------------------------------------------------------------------
+
+
+@router.get("/proxies")
+async def list_proxies_sa(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    from src.services import proxy_pool
+
+    return await proxy_pool.list_proxies(db)
+
+
+@router.post("/proxies", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_proxy_sa(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import proxy_pool
+
+    if not payload.get("url"):
+        raise HTTPException(422, "url required")
+    try:
+        new_id = await proxy_pool.create_proxy(
+            db,
+            label=payload.get("label", ""),
+            url=payload["url"],
+            region=payload.get("region"),
+            max_bosses=payload.get("max_bosses", 1),
+            notes=payload.get("notes"),
+        )
+    except proxy_pool.ProxyError as e:
+        raise HTTPException(e.status, e.message)
+    return {"id": new_id}
+
+
+@router.patch("/proxies/{proxy_id}", dependencies=[Depends(verify_json_csrf)])
+async def update_proxy_sa(
+    proxy_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import proxy_pool
+
+    try:
+        await proxy_pool.update_proxy(db, proxy_id, payload)
+    except proxy_pool.ProxyError as e:
+        raise HTTPException(e.status, e.message)
+    return {"updated": 1}
+
+
+@router.delete("/proxies/{proxy_id}", dependencies=[Depends(verify_json_csrf)])
+async def delete_proxy_sa(
+    proxy_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import proxy_pool
+
+    try:
+        await proxy_pool.delete_proxy(db, proxy_id)
+    except proxy_pool.ProxyError as e:
+        raise HTTPException(e.status, e.message)
+    return {"deleted": 1}
+
+
+@router.post("/proxies/{proxy_id}/test", dependencies=[Depends(verify_json_csrf)])
+async def test_proxy_sa(
+    proxy_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    """Gọi thử qua proxy lấy IP công khai để kiểm tra còn sống."""
+    from src.services import proxy_pool
+
+    async with db.acquire() as c:
+        blob = await c.fetchval("SELECT url_enc FROM proxies WHERE id=$1", proxy_id)
+    if blob is None:
+        raise HTTPException(404, "proxy not found")
+    url = proxy_pool.decrypt_url(blob)
+    if not url:
+        raise HTTPException(500, "could not decrypt proxy url")
+    return await proxy_pool.test_proxy(url)
+
+
+# ---------------------------------------------------------------------------
+# GET /usage — platform-wide token usage analytics
+# ---------------------------------------------------------------------------
+
+@router.get("/usage")
+async def platform_usage(
+    range: str = Query("30d", pattern=r"^\d+d$"),
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    days = max(1, min(int(range.rstrip("d")), 365))
+    async with db.acquire() as c:
+        totals = await c.fetchrow(
+            """
+            SELECT COALESCE(SUM(tokens_in), 0)::bigint              AS tokens_in,
+                   COALESCE(SUM(tokens_out), 0)::bigint             AS tokens_out,
+                   COALESCE(SUM(tokens_in + tokens_out), 0)::bigint AS tokens,
+                   COUNT(*)::bigint                                 AS calls,
+                   COALESCE(SUM(cost_usd), 0.0)::float              AS cost_usd
+            FROM token_usage
+            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
+            """,
+            str(days),
+        )
+        daily = await c.fetch(
+            """
+            SELECT d::date AS day,
+                   COALESCE(SUM(t.tokens_in + t.tokens_out), 0)::bigint AS tokens,
+                   COUNT(t.id)::bigint                                  AS calls,
+                   COALESCE(SUM(t.cost_usd), 0.0)::float                AS cost_usd
+            FROM generate_series(
+                   (NOW() AT TIME ZONE 'UTC')::date - ($1::int - 1),
+                   (NOW() AT TIME ZONE 'UTC')::date,
+                   INTERVAL '1 day'
+                 ) d
+            LEFT JOIN token_usage t
+                   ON DATE(t.called_at AT TIME ZONE 'UTC') = d::date
+            GROUP BY d ORDER BY d DESC
+            """,
+            days,
+        )
+        by_boss = await c.fetch(
+            """
+            SELECT t.boss_id, u.email, u.name,
+                   SUM(t.tokens_in + t.tokens_out)::bigint AS tokens,
+                   COUNT(*)::bigint                        AS calls,
+                   SUM(t.cost_usd)::float                  AS cost_usd
+            FROM token_usage t
+            JOIN users u ON u.id = t.boss_id
+            WHERE t.called_at > NOW() - ($1 || ' days')::INTERVAL
+            GROUP BY t.boss_id, u.email, u.name
+            ORDER BY SUM(t.cost_usd) DESC
+            LIMIT 50
+            """,
+            str(days),
+        )
+        by_feature = await c.fetch(
+            """
+            SELECT feature,
+                   SUM(tokens_in + tokens_out)::bigint AS tokens,
+                   COUNT(*)::bigint                    AS calls,
+                   SUM(cost_usd)::float                AS cost_usd
+            FROM token_usage
+            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
+            GROUP BY feature ORDER BY SUM(cost_usd) DESC
+            """,
+            str(days),
+        )
+        by_model = await c.fetch(
+            """
+            SELECT provider, model,
+                   SUM(tokens_in + tokens_out)::bigint AS tokens,
+                   COUNT(*)::bigint                    AS calls,
+                   SUM(cost_usd)::float                AS cost_usd
+            FROM token_usage
+            WHERE called_at > NOW() - ($1 || ' days')::INTERVAL
+            GROUP BY provider, model ORDER BY SUM(cost_usd) DESC NULLS LAST
+            """,
+            str(days),
+        )
+    return {
+        "range_days": days,
+        "totals": dict(totals),
+        "daily": [{**dict(r), "day": str(r["day"])} for r in daily],
+        "by_boss": [dict(r) for r in by_boss],
+        "by_feature": [dict(r) for r in by_feature],
+        "by_model": [dict(r) for r in by_model],
+    }
 
 
 # ===========================================================================
@@ -1072,6 +1501,42 @@ async def delete_agent_trigger(
 
 
 # ---------------------------------------------------------------------------
+# Announcements — broadcast thông báo tới mọi user (vd phiên bản mới)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/announcements")
+async def list_announcements(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    from src.services import notifications
+
+    return await notifications.list_broadcasts(db)
+
+
+@router.post("/announcements", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_announcement(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services import notifications
+
+    title = (payload.get("title") or "").strip()
+    if not title:
+        raise HTTPException(422, "title required")
+    new_id = await notifications.broadcast(
+        db,
+        kind=payload.get("kind") or "announcement",
+        title=title,
+        body=(payload.get("body") or "").strip() or None,
+        link=(payload.get("link") or "").strip() or None,
+    )
+    return {"id": new_id}
+
+
+# ---------------------------------------------------------------------------
 # GET /audit-log  — paginated read-only (cursor-based on created_at)
 # ---------------------------------------------------------------------------
 
@@ -1210,3 +1675,356 @@ async def patch_retrieval_pipeline(
             body.description,
         )
     return {"feature": feature, "ok": True}
+
+
+# ===========================================================================
+# Subscription Requests — superadmin review
+# ===========================================================================
+
+import json as _json  # noqa: E402
+
+from fastapi.responses import FileResponse  # noqa: E402
+
+from src.services.subscription import apply_plan_to_user  # noqa: E402
+
+
+@router.get("/subscription-requests")
+async def list_subscription_requests_sa(
+    status: str | None = None,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        if status:
+            rows = await c.fetch(
+                """
+                SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                       sr.billing_months,
+                       sr.reviewer_note, sr.refund_requested, sr.refund_qr_path,
+                       sr.created_at, sr.reviewed_at, sr.cancelled_at,
+                       p.name AS plan_name, p.label AS plan_label,
+                       u.email AS boss_email, u.name AS boss_name,
+                       cp.name AS current_plan_name
+                FROM subscription_requests sr
+                JOIN plans p ON p.id = sr.plan_id
+                JOIN users u ON u.id = sr.boss_id
+                LEFT JOIN plans cp ON cp.id = u.plan_id
+                WHERE sr.status = $1
+                ORDER BY sr.created_at DESC
+                """,
+                status,
+            )
+        else:
+            rows = await c.fetch(
+                """
+                SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                       sr.billing_months,
+                       sr.reviewer_note, sr.refund_requested, sr.refund_qr_path,
+                       sr.created_at, sr.reviewed_at, sr.cancelled_at,
+                       p.name AS plan_name, p.label AS plan_label,
+                       u.email AS boss_email, u.name AS boss_name,
+                       cp.name AS current_plan_name
+                FROM subscription_requests sr
+                JOIN plans p ON p.id = sr.plan_id
+                JOIN users u ON u.id = sr.boss_id
+                LEFT JOIN plans cp ON cp.id = u.plan_id
+                ORDER BY sr.created_at DESC
+                """
+            )
+    result = []
+    for r in rows:
+        d = dict(r)
+        for f in ("created_at", "reviewed_at", "cancelled_at"):
+            if d.get(f):
+                d[f] = d[f].isoformat()
+        result.append(d)
+    return result
+
+
+@router.get("/subscription-requests/{req_id}")
+async def get_subscription_request_sa(
+    req_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            SELECT sr.*, p.name AS plan_name, p.label AS plan_label,
+                   p.limits_json AS plan_limits,
+                   u.email AS boss_email, u.name AS boss_name,
+                   u.subscription_status AS current_status,
+                   cp.name AS current_plan_name
+            FROM subscription_requests sr
+            JOIN plans p ON p.id = sr.plan_id
+            JOIN users u ON u.id = sr.boss_id
+            LEFT JOIN plans cp ON cp.id = u.plan_id
+            WHERE sr.id = $1
+            """,
+            req_id,
+        )
+    if not row:
+        raise HTTPException(404, "Request not found")
+    d = dict(row)
+    for f in ("created_at", "reviewed_at", "cancelled_at"):
+        if d.get(f):
+            d[f] = d[f].isoformat()
+    return d
+
+
+@router.post(
+    "/subscription-requests/{req_id}/approve",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def approve_subscription_request(
+    req_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        req = await c.fetchrow(
+            "SELECT boss_id, plan_id, status, billing_months FROM subscription_requests WHERE id=$1",
+            req_id,
+        )
+    if not req:
+        raise HTTPException(404, "Request not found")
+    if req["status"] != "pending":
+        raise HTTPException(400, "Request is not pending")
+
+    overrides = payload.get("overrides") or {}
+    await apply_plan_to_user(
+        db, req["boss_id"], req["plan_id"], overrides,
+        billing_months=req["billing_months"],
+    )
+
+    async with db.acquire() as c:
+        await c.execute(
+            "UPDATE subscription_requests SET status='approved', reviewed_at=NOW() WHERE id=$1",
+            req_id,
+        )
+        plan_label = await c.fetchval(
+            "SELECT label FROM plans WHERE id=$1", req["plan_id"]
+        )
+    from src.services import notifications
+
+    await notifications.notify_boss(
+        db,
+        req["boss_id"],
+        kind="subscription",
+        title="Plan subscription approved",
+        body=f"Your plan {plan_label or ''} has been activated.".strip(),
+        link="/app/admin/subscription",
+    )
+    return {"status": "approved", "request_id": req_id}
+
+
+@router.post(
+    "/subscription-requests/{req_id}/reject",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def reject_subscription_request(
+    req_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    async with db.acquire() as c:
+        req = await c.fetchrow(
+            "SELECT boss_id, status FROM subscription_requests WHERE id=$1", req_id
+        )
+        if not req or req["status"] != "pending":
+            raise HTTPException(400, "Request not pending or not found")
+        await c.execute(
+            """
+            UPDATE subscription_requests
+            SET status='rejected', reviewed_at=NOW(), reviewer_note=$2
+            WHERE id=$1
+            """,
+            req_id,
+            payload.get("reviewer_note", ""),
+        )
+    from src.services import notifications
+
+    note = (payload.get("reviewer_note") or "").strip()
+    await notifications.notify_boss(
+        db,
+        req["boss_id"],
+        kind="subscription",
+        title="Subscription request rejected",
+        body=note or "Please double-check your payment details and submit again.",
+        link="/app/admin/subscription",
+    )
+    return {"status": "rejected", "request_id": req_id}
+
+
+@router.get("/payment-proof/{filename}")
+async def get_payment_proof(
+    filename: str,
+    _: BossContext = Depends(require_superadmin),
+) -> FileResponse:
+    from pathlib import Path
+
+    safe_name = Path(filename).name
+    for subdir in ("payment_proofs", "refund_qr"):
+        candidate = Path("uploads") / subdir / safe_name
+        if candidate.exists():
+            return FileResponse(str(candidate))
+    raise HTTPException(404, "File not found")
+
+
+# ===========================================================================
+# Plans CRUD — superadmin
+# ===========================================================================
+
+
+@router.get("/plans")
+async def list_plans_superadmin(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, label, limits_json, prices_json, is_active, sort_order FROM plans ORDER BY sort_order"
+        )
+    return [dict(r) for r in rows]
+
+
+@router.post("/plans", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_plan_sa(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    required = {"name", "label", "limits_json"}
+    if not required.issubset(payload):
+        raise HTTPException(400, f"Required fields: {required}")
+    async with db.acquire() as c:
+        try:
+            row = await c.fetchrow(
+                """
+                INSERT INTO plans (name, label, limits_json, prices_json, sort_order)
+                VALUES ($1, $2, $3::jsonb, $4::jsonb, COALESCE($5, 99))
+                RETURNING id, name
+                """,
+                payload["name"],
+                payload["label"],
+                _json.dumps(payload["limits_json"]),
+                _json.dumps(payload.get("prices_json") or {}),
+                payload.get("sort_order"),
+            )
+        except Exception as e:
+            if "unique" in str(e).lower():
+                raise HTTPException(409, "Plan name already exists")
+            raise
+    return {"id": row["id"], "name": row["name"]}
+
+
+@router.patch("/plans/{plan_id}", dependencies=[Depends(verify_json_csrf)])
+async def update_plan_sa(
+    plan_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    allowed_fields = {"label", "limits_json", "prices_json", "is_active", "sort_order"}
+    updates = {k: v for k, v in payload.items() if k in allowed_fields}
+    if not updates:
+        raise HTTPException(400, "No valid fields to update")
+    async with db.acquire() as c:
+        if updates.get("is_active") is False:
+            count = await c.fetchval(
+                "SELECT COUNT(*) FROM users WHERE plan_id=$1", plan_id
+            )
+            if count > 0:
+                raise HTTPException(
+                    400, f"Cannot deactivate plan: {count} users are on it"
+                )
+        sets = []
+        vals = [plan_id]
+        for i, (k, v) in enumerate(updates.items(), start=2):
+            if k in ("limits_json", "prices_json"):
+                sets.append(f"{k}=${i}::jsonb")
+                vals.append(_json.dumps(v))
+            else:
+                sets.append(f"{k}=${i}")
+                vals.append(v)
+        sets.append("updated_at=NOW()")
+        await c.execute(
+            f"UPDATE plans SET {', '.join(sets)} WHERE id=$1",
+            *vals,
+        )
+    return {"updated": 1}
+
+
+# ---------------------------------------------------------------------------
+# MCP catalog — danh mục integration đã kiểm duyệt
+# ---------------------------------------------------------------------------
+
+
+@router.get("/mcp-catalog")
+async def list_mcp_catalog(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, description, url, icon_url, is_active, created_at FROM mcp_catalog ORDER BY name"
+        )
+    return [{**dict(r), "created_at": r["created_at"].isoformat()} for r in rows]
+
+
+@router.post("/mcp-catalog", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_mcp_catalog(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    name = (payload.get("name") or "").strip()
+    url = (payload.get("url") or "").strip()
+    if not name or not url:
+        raise HTTPException(400, "name and url required")
+    async with db.acquire() as c:
+        new_id = await c.fetchval(
+            """
+            INSERT INTO mcp_catalog (name, description, url, icon_url)
+            VALUES ($1, $2, $3, $4) RETURNING id
+            """,
+            name, payload.get("description"), url, payload.get("icon_url"),
+        )
+    return {"id": new_id, "name": name}
+
+
+@router.patch("/mcp-catalog/{item_id}", dependencies=[Depends(verify_json_csrf)])
+async def update_mcp_catalog(
+    item_id: int,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    allowed = {"name", "description", "url", "icon_url", "is_active"}
+    updates = {k: v for k, v in payload.items() if k in allowed}
+    if not updates:
+        raise HTTPException(400, "No valid fields")
+    sets, vals = [], [item_id]
+    for i, (k, v) in enumerate(updates.items(), start=2):
+        sets.append(f"{k}=${i}")
+        vals.append(v)
+    async with db.acquire() as c:
+        await c.execute(f"UPDATE mcp_catalog SET {', '.join(sets)} WHERE id=$1", *vals)
+    return {"updated": 1}
+
+
+@router.delete("/mcp-catalog/{item_id}", status_code=204, dependencies=[Depends(verify_json_csrf)])
+async def delete_mcp_catalog(
+    item_id: int,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> None:
+    async with db.acquire() as c:
+        used = await c.fetchval(
+            "SELECT COUNT(*) FROM mcp_servers WHERE catalog_id=$1", item_id
+        )
+        if used:
+            raise HTTPException(400, f"{used} boss(es) are using this integration")
+        await c.execute("DELETE FROM mcp_catalog WHERE id=$1", item_id)

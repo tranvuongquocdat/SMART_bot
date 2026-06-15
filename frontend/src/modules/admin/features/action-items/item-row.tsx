@@ -3,6 +3,7 @@ import { toast } from 'sonner';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { relativeTime } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { patchActionItem, actionItemsQuery, type ActionItem, type ActionItemFilters } from './api';
 
 export function ItemRow({
@@ -12,6 +13,7 @@ export function ItemRow({
   item: ActionItem;
   filters: ActionItemFilters;
 }) {
+  const t = useT();
   const qc = useQueryClient();
 
   const patchMut = useMutation({
@@ -19,9 +21,9 @@ export function ItemRow({
     onSuccess: () => {
       qc.invalidateQueries(actionItemsQuery(filters));
       qc.invalidateQueries(actionItemsQuery({}));
-      toast.success('Đã cập nhật');
+      toast.success(t('common.updated'));
     },
-    onError: () => toast.error('Cập nhật thất bại'),
+    onError: () => toast.error(t('common.updateError')),
   });
 
   const isDone = item.status === 'done';
@@ -49,7 +51,7 @@ export function ItemRow({
       </td>
       <td className="p-3">
         <Badge variant={isDone ? 'secondary' : 'default'}>
-          {isDone ? 'Đã xong' : 'Đang làm'}
+          {isDone ? t('ai.status.done') : t('ai.status.doing')}
         </Badge>
       </td>
     </tr>

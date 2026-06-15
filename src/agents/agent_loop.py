@@ -22,11 +22,18 @@ from src.tools.base import ToolContext
 from src.tools.dispatcher import ToolDispatcher
 from src.tools.registry import _REGISTRY as _TOOL_REGISTRY
 
+import structlog
+
 log = logging.getLogger(__name__)
+_slog = structlog.get_logger()
 
 
 _FALLBACK_REPLY = "Em xin lỗi, hệ thống đang gặp trục trặc — sếp thử lại sau ít phút."
 _LOOP_REPLY = "(em xin lỗi, em hơi loạn — vui lòng thử lại)"
+
+# Responder là thư ký bám sát dữ kiện — temp thấp để bớt trôi/bịa và trả lời nhất
+# quán (extract dùng 0.2, reconcile 0.1). Mặc định LLMRequest là 0.7 (quá cao cho QA).
+_RESPONDER_TEMPERATURE = 0.3
 
 
 async def _load_prompt(prompt_key: str, ctx) -> str:
@@ -35,6 +42,42 @@ async def _load_prompt(prompt_key: str, ctx) -> str:
     repo = PromptsRepo(ctx.db, BossContext(ctx.boss.id, "boss"))
     p = await repo.get_active(prompt_key)
     return (p.body if p else "") or ""
+
+
+def _bot_language_directive(language: str | None) -> str | None:
+    """Chỉ thị ngôn ngữ trả lời của bot theo cài đặt của boss.
+    'auto' / None → không ép (bot trả lời theo ngôn ngữ người nhắn)."""
+    return {
+        "vi": "Luôn trả lời bằng tiếng Việt, bất kể người dùng nhắn bằng ngôn ngữ nào.",
+        "en": "Always respond in English, regardless of the language the user writes in.",
+    }.get((language or "").lower())
+
+
+def _current_time_directive(tz: str | None) -> str:
+    """Mốc thời gian hiện tại theo tz của boss — để agent suy luận 'hôm nay',
+    'ngày mai', 'cuối tuần', '2 tiếng nữa'… mà không phải gọi tool, và không bao
+    giờ nói 'tôi không biết ngày giờ'."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    zone = tz or "Asia/Ho_Chi_Minh"
+    try:
+        now = datetime.now(ZoneInfo(zone))
+    except Exception:
+        zone = "Asia/Ho_Chi_Minh"
+        now = datetime.now(ZoneInfo(zone))
+    weekday = [
+        "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy", "Chủ Nhật"
+    ][now.weekday()]
+    return (
+        f"Bối cảnh thời gian hiện tại: {weekday}, {now:%d/%m/%Y %H:%M} "
+        f"(múi giờ {zone}). Dùng đúng mốc này cho mọi suy luận thời gian "
+        "(hôm nay, ngày mai, cuối tuần, '2 tiếng nữa'…). "
+        "Khi xếp hạng/đánh giá deadline: mốc đã QUA so với hiện tại là việc 'trễ hạn' "
+        "(nêu riêng), KHÔNG được tính là 'sắp tới'; 'sắp tới hạn' CHỈ gồm các mốc còn ở "
+        "tương lai, gần nhất = mốc tương lai sớm nhất. Tuyệt đối KHÔNG nói rằng bạn "
+        "không biết ngày giờ hiện tại."
+    )
 
 
 def _format_memory(semantic, episodic, reminders, action_items) -> str:
@@ -77,11 +120,21 @@ async def _allowed_tools(cfg, ctx) -> set[str]:
     plugin is true, *all* of that plugin's registered tools are added to
     the allowlist for this boss.
     """
+    # Core/built-in tools (cfg.tools, từ _REGISTRY): LUÔN bật cho MỌI boss —
+    # không tắt được, không tính vào cap. Đây là bộ lõi để bot vận hành
+    # (search_knowledge, read/refresh note, set/list reminder, action items,
+    # find_exact_quote, remember, current_time…). Cap chỉ áp cho integration.
+    # (Trước đây intersect với boss_active_tools + cap max_active_tools khiến
+    # boss trial chỉ có 5 tool ngẫu nhiên theo thứ tự registry → mất cả
+    # search_knowledge, không dùng được tính năng lõi.)
     base: set[str] = set(cfg.tools or set())
     db = getattr(ctx, "db", None)
     boss = getattr(ctx, "boss", None)
     if db is None or boss is None:
         return base
+
+    # Plugin/integration tools cộng thêm theo boss_integrations (bật/tắt + cap
+    # riêng — mcp_slots), namespaced ``<plugin_id>_<tool_name>``.
     try:
         async with db.acquire() as c:
             rows = await c.fetch(
@@ -93,19 +146,20 @@ async def _allowed_tools(cfg, ctx) -> set[str]:
             )
     except Exception:
         log.exception("boss_integrations query failed")
-        return base
+        rows = []
     enabled = {r["plugin_id"] for r in rows}
-    if not enabled:
-        return base
-    for tname in _TOOL_REGISTRY:
-        prefix = tname.split("_", 1)[0]
-        if prefix in enabled:
-            base.add(tname)
+    if enabled:
+        for tname in _TOOL_REGISTRY:
+            prefix = tname.split("_", 1)[0]
+            if prefix in enabled:
+                base.add(tname)
+
     return base
 
 
-def _build_tool_ctx(ctx, op_name: str) -> ToolContext:
+def _build_tool_ctx(ctx, op_name: str, event: dict | None = None) -> ToolContext:
     trace = current_trace()
+    event = event or {}
     return ToolContext(
         boss_id=ctx.boss.id,
         boss_role="boss",
@@ -117,6 +171,9 @@ def _build_tool_ctx(ctx, op_name: str) -> ToolContext:
         llm=ctx.llm,
         trace_id=(trace.trace_id if trace else "no-trace"),
         span_id=(trace.span_id if trace else "no-span"),
+        chat_id=event.get("chat_id"),
+        provider=event.get("provider"),
+        chat_type=event.get("chat_type"),
     )
 
 
@@ -124,8 +181,15 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     cfg = op_cls._op_config
     op_name = cfg.name
 
-    # 1. System prompt
+    # 1. System prompt (+ chỉ thị ngôn ngữ trả lời theo cài đặt của boss)
     system_prompt = await _load_prompt(cfg.prompt_key, ctx)
+    lang_directive = _bot_language_directive(getattr(ctx.boss, "language", None))
+    if lang_directive:
+        system_prompt = f"{system_prompt}\n\n{lang_directive}"
+    # Luôn cấp mốc thời gian hiện tại (theo tz boss) — bot vốn không biết "now".
+    system_prompt = (
+        f"{system_prompt}\n\n{_current_time_directive(getattr(ctx.boss, 'tz', None))}"
+    )
 
     # 2. Memory recall (semantic + episodic + prospective when configured)
     semantic: list[Any] = []
@@ -176,7 +240,7 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     allowed = await _allowed_tools(cfg, ctx)
     tools = [_to_toolspec(t) for t in registry.filter_for_op(op_name, allowed=allowed)]
     dispatcher = ToolDispatcher(ctx.db)
-    tool_ctx = _build_tool_ctx(ctx, op_name=op_name)
+    tool_ctx = _build_tool_ctx(ctx, op_name=op_name, event=event)
 
     # 4. Loop
     for _ in range(max_iters):
@@ -187,6 +251,7 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
             tools=tools or None,
             cache_prefix_hint=cfg.cache_prefix_hint or "after_semantic_memory",
             routing_hints={"op": op_name},
+            temperature=_RESPONDER_TEMPERATURE,
         )
         try:
             resp = await ctx.llm.complete(req)
@@ -194,6 +259,11 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
             log.exception("llm.complete raised in agent_loop")
             return _FALLBACK_REPLY
 
+        _slog.info(
+            "agent_llm_turn", op=op_name, finish=resp.finish_reason,
+            content_len=len(resp.content or ""), n_tools=len(resp.tool_calls),
+            content_tail=(resp.content or "")[-120:],
+        )
         if resp.status != "ok":
             log.warning("llm response non-ok status=%s err=%s", resp.status, resp.error)
             return resp.content or _FALLBACK_REPLY
@@ -201,15 +271,24 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
         if not resp.tool_calls:
             return resp.content or ""
 
-        # Append assistant turn with tool_calls (content kept as plain string).
+        # Append assistant turn KÈM tool_calls — thiếu là OpenAI 400
+        # ("messages with role 'tool' must be a response to ... 'tool_calls'").
         msgs.append(
-            ChatMessage(role="assistant", content=resp.content or "")
+            ChatMessage(
+                role="assistant",
+                content=resp.content or "",
+                tool_calls=resp.tool_calls,
+            )
         )
+        for tc in resp.tool_calls:
+            _slog.info("agent_tool_call", op=op_name, name=tc.name, args=tc.arguments)
         results = await dispatcher.call_batch(resp.tool_calls, tool_ctx)
         for call_id, r in results:
             payload = (
                 str(r.content) if r.error is None else f"ERROR: {r.error}"
             )
+            _slog.info("agent_tool_result", op=op_name,
+                       result=payload[:800], err=r.error)
             msgs.append(
                 ChatMessage(role="tool", tool_call_id=call_id, content=payload)
             )

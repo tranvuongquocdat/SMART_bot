@@ -3,19 +3,21 @@ import { useSuspenseQuery } from '@tanstack/react-query';
 import { ClipboardList } from 'lucide-react';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { ActionItemFiltersBar } from './filters';
 import { ItemRow } from './item-row';
 import { actionItemsQuery, type ActionItemFilters } from './api';
 
 function ItemsTable({ filters }: { filters: ActionItemFilters }) {
+  const t = useT();
   const { data: items } = useSuspenseQuery(actionItemsQuery(filters));
 
   if (items.length === 0) {
     return (
       <EmptyState
         icon={ClipboardList}
-        title="Không có việc nào"
-        description="Không có việc cần làm khớp với bộ lọc này."
+        title={t('ai.empty.title')}
+        description={t('ai.empty.desc')}
       />
     );
   }
@@ -25,11 +27,11 @@ function ItemsTable({ filters }: { filters: ActionItemFilters }) {
       <thead>
         <tr className="text-left text-muted-foreground border-b">
           <th className="p-3 w-10"></th>
-          <th className="p-3">Nội dung</th>
-          <th className="p-3">Nhóm</th>
-          <th className="p-3">Giao cho</th>
-          <th className="p-3 whitespace-nowrap">Hạn</th>
-          <th className="p-3">Trạng thái</th>
+          <th className="p-3">{t('ai.col.content')}</th>
+          <th className="p-3">{t('ai.col.group')}</th>
+          <th className="p-3">{t('ai.col.assignee')}</th>
+          <th className="p-3 whitespace-nowrap">{t('ai.col.due')}</th>
+          <th className="p-3">{t('ai.col.status')}</th>
         </tr>
       </thead>
       <tbody>
@@ -42,14 +44,12 @@ function ItemsTable({ filters }: { filters: ActionItemFilters }) {
 }
 
 export default function ActionItemsPage() {
+  const t = useT();
   const [filters, setFilters] = useState<ActionItemFilters>({});
 
   return (
     <PageWrap>
-      <PageHeader
-        title="Việc cần làm"
-        subtitle="Tổng hợp việc cần làm từ tất cả các nhóm"
-      />
+      <PageHeader title={t('ai.title')} subtitle={t('ai.subtitle')} />
 
       <PageSection>
         <Suspense fallback={<div className="h-9" />}>
@@ -60,7 +60,7 @@ export default function ActionItemsPage() {
       <PageSection className="rounded-[12px] bg-card-grad surface-section overflow-hidden">
         <Suspense
           fallback={
-            <div className="p-8 text-center text-muted-foreground text-sm">Đang tải...</div>
+            <div className="p-8 text-center text-muted-foreground text-sm">{t('common.loadingShort')}</div>
           }
         >
           <ItemsTable filters={filters} />

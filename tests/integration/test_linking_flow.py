@@ -1,24 +1,33 @@
-"""LinkingService end-to-end + /start <token> handshake via normalizer.
+"""LinkingService end-to-end + /start <token> handshake via InboundIngest.
 
-We don't run a real bridge — we publish ``inbound.raw.zalo`` directly with
-the ``/start <token>`` payload and verify the normalizer:
+We don't run a real bridge — we publish ``inbound.normalized`` directly with
+the ``/start <token>`` payload and verify InboundIngest:
   - calls LinkingService.consume
   - inserts account_links row
-  - emits outbound.send ack
+  - sends an ack via outbound_service (post-hoc ``outbound.send``)
   - does NOT publish message.captured (handshake message swallowed)
 """
 
 from __future__ import annotations
 
-import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
-from src.channels.zalo import normalizer as zalo_normalizer
+from src.channels.base import InboundMessage
+from src.channels.ingest import InboundIngest
 from src.events.bus import InMemoryEventBus
 from src.services.linking_service import LinkingService
 from src.services.outbound_service import OutboundService
+
+
+def _dm(bot_acc_id, sender_uid, text, msg_id):
+    return InboundMessage(
+        bot_account_id=bot_acc_id, provider="zalo", chat_id=sender_uid,
+        chat_type="dm", provider_msg_id=msg_id, sender_provider_id=sender_uid,
+        sender_name="Boss", text=text, mentions_bot=False,
+        reply_to_provider_msg_id=None, media_kind="text", media_url=None,
+        ts=datetime.now(timezone.utc))
 
 
 async def _seed_zalo_bot_account(pool, label: str = "linktest-bot"):
@@ -130,13 +139,13 @@ async def test_gc_expired_clears_old_tokens(db_pool, boss_user):
     assert [r["token"] for r in rows] == ["alive-1"]
 
 
-# --- end-to-end /start handshake via normalizer --------------------------------
+# --- end-to-end /start handshake via InboundIngest -----------------------------
 
 
 @pytest.mark.asyncio
-async def test_normalizer_consumes_start_token_and_acks(db_pool, boss_user):
+async def test_ingest_consumes_start_token_and_acks(db_pool, boss_user):
     bus = InMemoryEventBus()
-    zalo_normalizer.register(bus, db_pool, OutboundService(db_pool, bus))
+    InboundIngest(db_pool, bus, OutboundService(db_pool, bus)).register()
 
     bot_acc_id = await _seed_zalo_bot_account(db_pool, "lt-handshake")
     # NOTE: NO active assignment yet — handshake should still complete,
@@ -150,27 +159,8 @@ async def test_normalizer_consumes_start_token_and_acks(db_pool, boss_user):
     bus.subscribe("outbound.send", lambda p: sent.append(p) or _noop())
     bus.subscribe("message.captured", lambda p: captured.append(p) or _noop())
 
-    await bus.publish(
-        "inbound.raw.zalo",
-        {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "lt-handshake",
-            "data": {
-                "type": 0,
-                "threadId": "boss-uid-1",
-                "uidFrom": "boss-uid-1",
-                "dName": "Boss",
-                "msgId": "handshake-1",
-                "ts": int(datetime.now(timezone.utc).timestamp() * 1000),
-                "text": f"/start {token}",
-                "content": f"/start {token}",
-                "mentions": [],
-                "is_mentioned": False,
-                "content_type": "text",
-                "media_url": None,
-            },
-        },
-    )
+    await bus.publish("inbound.normalized", {"message": _dm(
+        bot_acc_id, "boss-uid-1", f"/start {token}", "handshake-1")})
 
     # Handshake should NOT publish message.captured (we swallow it).
     assert captured == []
@@ -190,9 +180,9 @@ async def test_normalizer_consumes_start_token_and_acks(db_pool, boss_user):
 
 
 @pytest.mark.asyncio
-async def test_normalizer_start_invalid_token_no_link(db_pool, boss_user):
+async def test_ingest_start_invalid_token_no_link(db_pool, boss_user):
     bus = InMemoryEventBus()
-    zalo_normalizer.register(bus, db_pool, OutboundService(db_pool, bus))
+    InboundIngest(db_pool, bus, OutboundService(db_pool, bus)).register()
     bot_acc_id = await _seed_zalo_bot_account(db_pool, "lt-handshake-bad")
 
     sent: list[dict] = []
@@ -200,26 +190,8 @@ async def test_normalizer_start_invalid_token_no_link(db_pool, boss_user):
     bus.subscribe("outbound.send", lambda p: sent.append(p) or _noop())
     bus.subscribe("message.captured", lambda p: captured.append(p) or _noop())
 
-    await bus.publish(
-        "inbound.raw.zalo",
-        {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "lt-handshake-bad",
-            "data": {
-                "type": 0,
-                "threadId": "boss-uid-2",
-                "uidFrom": "boss-uid-2",
-                "dName": "?",
-                "msgId": "handshake-bad",
-                "ts": int(datetime.now(timezone.utc).timestamp() * 1000),
-                "text": "/start completely-invalid-token",
-                "content": "/start completely-invalid-token",
-                "mentions": [],
-                "is_mentioned": False,
-                "content_type": "text",
-            },
-        },
-    )
+    await bus.publish("inbound.normalized", {"message": _dm(
+        bot_acc_id, "boss-uid-2", "/start completely-invalid-token", "handshake-bad")})
 
     assert sent == []  # no ack
     assert captured == []  # not captured either

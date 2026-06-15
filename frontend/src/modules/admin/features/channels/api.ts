@@ -14,9 +14,8 @@ export type Channel = {
 
 export type ConnectResult = {
   provider: string;
-  redirect_url: string | null;
-  qr_url: string | null;
-  message: string;
+  status: string;
+  display_name: string | null;
 };
 
 export const channelsQuery = () =>
@@ -35,4 +34,30 @@ export const disconnectChannel = (provider: string) =>
   api<{ deleted: boolean; provider: string }>(
     `/api/v1/admin/channels/${encodeURIComponent(provider)}`,
     { method: 'DELETE' },
+  );
+
+export type ZaloQrStatus = {
+  status: 'starting' | 'qr' | 'scanned' | 'success' | 'error';
+  qr_image_b64: string | null;
+  display_name: string | null;
+  error: string | null;
+  bot_account_id: number | null;
+  expires_in_s: number;
+};
+
+export const startZaloQrLogin = () =>
+  api<{ login_id: string; status: string }>('/api/v1/admin/channels/zalo/qr-login', {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+
+export const zaloQrLoginStatus = (loginId: string) =>
+  api<ZaloQrStatus>(`/api/v1/admin/channels/zalo/qr-login/${loginId}`);
+
+export type LinkToken = { token: string; bot_name: string };
+
+export const mintLinkToken = (provider: string) =>
+  api<LinkToken>(
+    `/api/v1/admin/channels/${encodeURIComponent(provider)}/link-token`,
+    { method: 'POST', body: JSON.stringify({}) }
   );

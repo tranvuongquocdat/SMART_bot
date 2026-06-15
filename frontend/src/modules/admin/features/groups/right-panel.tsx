@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { formatNumber, relativeTime } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { StatusDot } from '@/components/status-dot';
 import { UserPicker, type UserPickerOption } from '@/components/user-picker';
 import { Button } from '@/components/ui/button';
@@ -21,6 +22,7 @@ import { membersQuery, peopleSearchQuery, addMember, removeMember } from './api'
 // ---------------------------------------------------------------------------
 
 function MembersPanel({ groupId, members }: { groupId: string; members?: Member[] }) {
+  const t = useT();
   const [addOpen, setAddOpen] = useState(false);
   const [q, setQ] = useState('');
   const [selectedId, setSelectedId] = useState<string | number | undefined>();
@@ -45,28 +47,28 @@ function MembersPanel({ groupId, members }: { groupId: string; members?: Member[
     },
     onSuccess: () => {
       qc.invalidateQueries(membersQuery(groupId));
-      toast.success('Đã thêm thành viên');
+      toast.success(t('grp.member.added'));
       setAddOpen(false);
       setSelectedId(undefined);
       setQ('');
     },
-    onError: () => toast.error('Thêm thất bại'),
+    onError: () => toast.error(t('grp.member.addError')),
   });
 
   const removeMutation = useMutation({
     mutationFn: (mid: number) => removeMember(groupId, mid),
     onSuccess: () => {
       qc.invalidateQueries(membersQuery(groupId));
-      toast.success('Đã xoá thành viên');
+      toast.success(t('grp.member.removed'));
       setRemoveTarget(null);
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('grp.member.removeError')),
   });
 
   return (
     <>
       <Card
-        title={`Thành viên (${members?.length ?? 0})`}
+        title={t('grp.member.title', { n: members?.length ?? 0 })}
         action={
           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setAddOpen(true)}>
             <UserPlus className="h-3.5 w-3.5" />
@@ -74,7 +76,7 @@ function MembersPanel({ groupId, members }: { groupId: string; members?: Member[
         }
       >
         {(members?.length ?? 0) === 0 && (
-          <p className="text-xs text-muted-foreground">Chưa có dữ liệu thành viên.</p>
+          <p className="text-xs text-muted-foreground">{t('grp.member.empty')}</p>
         )}
         {members?.map((m, i) => (
           <div key={m.id} className={`flex items-center gap-2.5 py-1.5 ${i > 0 ? 'border-t border-border' : ''}`}>
@@ -97,7 +99,7 @@ function MembersPanel({ groupId, members }: { groupId: string; members?: Member[
                     className="text-destructive focus:text-destructive"
                     onClick={() => setRemoveTarget(m)}
                   >
-                    Xoá khỏi nhóm
+                    {t('grp.member.removeFromGroup')}
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -110,7 +112,7 @@ function MembersPanel({ groupId, members }: { groupId: string; members?: Member[
       <Dialog open={addOpen} onOpenChange={v => { setAddOpen(v); if (!v) { setSelectedId(undefined); setQ(''); } }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Thêm thành viên</DialogTitle>
+            <DialogTitle>{t('grp.member.addTitle')}</DialogTitle>
           </DialogHeader>
           <div className="mt-2">
             <UserPicker
@@ -118,19 +120,19 @@ function MembersPanel({ groupId, members }: { groupId: string; members?: Member[
               value={selectedId}
               onChange={id => setSelectedId(id)}
               onSearchChange={setQ}
-              placeholder="Tìm người dùng…"
+              placeholder={t('grp.member.searchPlaceholder')}
             />
             <p className="text-xs text-muted-foreground mt-1.5">
-              Gõ để tìm trong workspace
+              {t('grp.member.searchHint')}
             </p>
           </div>
           <DialogFooter className="mt-4">
-            <Button variant="ghost" onClick={() => setAddOpen(false)}>Huỷ</Button>
+            <Button variant="ghost" onClick={() => setAddOpen(false)}>{t('common.cancel')}</Button>
             <Button
               disabled={!selectedId || addMutation.isPending}
               onClick={() => addMutation.mutate()}
             >
-              {addMutation.isPending ? 'Đang thêm…' : 'Thêm'}
+              {addMutation.isPending ? t('grp.member.adding') : t('grp.member.add')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -140,19 +142,19 @@ function MembersPanel({ groupId, members }: { groupId: string; members?: Member[
       <Dialog open={!!removeTarget} onOpenChange={v => { if (!v) setRemoveTarget(null); }}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Xoá thành viên?</DialogTitle>
+            <DialogTitle>{t('grp.member.removeTitle')}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            Xoá <strong>{removeTarget?.name}</strong> khỏi nhóm này?
+            {t('grp.member.removeQPre')}<strong>{removeTarget?.name}</strong>{t('grp.member.removeQPost')}
           </p>
           <DialogFooter className="mt-4">
-            <Button variant="ghost" onClick={() => setRemoveTarget(null)}>Huỷ</Button>
+            <Button variant="ghost" onClick={() => setRemoveTarget(null)}>{t('common.cancel')}</Button>
             <Button
               variant="destructive"
               disabled={removeMutation.isPending}
               onClick={() => removeTarget && removeMutation.mutate(removeTarget.id)}
             >
-              {removeMutation.isPending ? 'Đang xoá…' : 'Xoá'}
+              {removeMutation.isPending ? t('common.deleting') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -176,23 +178,24 @@ export function RightPanel({
   members?: Member[];
   files?: FileItem[];
 }) {
+  const t = useT();
   return (
     <aside className="flex flex-col gap-4 sticky top-[90px] self-start">
-      <Card title="7 ngày qua">
+      <Card title={t('grp.panel.last7days')}>
         <div className="grid grid-cols-2 gap-3">
-          <Stat label="Tin nhắn" value={stats?.messages} />
-          <Stat label="Tác vụ" value={stats?.tasks} />
-          <Stat label="Nhắc lịch" value={stats?.reminders} />
-          <Stat label="Quyết định" value={stats?.decisions} />
+          <Stat label={t('grp.stats.messages')} value={stats?.messages} />
+          <Stat label={t('grp.stats.tasks')} value={stats?.tasks} />
+          <Stat label={t('grp.stats.reminders')} value={stats?.reminders} />
+          <Stat label={t('grp.stats.decisions')} value={stats?.decisions} />
         </div>
       </Card>
 
       {groupId ? (
         <MembersPanel groupId={groupId} members={members} />
       ) : (
-        <Card title={`Thành viên (${members?.length ?? 0})`}>
+        <Card title={t('grp.member.title', { n: members?.length ?? 0 })}>
           {(members?.length ?? 0) === 0 && (
-            <p className="text-xs text-muted-foreground">Chưa có dữ liệu thành viên.</p>
+            <p className="text-xs text-muted-foreground">{t('grp.member.empty')}</p>
           )}
           {members?.map((m, i) => (
             <div key={m.id} className={`flex items-center gap-2.5 py-1.5 ${i > 0 ? 'border-t border-border' : ''}`}>
@@ -208,9 +211,9 @@ export function RightPanel({
         </Card>
       )}
 
-      <Card title="Tệp & link gần đây">
+      <Card title={t('grp.panel.recentFiles')}>
         <div className="flex flex-col gap-2.5 text-[13px]">
-          {(files?.length ?? 0) === 0 && <p className="text-xs text-muted-foreground">Chưa có tệp nào.</p>}
+          {(files?.length ?? 0) === 0 && <p className="text-xs text-muted-foreground">{t('grp.panel.noFiles')}</p>}
           {files?.map(f => {
             const Icon = f.kind === 'image' ? ImageIcon : f.kind === 'link' ? LinkIcon : FileText;
             return (

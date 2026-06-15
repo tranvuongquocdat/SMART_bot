@@ -1,12 +1,15 @@
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useI18n } from '@/lib/i18n';
 import type { TimelineMsg } from './api';
 
 export function TimelineCard({ messages }: { messages: TimelineMsg[] }) {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   if (messages.length === 0) {
-    return <p className="text-sm text-muted-foreground py-8 text-center">Chưa có tin nhắn nào.</p>;
+    return <p className="text-sm text-muted-foreground py-8 text-center">{t('grp.empty.timeline')}</p>;
   }
-  const groups = groupByDate(messages);
+  const groups = groupByDate(messages, locale);
   return (
     <div className="rounded-xl bg-card shadow-[0_0_0_1px_hsl(var(--border-strong)),0_1px_2px_rgba(0,0,0,.04)] overflow-hidden">
       {groups.map(([date, msgs]) => (
@@ -21,14 +24,14 @@ export function TimelineCard({ messages }: { messages: TimelineMsg[] }) {
                 <div className="flex items-baseline gap-2 mb-0.5">
                   <span className="text-[13px] font-medium tracking-tight">{m.author_name}</span>
                   <span className="text-[11px] text-[hsl(var(--dim))]">
-                    {new Date(m.created_at).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(m.created_at).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
                 <p className="text-[13.5px] leading-[1.55]">{m.text}</p>
                 {m.extracted && (
                   <span className="mt-2 inline-flex items-center gap-1.5 text-[11.5px] text-primary px-2 py-[3px] bg-[hsl(var(--primary-soft))] rounded cursor-pointer">
                     <Check className="h-2.5 w-2.5" />
-                    Đã trích: {m.extracted}
+                    {t('grp.extracted', { what: m.extracted })}
                   </span>
                 )}
               </div>
@@ -54,10 +57,10 @@ function Avatar({ kind, name }: { kind: TimelineMsg['author_kind']; name: string
   );
 }
 
-function groupByDate(msgs: TimelineMsg[]): [string, TimelineMsg[]][] {
+function groupByDate(msgs: TimelineMsg[], locale: string): [string, TimelineMsg[]][] {
   const map = new Map<string, TimelineMsg[]>();
   for (const m of msgs) {
-    const key = new Date(m.created_at).toLocaleDateString('vi-VN', { weekday: 'long', day: 'numeric', month: 'numeric' });
+    const key = new Date(m.created_at).toLocaleDateString(locale, { weekday: 'long', day: 'numeric', month: 'numeric' });
     map.set(key, [...(map.get(key) ?? []), m]);
   }
   return Array.from(map.entries());

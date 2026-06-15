@@ -1,0 +1,328 @@
+import { useEffect, useState } from 'react';
+import { useSuspenseQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { Plus, Pencil } from 'lucide-react';
+import { toast } from 'sonner';
+import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useT } from '@/lib/i18n';
+import { plansAdminQuery, createPlan, updatePlan, type SAPlan, type PlanLimits, type PlanPrices } from './api';
+
+function parseLimits(raw: string | PlanLimits): PlanLimits {
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { return {}; }
+  }
+  return raw;
+}
+
+function parsePrices(raw: string | PlanPrices | undefined): PlanPrices {
+  if (raw == null) return {};
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { return {}; }
+  }
+  return raw;
+}
+
+const BILLING_PERIODS = [
+  { key: '1' as const, months: 1 },
+  { key: '3' as const, months: 3 },
+  { key: '12' as const, months: 12 },
+];
+
+const fmtVnd = (v: number) => new Intl.NumberFormat('vi-VN').format(v) + 'đ';
+
+function LimitField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number | null | undefined;
+  onChange: (v: number | null) => void;
+}) {
+  const t = useT();
+  return (
+    <div className="space-y-1">
+      <Label className="text-xs">{label}</Label>
+      <Input
+        type="number"
+        placeholder={t('sa.plan.limitPlaceholder')}
+        value={value ?? ''}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        className="h-8 text-sm"
+      />
+    </div>
+  );
+}
+
+type FormState = {
+  name: string;
+  label: string;
+  sort_order: string;
+  limits: PlanLimits;
+  prices: PlanPrices;
+};
+
+const emptyForm = (): FormState => ({
+  name: '',
+  label: '',
+  sort_order: '',
+  limits: {},
+  prices: {},
+});
+
+function fromPlan(plan: SAPlan): FormState {
+  return {
+    name: plan.name,
+    label: plan.label,
+    sort_order: String(plan.sort_order),
+    limits: parseLimits(plan.limits_json),
+    prices: parsePrices(plan.prices_json),
+  };
+}
+
+function PlanModal({
+  plan,
+  open,
+  onClose,
+}: {
+  plan: SAPlan | null;
+  open: boolean;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const qc = useQueryClient();
+  const [form, setForm] = useState<FormState>(plan ? fromPlan(plan) : emptyForm());
+
+  // Modal mount sẵn từ lúc page load (plan=null) — phải nạp lại form theo gói
+  // đang sửa mỗi lần mở, không thì các field trống dù ngoài list có giá trị.
+  useEffect(() => {
+    if (open) setForm(plan ? fromPlan(plan) : emptyForm());
+  }, [open, plan]);
+
+  const isEdit = !!plan;
+
+  const mut = useMutation({
+    mutationFn: () => {
+      const limits = form.limits;
+      const sort_order = form.sort_order ? Number(form.sort_order) : undefined;
+      // Chu kỳ bỏ trống = không bán chu kỳ đó — loại khỏi prices_json.
+      const prices: PlanPrices = Object.fromEntries(
+        Object.entries(form.prices).filter(([, v]) => v != null)
+      );
+      if (isEdit) {
+        return updatePlan(plan!.id, { label: form.label, limits_json: limits, prices_json: prices, sort_order });
+      }
+      return createPlan({ name: form.name, label: form.label, limits_json: limits, prices_json: prices, sort_order });
+    },
+    onSuccess: () => {
+      toast.success(isEdit ? t('sa.plan.updated') : t('sa.plan.created'));
+      qc.invalidateQueries({ queryKey: ['superadmin', 'plans'] });
+      onClose();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const setLimit = (key: keyof PlanLimits) => (v: number | null) =>
+    setForm((f) => ({ ...f, limits: { ...f.limits, [key]: v } }));
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? t('sa.plan.editTitle') : t('sa.plan.addTitle')}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          {!isEdit && (
+            <div className="space-y-1.5">
+              <Label>{t('sa.plan.fieldName')}</Label>
+              <Input
+                value={form.name}
+                onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                placeholder="starter"
+              />
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label>{t('sa.plan.fieldLabel')}</Label>
+            <Input
+              value={form.label}
+              onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+              placeholder="Starter"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>{t('sa.plan.sortOrder')}</Label>
+            <Input
+              type="number"
+              value={form.sort_order}
+              onChange={(e) => setForm((f) => ({ ...f, sort_order: e.target.value }))}
+              placeholder="1"
+              className="h-8 w-24"
+            />
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              {t('sa.plan.limits')}
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <LimitField label={t('sa.boss.ovMaxGroups')} value={form.limits.max_active_groups} onChange={setLimit('max_active_groups')} />
+              <LimitField label={t('sa.boss.ovMaxTools')} value={form.limits.max_active_tools} onChange={setLimit('max_active_tools')} />
+              <LimitField label={t('sa.boss.ovMaxChannels')} value={form.limits.max_active_channels} onChange={setLimit('max_active_channels')} />
+              <LimitField label="MCP slots" value={form.limits.mcp_slots} onChange={setLimit('mcp_slots')} />
+              <LimitField label={t('sa.plan.days')} value={form.limits.duration_days} onChange={setLimit('duration_days')} />
+              <LimitField label={t('sa.plan.costUsdDay')} value={form.limits.cost_cap_usd_daily} onChange={setLimit('cost_cap_usd_daily')} />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+              {t('sa.plan.pricesTitle')}
+            </p>
+            <div className="grid grid-cols-3 gap-3">
+              {BILLING_PERIODS.map((p) => (
+                <div key={p.key} className="space-y-1">
+                  <Label className="text-xs">{t('sa.plan.months', { n: p.months })}</Label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    placeholder="—"
+                    value={form.prices[p.key] ?? ''}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        prices: {
+                          ...f.prices,
+                          [p.key]: e.target.value === '' ? null : Number(e.target.value),
+                        },
+                      }))
+                    }
+                    className="h-8 text-sm"
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
+            {t('sa.common.cancel')}
+          </Button>
+          <Button onClick={() => mut.mutate()} disabled={mut.isPending}>
+            {mut.isPending ? t('sa.common.saving') : isEdit ? t('sa.common.save') : t('sa.plan.create')}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+export default function SAPlansPage() {
+  const t = useT();
+  const { data: plans } = useSuspenseQuery(plansAdminQuery());
+  const qc = useQueryClient();
+  const [editTarget, setEditTarget] = useState<SAPlan | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+
+  const toggleActive = useMutation({
+    mutationFn: (plan: SAPlan) =>
+      updatePlan(plan.id, { is_active: !plan.is_active }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['superadmin', 'plans'] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  return (
+    <PageWrap className="max-w-[800px]">
+      <PageHeader title={t('nav.sa.plans')} subtitle={t('sa.plan.subtitle')} />
+
+      <div className="flex justify-end">
+        <Button size="sm" onClick={() => setCreateOpen(true)} className="gap-1.5">
+          <Plus className="h-4 w-4" />
+          {t('sa.plan.createBtn')}
+        </Button>
+      </div>
+
+      <PageSection>
+        <div className="divide-y divide-border rounded-xl border">
+          {plans.map((plan) => {
+            const limits = parseLimits(plan.limits_json);
+            const prices = parsePrices(plan.prices_json);
+            const priceParts = BILLING_PERIODS.filter((p) => prices[p.key] != null).map(
+              (p) => `${fmtVnd(prices[p.key]!)}/${t('sa.plan.monthsShort', { n: p.months })}`
+            );
+            return (
+              <div key={plan.id} className="flex items-center gap-3 px-4 py-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm">{plan.label}</span>
+                    <span className="text-xs text-muted-foreground">({plan.name})</span>
+                    {!plan.is_active && (
+                      <Badge variant="outline" className="text-xs">{t('sa.plan.hidden')}</Badge>
+                    )}
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {[
+                      limits.max_active_groups != null ? t('sa.plan.sumGroups', { n: limits.max_active_groups }) : t('sa.plan.sumGroupsInf'),
+                      limits.max_active_tools != null ? t('sa.plan.sumTools', { n: limits.max_active_tools }) : t('sa.plan.sumToolsInf'),
+                      limits.max_active_channels != null ? t('sa.plan.sumChannels', { n: limits.max_active_channels }) : t('sa.plan.sumChannelsInf'),
+                      limits.duration_days != null ? `${limits.duration_days}d` : null,
+                    ].filter(Boolean).join(' · ')}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    {priceParts.length > 0 ? priceParts.join(' · ') : t('sa.plan.noPrice')}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => toggleActive.mutate(plan)}
+                    disabled={toggleActive.isPending}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
+                      plan.is_active ? 'bg-primary' : 'bg-input'
+                    }`}
+                    role="switch"
+                    aria-checked={plan.is_active}
+                  >
+                    <span
+                      className={`block h-4 w-4 rounded-full bg-background shadow-lg transition-transform ${
+                        plan.is_active ? 'translate-x-4' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setEditTarget(plan)}
+                    className="h-7 w-7"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </PageSection>
+
+      <PlanModal
+        plan={editTarget}
+        open={!!editTarget}
+        onClose={() => setEditTarget(null)}
+      />
+      <PlanModal
+        plan={null}
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+      />
+    </PageWrap>
+  );
+}

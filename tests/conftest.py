@@ -64,6 +64,12 @@ def _maybe_bootstrap_test_db() -> None:
     target_db = parsed.path.lstrip("/")
     admin_dsn = urlunparse(parsed._replace(path="/postgres"))
 
+    # Head revision đọc động từ migrations/ — hardcode từng gây lệch schema test DB.
+    from alembic.config import Config as _AlembicConfig
+    from alembic.script import ScriptDirectory as _ScriptDirectory
+
+    head_rev = _ScriptDirectory.from_config(_AlembicConfig("alembic.ini")).get_current_head()
+
     import asyncio
 
     async def _check_and_create() -> bool:
@@ -85,7 +91,7 @@ def _maybe_bootstrap_test_db() -> None:
                 ) else None
             finally:
                 await test_conn.close()
-            return current_rev != "0004"
+            return current_rev != head_rev
         finally:
             await conn.close()
 
@@ -139,6 +145,7 @@ async def clean_db(db_pool):
               group_note_versions, group_notes, memory_entries, linking_tokens,
               account_links, bot_account_assignments, bot_accounts, users,
               web_group_members, web_groups, web_users,
+              mcp_catalog,
               models, llm_routes, feature_budgets
             RESTART IDENTITY CASCADE
             """
@@ -155,6 +162,20 @@ async def clean_db(db_pool):
     yield db_pool
 
 
+async def _seed_all_tools(conn, boss_id: int) -> None:
+    """Seed every registered tool as active — runtime filter is a strict
+    intersect, so agent tests need rows in boss_active_tools."""
+    from src.tools.registry import _REGISTRY
+
+    await conn.executemany(
+        """
+        INSERT INTO boss_active_tools (boss_id, tool_name)
+        VALUES ($1, $2) ON CONFLICT DO NOTHING
+        """,
+        [(boss_id, n) for n in _REGISTRY],
+    )
+
+
 @pytest_asyncio.fixture
 async def boss_user(clean_db):
     """Insert a single boss user, return (id, email, name)."""
@@ -165,6 +186,7 @@ async def boss_user(clean_db):
             VALUES ('boss@example.com', 'Test Boss', 'boss') RETURNING id, email, name
             """
         )
+        await _seed_all_tools(c, row["id"])
     return row
 
 
@@ -194,6 +216,7 @@ def logged_in_boss(client, clean_db):
                     "boss-shared@example.com",
                     "Shared Boss",
                 )
+                await _seed_all_tools(c, int(row["id"]))
                 return int(row["id"])
 
         return asyncio.get_event_loop().run_until_complete(_async())

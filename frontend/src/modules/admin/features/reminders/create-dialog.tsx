@@ -18,6 +18,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/lib/i18n';
 import { createReminder, remindersQuery } from './api';
 
 export function CreateReminderDialog({
@@ -27,6 +28,7 @@ export function CreateReminderDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const [text, setText] = useState('');
   const [dueAt, setDueAt] = useState('');
   const [scope, setScope] = useState('dm');
@@ -42,13 +44,13 @@ export function CreateReminderDialog({
     onSuccess: () => {
       qc.invalidateQueries(remindersQuery('pending'));
       qc.invalidateQueries(remindersQuery('all'));
-      toast.success('Đã tạo nhắc lịch');
+      toast.success(t('rem.created'));
       setText('');
       setDueAt('');
       setScope('dm');
       onOpenChange(false);
     },
-    onError: () => toast.error('Tạo nhắc lịch thất bại'),
+    onError: () => toast.error(t('rem.createError')),
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -61,21 +63,21 @@ export function CreateReminderDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Tạo nhắc lịch mới</DialogTitle>
+          <DialogTitle>{t('rem.dialog.title')}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 mt-2">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="reminder-text">Nội dung</Label>
+            <Label htmlFor="reminder-text">{t('rem.field.content')}</Label>
             <Input
               id="reminder-text"
               value={text}
               onChange={e => setText(e.target.value)}
-              placeholder="VD: Họp nhóm lúc 9 giờ"
+              placeholder={t('rem.field.contentPlaceholder')}
               required
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="reminder-due">Thời gian nhắc</Label>
+            <Label htmlFor="reminder-due">{t('rem.field.time')}</Label>
             <input
               id="reminder-due"
               type="datetime-local"
@@ -86,14 +88,14 @@ export function CreateReminderDialog({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="reminder-scope">Phạm vi</Label>
+            <Label htmlFor="reminder-scope">{t('rem.field.scope')}</Label>
             <Select value={scope} onValueChange={setScope}>
               <SelectTrigger id="reminder-scope">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="dm">DM (tin nhắn riêng)</SelectItem>
-                <SelectItem value="group">Nhóm</SelectItem>
+                <SelectItem value="dm">{t('rem.scope.dmFull')}</SelectItem>
+                <SelectItem value="group">{t('rem.scope.group')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -103,13 +105,13 @@ export function CreateReminderDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Huỷ
+              {t('common.cancel')}
             </Button>
             <Button
               type="submit"
               disabled={mutation.isPending || !text.trim() || !dueAt}
             >
-              {mutation.isPending ? 'Đang tạo...' : 'Tạo'}
+              {mutation.isPending ? t('common.creating') : t('common.create')}
             </Button>
           </DialogFooter>
         </form>

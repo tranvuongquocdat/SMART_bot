@@ -25,6 +25,7 @@ import {
 import { agentTriggersQuery, deleteAgentTrigger, patchAgentTrigger } from './api';
 import type { AgentTrigger } from './api';
 import { EditDialog } from './edit-dialog';
+import { useT, useI18n } from '@/lib/i18n';
 
 // ---------------------------------------------------------------------------
 // Delete dialog
@@ -37,36 +38,37 @@ function DeleteDialog({
   trigger: AgentTrigger | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const mutation = useMutation({
     mutationFn: () => deleteAgentTrigger(trigger!.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'agent-triggers'] });
-      toast.success('Đã xoá trigger');
+      toast.success(t('sa.trig.deleted'));
       onClose();
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('sa.common.deleteError')),
   });
 
   return (
     <Dialog open={trigger !== null} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Xoá agent trigger</DialogTitle>
+          <DialogTitle>{t('sa.trig.deleteTitle')}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground py-2">
-          Xoá trigger <strong>{trigger?.op_name}</strong>? Không thể hoàn tác.
+          {t('sa.trig.deleteConfirmPre')}<strong>{trigger?.op_name}</strong>{t('sa.trig.deleteConfirmPost')}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             variant="destructive"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang xoá...' : 'Xoá'}
+            {mutation.isPending ? t('sa.common.deleting') : t('sa.common.delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -79,6 +81,8 @@ function DeleteDialog({
 // ---------------------------------------------------------------------------
 
 export default function AgentTriggersPage() {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const triggers = useQuery(agentTriggersQuery);
   const qc = useQueryClient();
 
@@ -92,7 +96,7 @@ export default function AgentTriggersPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'agent-triggers'] });
     },
-    onError: () => toast.error('Cập nhật thất bại'),
+    onError: () => toast.error(t('sa.common.updateError')),
   });
 
   const columns: ColumnDef<AgentTrigger>[] = [
@@ -143,14 +147,14 @@ export default function AgentTriggersPage() {
       ),
     },
     {
-      header: 'Cập nhật',
+      header: t('sa.trig.colUpdated'),
       accessorKey: 'updated_at',
       cell: ({ row }) => {
         const d = row.original.updated_at;
         if (!d) return <span className="text-muted-foreground">—</span>;
         return (
           <span className="text-sm text-muted-foreground">
-            {new Date(d).toLocaleString('vi-VN', {
+            {new Date(d).toLocaleString(locale, {
               day: '2-digit',
               month: '2-digit',
               hour: '2-digit',
@@ -173,13 +177,13 @@ export default function AgentTriggersPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
-                Sửa
+                {t('sa.common.edit')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 onClick={() => setDeleteTarget(row.original)}
               >
-                Xoá
+                {t('sa.common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -191,12 +195,12 @@ export default function AgentTriggersPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Agent triggers"
-        subtitle="Cấu hình debounce, threshold và bật/tắt từng trigger cho agent."
+        title={t('nav.sa.agentTriggers')}
+        subtitle={t('sa.trig.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Thêm trigger
+            {t('sa.trig.addBtn')}
           </Button>
         }
       />
@@ -212,8 +216,8 @@ export default function AgentTriggersPage() {
             empty={
               <EmptyState
                 icon={Zap}
-                title="Chưa có trigger nào"
-                action={{ label: '+ Thêm trigger', onClick: () => setCreateOpen(true) }}
+                title={t('sa.trig.empty')}
+                action={{ label: t('sa.trig.emptyAction'), onClick: () => setCreateOpen(true) }}
               />
             }
           />

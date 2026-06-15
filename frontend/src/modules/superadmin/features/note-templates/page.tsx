@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT, useI18n } from '@/lib/i18n';
 import { noteTemplatesQuery, deleteNoteTemplate } from './api';
 import type { NoteTemplate } from './api';
 import { EditDialog } from './edit-dialog';
@@ -36,36 +37,37 @@ function DeleteDialog({
   template: NoteTemplate | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const mutation = useMutation({
     mutationFn: () => deleteNoteTemplate(template!.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'note-templates'] });
-      toast.success('Đã xoá template');
+      toast.success(t('sa.tmpl.deleted'));
       onClose();
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('sa.common.deleteError')),
   });
 
   return (
     <Dialog open={template !== null} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Xoá note template</DialogTitle>
+          <DialogTitle>{t('sa.tmpl.deleteTitle')}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground py-2">
-          Xoá template <strong>{template?.name}</strong>? Không thể hoàn tác.
+          {t('sa.tmpl.deleteConfirmPre')}<strong>{template?.name}</strong>{t('sa.tmpl.deleteConfirmPost')}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             variant="destructive"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang xoá...' : 'Xoá'}
+            {mutation.isPending ? t('sa.common.deleting') : t('sa.common.delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -78,6 +80,8 @@ function DeleteDialog({
 // ---------------------------------------------------------------------------
 
 export default function NoteTemplatesPage() {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const templates = useQuery(noteTemplatesQuery);
   const [createOpen, setCreateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<NoteTemplate | null>(null);
@@ -85,14 +89,14 @@ export default function NoteTemplatesPage() {
 
   const columns: ColumnDef<NoteTemplate>[] = [
     {
-      header: 'Tên',
+      header: t('sa.tmpl.colName'),
       accessorKey: 'name',
       cell: ({ row }) => (
         <span className="font-medium">{row.original.name}</span>
       ),
     },
     {
-      header: 'Mô tả',
+      header: t('sa.tmpl.colDesc'),
       accessorKey: 'description',
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground">
@@ -109,14 +113,14 @@ export default function NoteTemplatesPage() {
         ) : null,
     },
     {
-      header: 'Cập nhật',
+      header: t('sa.tmpl.colUpdated'),
       accessorKey: 'updated_at',
       cell: ({ row }) => {
         const d = row.original.updated_at;
         if (!d) return <span className="text-muted-foreground">—</span>;
         return (
           <span className="text-sm text-muted-foreground">
-            {new Date(d).toLocaleString('vi-VN', {
+            {new Date(d).toLocaleString(locale, {
               day: '2-digit',
               month: '2-digit',
               hour: '2-digit',
@@ -139,13 +143,13 @@ export default function NoteTemplatesPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
-                Sửa
+                {t('sa.common.edit')}
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 onClick={() => setDeleteTarget(row.original)}
               >
-                Xoá
+                {t('sa.common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -157,12 +161,12 @@ export default function NoteTemplatesPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Note templates"
-        subtitle="Các mẫu ghi chú dùng cho group notes."
+        title={t('nav.sa.noteTemplates')}
+        subtitle={t('sa.tmpl.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Thêm template
+            {t('sa.tmpl.addBtn')}
           </Button>
         }
       />
@@ -178,8 +182,8 @@ export default function NoteTemplatesPage() {
             empty={
               <EmptyState
                 icon={BookTemplate}
-                title="Chưa có template nào"
-                action={{ label: '+ Thêm template', onClick: () => setCreateOpen(true) }}
+                title={t('sa.tmpl.empty')}
+                action={{ label: t('sa.tmpl.emptyAction'), onClick: () => setCreateOpen(true) }}
               />
             }
           />

@@ -23,8 +23,22 @@ ZALO_CAPS: dict[str, Any] = {
 }
 
 
+WEB_CAPS: dict[str, Any] = {
+    "inbound.has_webhook": False,
+    "inbound.supports_groups": True,
+    "inbound.supports_mentions": True,
+    "inbound.media_kinds": ["text", "image", "file", "url"],
+    "outbound.send_text": True,
+    "outbound.reply_to_msg": True,
+    "member.list_api": "full",
+    "auth.kind": "internal",
+    "requires_admin_role_for_core": False,
+}
+
+
 CAPABILITIES: dict[str, dict[str, Any]] = {
     "zalo": ZALO_CAPS,
+    "web": WEB_CAPS,
 }
 
 

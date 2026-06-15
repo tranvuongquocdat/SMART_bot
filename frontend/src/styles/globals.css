@@ -45,21 +45,21 @@
 
 :root {
   --background: 240 8% 5%;
-  --bg-subtle: 240 7% 7%;
-  --foreground: 0 0% 98%;
-  --muted: 240 5% 11%;
-  --muted-foreground: 240 5% 62%;
-  --dim: 240 4% 40%;
-  --border: 240 8% 6%;
-  --border-strong: 240 6% 13%;
-  --divider: 240 10% 3%;
-  --card: 240 7% 8%;
-  --card-grad-top: 240 7% 10%;
-  --card-grad-bot: 240 8% 7%;
-  --sidebar: 240 8% 8.5%;
-  --topbar: 240 8% 6%;
-  --hover: 240 8% 16%;
-  --accent: 240 8% 16%;
+  --bg-subtle: 240 7% 8.5%;
+  --foreground: 0 0% 99%;
+  --muted: 240 5% 12%;
+  --muted-foreground: 240 6% 71%;
+  --dim: 240 5% 51%;
+  --border: 240 8% 9%;
+  --border-strong: 240 7% 19%;
+  --divider: 240 9% 7%;
+  --card: 240 7% 9.5%;
+  --card-grad-top: 240 7% 11.5%;
+  --card-grad-bot: 240 8% 8.5%;
+  --sidebar: 240 8% 10%;
+  --topbar: 240 8% 7.5%;
+  --hover: 240 8% 19%;
+  --accent: 240 8% 19%;
   --accent-foreground: 0 0% 98%;
   --primary: 172 70% 45%;
   --primary-strong: 188 80% 50%;
@@ -78,10 +78,10 @@
   --text-2xl: 1.375rem;
   --text-3xl: 1.75rem;
   /* Surface borders — per-context. Slightly darker than card bg so they "scribe in" instead of "rise up". */
-  --ring-card:    240 10% 3% / 0.55;
-  --ring-section: 240 10% 3% / 0.45;
-  --ring-row:     240 10% 3% / 0.35;
-  --ring-hover-stat: 172 40% 28% / 0.55;
+  --ring-card:    240 10% 2% / 0.7;
+  --ring-section: 240 10% 2% / 0.6;
+  --ring-row:     240 10% 2% / 0.5;
+  --ring-hover-stat: 172 45% 32% / 0.65;
   /* No top inset highlight in dark — even subtle white creates a visible line. */
   --hl-top: 0 0% 100% / 0;
   --hl-top-strong: 0 0% 100% / 0;
@@ -93,15 +93,15 @@
 }
 
 .light {
-  --background: 0 0% 98%;
-  --bg-subtle: 240 10% 96%;
-  --foreground: 240 10% 6%;
-  --muted: 240 6% 95%;
-  --muted-foreground: 240 4% 35%;
-  --dim: 240 4% 58%;
-  --border: 240 6% 91%;
-  --border-strong: 240 6% 84%;
-  --divider: 240 6% 90%;
+  --background: 0 0% 99%;
+  --bg-subtle: 240 10% 95%;
+  --foreground: 240 12% 4%;
+  --muted: 240 6% 94%;
+  --muted-foreground: 240 5% 27%;
+  --dim: 240 4% 47%;
+  --border: 240 6% 86%;
+  --border-strong: 240 6% 77%;
+  --divider: 240 6% 85%;
   --card: 0 0% 100%;
   --card-grad-top: 0 0% 100%;
   --card-grad-bot: 240 10% 99%;
@@ -118,10 +118,10 @@
   --ok: 158 60% 32%;
   --warn: 38 88% 42%;
   --danger: 0 65% 48%;
-  --ring-card:    240 6% 91% / 1;
-  --ring-section: 240 6% 94% / 1;
-  --ring-row:     240 6% 94% / 1;
-  --ring-hover-stat: 172 50% 75% / 1;
+  --ring-card:    240 6% 86% / 1;
+  --ring-section: 240 6% 89% / 1;
+  --ring-row:     240 6% 90% / 1;
+  --ring-hover-stat: 172 50% 68% / 1;
   --hl-top: 0 0% 100% / 1;
   --hl-top-strong: 0 0% 100% / 1;
   --pill-zalo-bg: 210 80% 94%;
@@ -202,3 +202,83 @@ body {
   70%  { box-shadow: 0 0 0 6px hsl(var(--primary) / 0); }
   100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
 }
+
+/* tailwindcss-animate core — Tailwind v4 không tự nạp plugin này nên các class
+   data-[state]:animate-in/out của Radix (Dialog, Sheet, Dropdown…) trước đây là
+   class chết → modal pop cứng. Định nghĩa tối thiểu để chúng hoạt động. */
+@keyframes tw-enter {
+  from {
+    opacity: var(--tw-enter-opacity, 1);
+    transform: translate3d(var(--tw-enter-translate-x, 0), var(--tw-enter-translate-y, 0), 0)
+      scale3d(var(--tw-enter-scale, 1), var(--tw-enter-scale, 1), 1)
+      rotate(var(--tw-enter-rotate, 0));
+  }
+}
+@keyframes tw-exit {
+  to {
+    opacity: var(--tw-exit-opacity, 1);
+    transform: translate3d(var(--tw-exit-translate-x, 0), var(--tw-exit-translate-y, 0), 0)
+      scale3d(var(--tw-exit-scale, 1), var(--tw-exit-scale, 1), 1)
+      rotate(var(--tw-exit-rotate, 0));
+  }
+}
+
+.animate-in {
+  animation-name: tw-enter;
+  animation-duration: 200ms;
+  animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --tw-enter-opacity: initial;
+  --tw-enter-scale: initial;
+  --tw-enter-rotate: initial;
+  --tw-enter-translate-x: initial;
+  --tw-enter-translate-y: initial;
+}
+.animate-out {
+  animation-name: tw-exit;
+  animation-duration: 160ms;
+  animation-timing-function: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --tw-exit-opacity: initial;
+  --tw-exit-scale: initial;
+  --tw-exit-rotate: initial;
+  --tw-exit-translate-x: initial;
+  --tw-exit-translate-y: initial;
+}
+
+.fade-in-0  { --tw-enter-opacity: 0; }
+.fade-out-0 { --tw-exit-opacity: 0; }
+.zoom-in-95  { --tw-enter-scale: 0.95; }
+.zoom-out-95 { --tw-exit-scale: 0.95; }
+
+/* Dialog (căn giữa bằng translate -50%) */
+.slide-in-from-left-1\/2   { --tw-enter-translate-x: -50%; }
+.slide-in-from-top-\[48\%\]  { --tw-enter-translate-y: -48%; }
+.slide-out-to-left-1\/2    { --tw-exit-translate-x: -50%; }
+.slide-out-to-top-\[48\%\]   { --tw-exit-translate-y: -48%; }
+
+/* Dropdown / Select / Popover / Tooltip (nhích nhẹ theo side: 1=.25rem, 2=.5rem) */
+.slide-in-from-top-1     { --tw-enter-translate-y: -0.25rem; }
+.slide-in-from-top-2     { --tw-enter-translate-y: -0.5rem; }
+.slide-in-from-bottom-1  { --tw-enter-translate-y: 0.25rem; }
+.slide-in-from-bottom-2  { --tw-enter-translate-y: 0.5rem; }
+.slide-in-from-left-1    { --tw-enter-translate-x: -0.25rem; }
+.slide-in-from-left-2    { --tw-enter-translate-x: -0.5rem; }
+.slide-in-from-right-1   { --tw-enter-translate-x: 0.25rem; }
+.slide-in-from-right-2   { --tw-enter-translate-x: 0.5rem; }
+.slide-out-to-top-1      { --tw-exit-translate-y: -0.25rem; }
+.slide-out-to-top-2      { --tw-exit-translate-y: -0.5rem; }
+.slide-out-to-bottom-1   { --tw-exit-translate-y: 0.25rem; }
+.slide-out-to-bottom-2   { --tw-exit-translate-y: 0.5rem; }
+.slide-out-to-left-1     { --tw-exit-translate-x: -0.25rem; }
+.slide-out-to-left-2     { --tw-exit-translate-x: -0.5rem; }
+.slide-out-to-right-1    { --tw-exit-translate-x: 0.25rem; }
+.slide-out-to-right-2    { --tw-exit-translate-x: 0.5rem; }
+
+/* Sheet (trượt full cạnh — chưa dùng nhưng để sẵn cho đồng bộ) */
+.slide-in-from-top     { --tw-enter-translate-y: -100%; }
+.slide-in-from-bottom  { --tw-enter-translate-y: 100%; }
+.slide-in-from-left    { --tw-enter-translate-x: -100%; }
+.slide-in-from-right   { --tw-enter-translate-x: 100%; }
+.slide-out-to-top      { --tw-exit-translate-y: -100%; }
+.slide-out-to-bottom   { --tw-exit-translate-y: 100%; }
+.slide-out-to-left     { --tw-exit-translate-x: -100%; }
+.slide-out-to-right    { --tw-exit-translate-x: 100%; }

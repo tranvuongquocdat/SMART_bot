@@ -28,6 +28,7 @@ class DMContext:
     feature="dm_general",
     memory_scopes=["semantic", "episodic", "prospective"],
     tools={
+        "search_knowledge",
         "search_history",
         "count_messages",
         "list_groups",
@@ -41,6 +42,7 @@ class DMContext:
         "fetch_url",
         "list_action_items",
         "mark_action_item",
+        "workload_summary",
         "edit_group_note",
         "read_group_note",
         "refresh_group_note",
@@ -61,4 +63,5 @@ class DMResponder:
             chat_id=event["chat_id"],
             content=answer,
             trigger="dm",
+            chat_type="dm",
         )

@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { createNoteTemplate, patchNoteTemplate } from './api';
 import type { NoteTemplate } from './api';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   template: NoteTemplate | null; // null = create mode
@@ -21,6 +22,7 @@ type Props = {
 };
 
 export function EditDialog({ template, open, onOpenChange }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const isEdit = template !== null;
 
@@ -50,10 +52,10 @@ export function EditDialog({ template, open, onOpenChange }: Props) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'note-templates'] });
-      toast.success(isEdit ? 'Đã cập nhật template' : 'Đã tạo template mới');
+      toast.success(isEdit ? t('sa.tmpl.updated') : t('sa.tmpl.created'));
       onOpenChange(false);
     },
-    onError: () => toast.error(isEdit ? 'Cập nhật thất bại' : 'Tạo thất bại'),
+    onError: () => toast.error(isEdit ? t('sa.common.updateError') : t('sa.tmpl.createError')),
   });
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -62,22 +64,22 @@ export function EditDialog({ template, open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>{isEdit ? 'Sửa note template' : 'Thêm note template'}</DialogTitle>
+          <DialogTitle>{isEdit ? t('sa.tmpl.editTitle') : t('sa.tmpl.addTitle')}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
-            <Label>Tên</Label>
+            <Label>{t('sa.tmpl.name')}</Label>
             <Input
-              placeholder="vd: Weekly recap"
+              placeholder={t('sa.tmpl.namePlaceholder')}
               value={form.name}
               onChange={e => set('name', e.target.value)}
             />
           </div>
           <div className="grid gap-1.5">
-            <Label>Mô tả (tuỳ chọn)</Label>
+            <Label>{t('sa.tmpl.descOptional')}</Label>
             <Input
-              placeholder="Mô tả ngắn..."
+              placeholder={t('sa.tmpl.descPlaceholder')}
               value={form.description}
               onChange={e => set('description', e.target.value)}
             />
@@ -86,13 +88,13 @@ export function EditDialog({ template, open, onOpenChange }: Props) {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             disabled={mutation.isPending || !form.name.trim()}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang lưu...' : 'Lưu'}
+            {mutation.isPending ? t('sa.common.saving') : t('sa.common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>

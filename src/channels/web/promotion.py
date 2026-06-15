@@ -52,6 +52,11 @@ class BossPromotionService:
                     boss_id, web_user_id,
                 )
 
+                if role == "boss":
+                    from src.services.subscription import provision_new_boss
+
+                    await provision_new_boss(c, boss_id)
+
                 bot_acc_id = await c.fetchval(
                     """
                     SELECT id FROM bot_accounts

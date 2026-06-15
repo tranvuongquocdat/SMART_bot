@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { patchBoss } from './api';
 import type { Boss } from './api';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   boss: Boss | null;
@@ -27,6 +28,7 @@ type Props = {
 };
 
 export function EditDialog({ boss, onOpenChange }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const open = boss !== null;
 
@@ -55,10 +57,10 @@ export function EditDialog({ boss, onOpenChange }: Props) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bosses'] });
-      toast.success('Đã cập nhật boss');
+      toast.success(t('sa.boss.updated'));
       onOpenChange(false);
     },
-    onError: () => toast.error('Cập nhật thất bại'),
+    onError: () => toast.error(t('sa.common.updateError')),
   });
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -67,12 +69,12 @@ export function EditDialog({ boss, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>Sửa boss</DialogTitle>
+          <DialogTitle>{t('sa.boss.editTitle')}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
-            <Label>Tên hiển thị</Label>
+            <Label>{t('sa.boss.fieldName')}</Label>
             <Input
               value={form.name}
               onChange={e => set('name', e.target.value)}
@@ -80,7 +82,7 @@ export function EditDialog({ boss, onOpenChange }: Props) {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Vai trò</Label>
+            <Label>{t('sa.boss.role')}</Label>
             <Select value={form.role} onValueChange={v => set('role', v)}>
               <SelectTrigger>
                 <SelectValue />
@@ -95,7 +97,7 @@ export function EditDialog({ boss, onOpenChange }: Props) {
           <div className="grid gap-1.5">
             <Label>Timezone</Label>
             <Input
-              placeholder="VD: Asia/Ho_Chi_Minh"
+              placeholder={t('sa.boss.tzPlaceholder')}
               value={form.tz}
               onChange={e => set('tz', e.target.value)}
             />
@@ -104,13 +106,13 @@ export function EditDialog({ boss, onOpenChange }: Props) {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             disabled={mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang lưu...' : 'Lưu'}
+            {mutation.isPending ? t('sa.common.saving') : t('sa.common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>

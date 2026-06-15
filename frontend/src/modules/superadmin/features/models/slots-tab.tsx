@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT } from '@/lib/i18n';
 
 const SLOT_ICONS = { smart: RefreshCw, fast: Zap, vision: Eye } as const;
 
@@ -36,6 +37,7 @@ function AssignSlotDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const eligibleModels = models.filter(
     m => m.tier === slot.slot && m.is_active,
@@ -47,24 +49,24 @@ function AssignSlotDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'model-slots'] });
       qc.invalidateQueries({ queryKey: ['superadmin', 'models'] });
-      toast.success(`Đã cập nhật slot ${slot.slot}`);
+      toast.success(t('sa.models.slotUpdated', { slot: slot.slot }));
       onOpenChange(false);
     },
-    onError: () => toast.error('Cập nhật slot thất bại'),
+    onError: () => toast.error(t('sa.models.slotUpdateError')),
   });
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
-          <DialogTitle>Gán model cho slot <span className="capitalize">{slot.slot}</span></DialogTitle>
+          <DialogTitle>{t('sa.models.assignTitle')} <span className="capitalize">{slot.slot}</span></DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3 mt-2">
           <div className="flex flex-col gap-1.5">
             <Label>Model</Label>
             {eligibleModels.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Chưa có model nào với tier <strong>{slot.slot}</strong>. Hãy thêm model ở tab Models trước.
+                {t('sa.models.noTierPre')}<strong>{slot.slot}</strong>{t('sa.models.noTierPost')}
               </p>
             ) : (
               <Select
@@ -72,7 +74,7 @@ function AssignSlotDialog({
                 onValueChange={v => setSelectedId(Number(v))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Chọn model" />
+                  <SelectValue placeholder={t('sa.models.choose')} />
                 </SelectTrigger>
                 <SelectContent>
                   {eligibleModels.map(m => (
@@ -86,12 +88,12 @@ function AssignSlotDialog({
           </div>
         </div>
         <DialogFooter className="mt-4">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Huỷ</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('sa.common.cancel')}</Button>
           <Button
             disabled={!selectedId || eligibleModels.length === 0 || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            Lưu
+            {t('sa.common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -100,6 +102,7 @@ function AssignSlotDialog({
 }
 
 export function SlotsTab() {
+  const t = useT();
   const slots = useQuery(slotsQuery);
   const models = useQuery(modelsQuery);
   const [editSlot, setEditSlot] = useState<Slot | null>(null);
@@ -110,7 +113,7 @@ export function SlotsTab() {
         <div>
           <h2 className="text-[14.5px] font-semibold tracking-tight">Model slots</h2>
           <p className="text-[12.5px] text-muted-foreground mt-0.5">
-            Boss có thể override; đây là giá trị mặc định nền tảng.
+            {t('sa.models.slotsDesc')}
           </p>
         </div>
       </div>

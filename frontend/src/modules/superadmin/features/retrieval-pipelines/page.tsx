@@ -16,12 +16,15 @@ import {
 import { retrievalPipelinesQuery } from './api';
 import type { RetrievalPipeline } from './api';
 import { EditDialog } from './edit-dialog';
+import { useI18n } from '@/lib/i18n';
 
 // ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
 export default function RetrievalPipelinesPage() {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const pipelines = useQuery(retrievalPipelinesQuery);
   const [editTarget, setEditTarget] = useState<RetrievalPipeline | null>(null);
 
@@ -49,7 +52,7 @@ export default function RetrievalPipelinesPage() {
       },
     },
     {
-      header: 'Mô tả',
+      header: t('sa.rp.colDesc'),
       accessorKey: 'description',
       cell: ({ row }) =>
         row.original.description ? (
@@ -59,14 +62,14 @@ export default function RetrievalPipelinesPage() {
         ),
     },
     {
-      header: 'Cập nhật',
+      header: t('sa.rp.colUpdated'),
       accessorKey: 'updated_at',
       cell: ({ row }) => {
         const d = row.original.updated_at;
         if (!d) return <span className="text-muted-foreground">—</span>;
         return (
           <span className="text-sm text-muted-foreground">
-            {new Date(d).toLocaleString('vi-VN', {
+            {new Date(d).toLocaleString(locale, {
               day: '2-digit',
               month: '2-digit',
               hour: '2-digit',
@@ -89,7 +92,7 @@ export default function RetrievalPipelinesPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => setEditTarget(row.original)}>
-                Sửa
+                {t('sa.common.edit')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -101,8 +104,8 @@ export default function RetrievalPipelinesPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Retrieval pipelines"
-        subtitle="Cấu hình stages và mô tả cho từng pipeline retrieval."
+        title={t('nav.sa.retrieval')}
+        subtitle={t('sa.rp.subtitle')}
       />
 
       <PageSection>
@@ -116,8 +119,8 @@ export default function RetrievalPipelinesPage() {
             empty={
               <EmptyState
                 icon={GitBranch}
-                title="Chưa có pipeline nào"
-                description="Dữ liệu sẽ xuất hiện khi có pipeline được cấu hình."
+                title={t('sa.rp.empty')}
+                description={t('sa.rp.emptyDesc')}
               />
             }
           />

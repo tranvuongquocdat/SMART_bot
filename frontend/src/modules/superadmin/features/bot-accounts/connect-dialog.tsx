@@ -19,10 +19,12 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { createBotAccount } from './api';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  onCreated?: (id: number, provider: string) => void;
 };
 
 const INITIAL = {
@@ -33,7 +35,8 @@ const INITIAL = {
   ownership: 'platform',
 };
 
-export function ConnectDialog({ open, onOpenChange }: Props) {
+export function ConnectDialog({ open, onOpenChange, onCreated }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState(INITIAL);
 
@@ -46,13 +49,19 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
         account_kind: form.account_kind,
         ownership: form.ownership || null,
       }),
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bot-accounts'] });
-      toast.success('Đã kết nối account');
+      toast.success(
+        form.provider === 'zalo'
+          ? t('sa.acct.createdZalo')
+          : t('sa.acct.connected')
+      );
+      const provider = form.provider;
       setForm(INITIAL);
       onOpenChange(false);
+      onCreated?.(res.id, provider);
     },
-    onError: () => toast.error('Kết nối thất bại'),
+    onError: () => toast.error(t('sa.acct.connectError')),
   });
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -62,7 +71,7 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>Kết nối bot account</DialogTitle>
+          <DialogTitle>{t('sa.acct.connectTitle')}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
@@ -73,7 +82,7 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="zalo">Zalo cá nhân</SelectItem>
+                <SelectItem value="zalo">{t('sa.acct.channelZalo')}</SelectItem>
                 <SelectItem value="telegram">Telegram</SelectItem>
                 <SelectItem value="lark">Lark</SelectItem>
               </SelectContent>
@@ -81,25 +90,25 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Tên hiển thị (label)</Label>
+            <Label>{t('sa.acct.fieldLabel')}</Label>
             <Input
-              placeholder="VD: Trợ lý Zalo Boss A"
+              placeholder={t('sa.acct.labelPlaceholder')}
               value={form.label}
               onChange={e => set('label', e.target.value)}
             />
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Handle / ID</Label>
+            <Label>{t('sa.acct.fieldHandle')}</Label>
             <Input
-              placeholder="VD: 0987654321 hoặc @mybot"
+              placeholder={t('sa.acct.handlePlaceholder')}
               value={form.handle}
               onChange={e => set('handle', e.target.value)}
             />
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Loại tài khoản</Label>
+            <Label>{t('sa.acct.fieldKind')}</Label>
             <Select value={form.account_kind} onValueChange={v => set('account_kind', v)}>
               <SelectTrigger>
                 <SelectValue />
@@ -112,14 +121,14 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Ownership</Label>
+            <Label>{t('sa.acct.ownership')}</Label>
             <Select value={form.ownership} onValueChange={v => set('ownership', v)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="platform">Platform (dùng chung)</SelectItem>
-                <SelectItem value="boss_owned">Boss owned (riêng)</SelectItem>
+                <SelectItem value="platform">{t('sa.acct.ownPlatform')}</SelectItem>
+                <SelectItem value="boss_owned">{t('sa.acct.ownBoss')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -127,13 +136,13 @@ export function ConnectDialog({ open, onOpenChange }: Props) {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             disabled={!valid || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang kết nối...' : 'Kết nối'}
+            {mutation.isPending ? t('sa.acct.connecting') : t('sa.acct.connect')}
           </Button>
         </DialogFooter>
       </DialogContent>

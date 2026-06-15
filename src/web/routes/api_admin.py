@@ -7,11 +7,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import asyncpg
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from pydantic import BaseModel
 
 from src.repositories.base import BossContext
 from src.web.deps import get_db, require_boss
+from src.web.i18n import tr
 from src.web.security import verify_json_csrf
 
 router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
@@ -644,25 +645,11 @@ async def patch_settings_account(
 # ---------------------------------------------------------------------------
 
 
-def _mask_keys(api_keys_enc: bytes | None) -> dict[str, dict]:
-    """Decrypt api_keys_enc and return per-provider {present, last_4} map.
-    Never returns raw keys. Returns empty dict on any decryption error.
-    """
-    from cryptography.fernet import Fernet
-    from src.config import settings as cfg
+from src.services.boss_ai_config import AiConfigError  # noqa: E402
 
-    result: dict[str, dict] = {}
-    if not api_keys_enc:
-        return result
-    try:
-        f = Fernet(cfg.FERNET_KEY.encode())
-        data: dict[str, str] = json.loads(f.decrypt(bytes(api_keys_enc)).decode())
-    except Exception:
-        return result
-    for prov, key_val in data.items():
-        last_4 = key_val[-4:] if len(key_val) >= 4 else ""
-        result[prov] = {"present": True, "last_4": last_4}
-    return result
+
+def _ai_err(e: AiConfigError) -> HTTPException:
+    return HTTPException(status_code=e.status, detail=e.message)
 
 
 @router.get("/settings/ai")
@@ -671,65 +658,12 @@ async def get_settings_ai(
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
     """Return 3 model slots + masked API key info + available models list."""
-    async with db.acquire() as c:
-        boss = await c.fetchrow(
-            """
-            SELECT smart_model_id, fast_model_id, vision_model_id,
-                   cost_cap_usd_daily, api_keys_enc
-            FROM users WHERE id = $1
-            """,
-            ctx.boss_id,
-        )
-        models = await c.fetch(
-            """
-            SELECT id, name, provider, tier, capabilities,
-                   cost_per_1m_input_usd, cost_per_1m_output_usd, is_platform_default
-            FROM models
-            WHERE is_active = TRUE
-            ORDER BY tier, provider, name
-            """
-        )
+    from src.services import boss_ai_config
 
-    slots = [
-        {
-            "slot": "smart",
-            "model_id": boss["smart_model_id"] if boss else None,
-        },
-        {
-            "slot": "fast",
-            "model_id": boss["fast_model_id"] if boss else None,
-        },
-        {
-            "slot": "vision",
-            "model_id": boss["vision_model_id"] if boss else None,
-        },
-    ]
-
-    keys = _mask_keys(boss["api_keys_enc"] if boss else None)
-    # Ensure all 3 standard providers appear (even if absent)
-    for prov in ("openai", "groq", "gemini"):
-        keys.setdefault(prov, {"present": False})
-
-    models_list = [
-        {
-            "id": int(m["id"]),
-            "name": m["name"],
-            "provider": m["provider"],
-            "tier": m["tier"],
-            "capabilities": list(m["capabilities"]) if m["capabilities"] else [],
-            "cost_per_1m_input_usd": float(m["cost_per_1m_input_usd"] or 0),
-            "cost_per_1m_output_usd": float(m["cost_per_1m_output_usd"] or 0),
-            "is_platform_default": bool(m["is_platform_default"]),
-        }
-        for m in models
-    ]
-
-    return {
-        "slots": slots,
-        "keys": keys,
-        "models": models_list,
-        "cost_cap_usd_daily": float(boss["cost_cap_usd_daily"] or 0) if boss else 0.0,
-    }
+    try:
+        return await boss_ai_config.get_ai_settings(db, ctx.boss_id)
+    except AiConfigError as e:
+        raise _ai_err(e)
 
 
 @router.patch("/settings/ai", dependencies=[Depends(verify_json_csrf)])
@@ -744,31 +678,20 @@ async def patch_settings_ai(
       {slot: 'smart'|'fast'|'vision', model_id: int|null}
       {cost_cap_usd_daily: float}
     """
+    from src.services import boss_ai_config
+
     slot = payload.get("slot")
-    model_id = payload.get("model_id")
     cap = payload.get("cost_cap_usd_daily")
 
-    slot_col_map = {"smart": "smart_model_id", "fast": "fast_model_id", "vision": "vision_model_id"}
-
-    if slot and slot in slot_col_map:
-        col = slot_col_map[slot]
-        async with db.acquire() as c:
-            await c.execute(
-                f"UPDATE users SET {col}=$2 WHERE id=$1",
-                ctx.boss_id,
-                int(model_id) if model_id is not None else None,
-            )
-        return {"updated": 1}
-
-    if cap is not None:
-        async with db.acquire() as c:
-            await c.execute(
-                "UPDATE users SET cost_cap_usd_daily=$2 WHERE id=$1",
-                ctx.boss_id,
-                float(cap),
-            )
-        return {"updated": 1}
-
+    try:
+        if slot:
+            await boss_ai_config.set_model_slot(db, ctx.boss_id, slot, payload.get("model_id"))
+            return {"updated": 1}
+        if cap is not None:
+            await boss_ai_config.set_cost_cap(db, ctx.boss_id, cap)
+            return {"updated": 1}
+    except AiConfigError as e:
+        raise _ai_err(e)
     return {"updated": 0}
 
 
@@ -785,43 +708,83 @@ async def patch_settings_ai_keys(
 
     Keys are Fernet-encrypted at rest. Never echoed back.
     """
-    from cryptography.fernet import Fernet
-    from src.config import settings as cfg
+    from src.services import boss_ai_config
 
-    provider = payload.get("provider", "").strip().lower()
-    if provider not in ("openai", "groq", "gemini"):
-        raise HTTPException(status_code=422, detail="unknown provider")
-
-    async with db.acquire() as c:
-        blob = await c.fetchval(
-            "SELECT api_keys_enc FROM users WHERE id=$1", ctx.boss_id
-        )
-
-    f = Fernet(cfg.FERNET_KEY.encode())
-    existing: dict[str, str] = {}
-    if blob:
-        try:
-            existing = json.loads(f.decrypt(bytes(blob)).decode())
-        except Exception:
-            existing = {}
-
-    if payload.get("clear"):
-        existing.pop(provider, None)
-    else:
-        api_key = (payload.get("api_key") or "").strip()
-        if not api_key:
-            raise HTTPException(status_code=422, detail="api_key required")
-        existing[provider] = api_key
-
-    new_blob = f.encrypt(json.dumps(existing).encode())
-    async with db.acquire() as c:
-        await c.execute(
-            "UPDATE users SET api_keys_enc=$2 WHERE id=$1",
-            ctx.boss_id,
-            new_blob,
-        )
-
+    provider = payload.get("provider", "")
+    try:
+        if payload.get("clear"):
+            await boss_ai_config.clear_api_key(db, ctx.boss_id, provider)
+        else:
+            await boss_ai_config.set_api_key(
+                db,
+                ctx.boss_id,
+                provider,
+                payload.get("api_key") or "",
+                base_url=payload.get("base_url"),
+            )
+    except AiConfigError as e:
+        raise _ai_err(e)
     return {"updated": 1}
+
+
+# ---------------------------------------------------------------------------
+# Settings: AI — model riêng của boss (BYO)
+#   POST   /api/v1/admin/settings/ai/models
+#   DELETE /api/v1/admin/settings/ai/models/{model_id}
+# ---------------------------------------------------------------------------
+
+
+@router.post("/settings/ai/models", dependencies=[Depends(verify_json_csrf)], status_code=201)
+async def create_own_model(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Boss tự thêm model chạy bằng API key của mình.
+
+    Payload: {provider, name, tier, vision?: bool, ctx_max?: int}
+    Yêu cầu boss đã lưu BYO key cho provider — model riêng không có dữ liệu giá
+    nên không được chạy trên quota nền tảng (lách cost cap).
+    """
+    from src.services import boss_ai_config
+
+    try:
+        new_id = await boss_ai_config.create_own_model(db, ctx, ctx.boss_id, payload)
+    except AiConfigError as e:
+        raise _ai_err(e)
+    return {"id": new_id}
+
+
+@router.patch("/settings/ai/models/{model_id}", dependencies=[Depends(verify_json_csrf)])
+async def patch_own_model(
+    model_id: int,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Sửa thông số model riêng: tier, capabilities, cost, ctx_max."""
+    from src.services import boss_ai_config
+
+    try:
+        await boss_ai_config.patch_own_model(db, ctx.boss_id, model_id, payload)
+    except AiConfigError as e:
+        raise _ai_err(e)
+    return {"updated": 1}
+
+
+@router.delete("/settings/ai/models/{model_id}", dependencies=[Depends(verify_json_csrf)])
+async def delete_own_model(
+    model_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.services import boss_ai_config
+
+    try:
+        await boss_ai_config.delete_own_model(db, ctx.boss_id, model_id)
+    except AiConfigError as e:
+        raise _ai_err(e)
+    return {"deleted": 1}
 
 
 # ---------------------------------------------------------------------------
@@ -834,10 +797,10 @@ async def get_settings_general(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Return general/profile settings: name, tz, language."""
+    """Return general/profile settings: name, tz, language (bot), ui_language (web)."""
     async with db.acquire() as c:
         row = await c.fetchrow(
-            "SELECT id, name, tz, language FROM users WHERE id=$1",
+            "SELECT id, name, tz, language, ui_language FROM users WHERE id=$1",
             ctx.boss_id,
         )
     if not row:
@@ -862,6 +825,7 @@ async def groups_list(
                 SELECT gn.id,
                        COALESCE(gn.group_name, gn.chat_id) AS name,
                        gn.provider                          AS channel,
+                       gn.is_active,
                        gn.updated_at,
                        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
                 FROM group_notes gn
@@ -874,6 +838,7 @@ async def groups_list(
                 SELECT gn.id,
                        COALESCE(gn.group_name, gn.chat_id) AS name,
                        gn.provider                          AS channel,
+                       gn.is_active,
                        gn.updated_at,
                        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
                 FROM group_notes gn
@@ -887,6 +852,7 @@ async def groups_list(
             "id": int(r["id"]),
             "name": r["name"],
             "channel": r["channel"],
+            "is_active": bool(r["is_active"]),
             "members_count": int(r["members_count"]),
             "updated_at": r["updated_at"].isoformat() if r["updated_at"] else None,
         }
@@ -1039,8 +1005,8 @@ async def patch_settings_general(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Update name, tz, language."""
-    allowed = {"name", "tz", "language"}
+    """Update name, tz, language (bot), ui_language (web)."""
+    allowed = {"name", "tz", "language", "ui_language"}
     sets = {k: v for k, v in payload.items() if k in allowed}
     if not sets:
         return {"updated": 0}
@@ -1522,17 +1488,190 @@ async def list_channels(
 @router.post("/channels/{provider}/connect", dependencies=[Depends(verify_json_csrf)])
 async def connect_channel(
     provider: str,
+    request: Request,
     ctx: BossContext = Depends(require_boss),
-    db: asyncpg.Pool = Depends(get_db),  # noqa: ARG001
+    db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Kick off a channel connect flow. Currently stubbed — real OAuth/QR flows TBD."""
-    # Real implementation will return {redirect_url} or {qr_url} depending on provider.
-    # Frontend handles null redirect_url gracefully (shows "coming soon" toast).
+    """Self-service connect: cấp phát bot account từ pool nền tảng.
+
+    Zalo dùng acc cá nhân do nền tảng quản lý (không OAuth) — connect nghĩa là
+    chọn acc ít tải nhất còn slot rồi kích hoạt inbound luôn (bấm Connect từ
+    web chính là chấp nhận assignment).
+    """
+    from src.services.bot_account_service import BotAccountService, NoCapacityError
+    from src.services.subscription import get_effective_limits
+
+    provider = provider.lower().strip()
+
+    async with db.acquire() as c:
+        existing = await c.fetchval(
+            """
+            SELECT status FROM bot_account_assignments
+            WHERE boss_id=$1 AND provider=$2 AND status IN ('active', 'pending_accept')
+            """,
+            ctx.boss_id,
+            provider,
+        )
+        if existing:
+            raise HTTPException(409, tr(ctx, vi="Kênh này đã được kết nối", en="This channel is already connected"))
+
+        limits = await get_effective_limits(db, ctx.boss_id)
+        if limits.max_active_channels is not None:
+            active = await c.fetchval(
+                """
+                SELECT COUNT(*) FROM bot_account_assignments
+                WHERE boss_id=$1 AND status='active' AND provider <> 'web'
+                """,
+                ctx.boss_id,
+            )
+            if active >= limits.max_active_channels:
+                raise HTTPException(
+                    400,
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {limits.max_active_channels} kênh của gói hiện tại",
+                        en=f"Reached the {limits.max_active_channels}-channel limit of the current plan",
+                    ),
+                )
+
+    registry = getattr(request.app.state, "channel_registry", None)
+    adapter_map = (
+        {a.provider: a for a in registry.adapters()} if registry is not None else {}
+    )
+    svc = BotAccountService(db, request.app.state.bus, adapter_map)
+    try:
+        bot_account_id = await svc.auto_assign(ctx.boss_id, provider)
+    except NoCapacityError:
+        raise HTTPException(
+            409,
+            tr(
+                ctx,
+                vi="Hiện chưa có tài khoản bot khả dụng cho kênh này — vui lòng liên hệ quản trị viên",
+                en="No bot account is available for this channel right now — please contact an administrator",
+            ),
+        )
+    await svc.accept(ctx.boss_id, provider)
+
+    async with db.acquire() as c:
+        display_name = await c.fetchval(
+            "SELECT display_name FROM bot_accounts WHERE id=$1", bot_account_id
+        )
+    return {"provider": provider, "status": "active", "display_name": display_name}
+
+
+@router.post("/channels/{provider}/link-token", dependencies=[Depends(verify_json_csrf)])
+async def mint_link_token(
+    provider: str,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Cấp token handshake để boss nhắn ``/start <token>`` từ TÀI KHOẢN CHÍNH.
+
+    Đây là khâu định danh acc chính của sếp: bot nhận DM ``/start <token>``,
+    InboundIngest consume token -> ghi account_links. Nhờ đó bot nhận diện được
+    sếp khi sếp DM hoặc khi sếp xuất hiện trong nhóm.
+    """
+    provider = provider.lower().strip()
+    async with db.acquire() as c:
+        acc = await c.fetchrow(
+            """
+            SELECT ba.id, ba.provider_user_id, ba.display_name
+            FROM bot_account_assignments baa
+            JOIN bot_accounts ba ON ba.id = baa.bot_account_id
+            WHERE baa.boss_id=$1 AND baa.provider=$2 AND baa.status='active'
+            """,
+            ctx.boss_id,
+            provider,
+        )
+    if acc is None:
+        raise HTTPException(
+            409,
+            tr(ctx, vi="Chưa kết nối kênh này", en="Channel not connected"),
+        )
+    from src.services.linking_service import LinkingService
+
+    token = await LinkingService(db).generate(ctx.boss_id, provider, acc["id"])
     return {
-        "provider": provider,
-        "redirect_url": None,
-        "qr_url": None,
-        "message": "not_implemented",
+        "token": token,
+        "bot_name": acc["display_name"] or acc["provider_user_id"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Zalo: boss tự kết nối acc phụ qua QR
+#   POST /channels/zalo/qr-login        → mở phiên login, trả login_id
+#   GET  /channels/zalo/qr-login/{id}   → poll trạng thái + ảnh QR
+# ---------------------------------------------------------------------------
+
+
+async def _check_channel_slot(db, ctx, provider: str) -> None:
+    """Chặn connect khi đã có kênh này hoặc vượt limit gói (dùng chung)."""
+    from src.services.subscription import get_effective_limits
+
+    async with db.acquire() as c:
+        existing = await c.fetchval(
+            """
+            SELECT status FROM bot_account_assignments
+            WHERE boss_id=$1 AND provider=$2 AND status IN ('active', 'pending_accept')
+            """,
+            ctx.boss_id,
+            provider,
+        )
+        if existing:
+            raise HTTPException(409, tr(ctx, vi="Kênh này đã được kết nối", en="This channel is already connected"))
+        limits = await get_effective_limits(db, ctx.boss_id)
+        if limits.max_active_channels is not None:
+            active = await c.fetchval(
+                """
+                SELECT COUNT(*) FROM bot_account_assignments
+                WHERE boss_id=$1 AND status='active' AND provider <> 'web'
+                """,
+                ctx.boss_id,
+            )
+            if active >= limits.max_active_channels:
+                raise HTTPException(
+                    400,
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {limits.max_active_channels} kênh của gói hiện tại",
+                        en=f"Reached the {limits.max_active_channels}-channel limit of the current plan",
+                    ),
+                )
+
+
+@router.post("/channels/zalo/qr-login", dependencies=[Depends(verify_json_csrf)])
+async def zalo_qr_login_start(
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Mở phiên QR login để boss quét bằng acc Zalo phụ (acc nghe ngóng)."""
+    await _check_channel_slot(db, ctx, "zalo")
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    if manager is None:
+        raise HTTPException(503, tr(ctx, vi="Zalo QR login chưa sẵn sàng", en="Zalo QR login is not ready"))
+    sess = await manager.start(ctx.boss_id)
+    return {"login_id": sess.login_id, "status": sess.status}
+
+
+@router.get("/channels/zalo/qr-login/{login_id}")
+async def zalo_qr_login_status(
+    login_id: str,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+) -> dict:
+    manager = getattr(request.app.state, "zalo_qr_login", None)
+    sess = manager.get(ctx.boss_id, login_id) if manager else None
+    if sess is None:
+        raise HTTPException(404, tr(ctx, vi="Phiên đăng nhập không tồn tại", en="Login session does not exist"))
+    return {
+        "status": sess.status,
+        "qr_image_b64": sess.qr_image_b64 if sess.status == "qr" else None,
+        "display_name": sess.display_name,
+        "error": sess.error,
+        "bot_account_id": sess.bot_account_id,
+        "expires_in_s": sess.expires_in_s,
     }
 
 
@@ -1563,6 +1702,24 @@ async def disconnect_channel(
 
 
 # ===========================================================================
+# Workload / Hiệu suất  –  GET /api/v1/admin/workload?group_id=
+# Tổng hợp khối lượng việc theo người TỪ SPINE (knowledge_items có assignee):
+# open=active, done=resolved, overdue=active&due<now + completion_rate + overdue_items.
+# ===========================================================================
+
+@router.get("/workload")
+async def get_workload(
+    group_id: str | None = Query(None),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.repositories.knowledge import KnowledgeRepo
+
+    repo = KnowledgeRepo(db, ctx)
+    return await repo.workload_summary(chat_id=group_id or None)
+
+
+# ===========================================================================
 # Usage  –  GET /api/v1/admin/usage?range=30d
 # ===========================================================================
 
@@ -1580,23 +1737,29 @@ async def get_usage(
     days = max(1, min(days, 365))
 
     async with db.acquire() as c:
-        # Per-day breakdown for DataTable / chart
+        # Per-day breakdown — gap-fill đủ N ngày (ngày không dùng = 0) để chart
+        # hiển thị trọn khoảng đã chọn.
         daily_rows = await c.fetch(
             """
-            SELECT DATE(called_at AT TIME ZONE 'UTC') AS day,
-                   SUM(tokens_in)   AS tokens_in,
-                   SUM(tokens_out)  AS tokens_out,
-                   SUM(tokens_in + tokens_out) AS tokens_total,
-                   COUNT(*)         AS messages,
-                   SUM(cost_usd)    AS cost_usd
-            FROM token_usage
-            WHERE boss_id = $1
-              AND called_at > NOW() - ($2 || ' days')::INTERVAL
-            GROUP BY day
-            ORDER BY day DESC
+            SELECT d::date AS day,
+                   COALESCE(SUM(t.tokens_in), 0)::bigint            AS tokens_in,
+                   COALESCE(SUM(t.tokens_out), 0)::bigint           AS tokens_out,
+                   COALESCE(SUM(t.tokens_in + t.tokens_out), 0)::bigint AS tokens_total,
+                   COUNT(t.id)::bigint                              AS messages,
+                   COALESCE(SUM(t.cost_usd), 0.0)                   AS cost_usd
+            FROM generate_series(
+                   (NOW() AT TIME ZONE 'UTC')::date - ($2::int - 1),
+                   (NOW() AT TIME ZONE 'UTC')::date,
+                   INTERVAL '1 day'
+                 ) d
+            LEFT JOIN token_usage t
+                   ON DATE(t.called_at AT TIME ZONE 'UTC') = d::date
+                  AND t.boss_id = $1
+            GROUP BY d
+            ORDER BY d DESC
             """,
             ctx.boss_id,
-            str(days),
+            days,
         )
 
         # Summary totals
@@ -1610,6 +1773,24 @@ async def get_usage(
             FROM token_usage
             WHERE boss_id = $1
               AND called_at > NOW() - ($2 || ' days')::INTERVAL
+            """,
+            ctx.boss_id,
+            str(days),
+        )
+
+        # Per-model breakdown — model nào tốn bao nhiêu (cost + tokens + calls).
+        model_rows = await c.fetch(
+            """
+            SELECT provider, model,
+                   SUM(tokens_in)  AS tokens_in,
+                   SUM(tokens_out) AS tokens_out,
+                   COUNT(*)        AS calls,
+                   SUM(cost_usd)   AS cost_usd
+            FROM token_usage
+            WHERE boss_id = $1
+              AND called_at > NOW() - ($2 || ' days')::INTERVAL
+            GROUP BY provider, model
+            ORDER BY cost_usd DESC NULLS LAST, calls DESC
             """,
             ctx.boss_id,
             str(days),
@@ -1634,6 +1815,17 @@ async def get_usage(
                 "cost_usd": float(r["cost_usd"] or 0),
             }
             for r in daily_rows
+        ],
+        "by_model": [
+            {
+                "provider": r["provider"],
+                "model": r["model"],
+                "tokens_in": int(r["tokens_in"] or 0),
+                "tokens_out": int(r["tokens_out"] or 0),
+                "calls": int(r["calls"] or 0),
+                "cost_usd": float(r["cost_usd"] or 0),
+            }
+            for r in model_rows
         ],
     }
 
@@ -1674,3 +1866,1137 @@ async def get_subscription(
         "last_invoice": None,
         "upgrade_url": None,
     }
+
+
+# ===========================================================================
+# Subscription — Plans & Requests
+# ===========================================================================
+
+from src.services.subscription import get_effective_limits, check_over_limit  # noqa: E402
+from src.web.uploads import save_upload  # noqa: E402
+
+
+@router.get("/subscription/plans")
+async def list_plans(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, label, limits_json, prices_json FROM plans WHERE is_active=TRUE ORDER BY sort_order"
+        )
+    result = []
+    for r in rows:
+        # asyncpg trả JSONB dạng chuỗi (không đăng ký codec) — phải parse,
+        # không thì frontend nhận string và mọi limit hiển thị "Không giới hạn".
+        prices = r["prices_json"]
+        if isinstance(prices, str):
+            prices = json.loads(prices)
+        limits = r["limits_json"]
+        if isinstance(limits, str):
+            limits = json.loads(limits)
+        result.append(
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "label": r["label"],
+                "limits": limits or {},
+                "prices": prices or {},
+            }
+        )
+    return result
+
+
+@router.get("/subscription/limits")
+async def get_limits(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    lim = await get_effective_limits(db, ctx.boss_id)
+    over = await check_over_limit(db, ctx.boss_id)
+    return {
+        "max_active_groups": lim.max_active_groups,
+        "max_active_tools": lim.max_active_tools,
+        "max_active_channels": lim.max_active_channels,
+        "mcp_slots": lim.mcp_slots,
+        "cost_cap_usd_daily": lim.cost_cap_usd_daily,
+        "over_limit": {
+            "groups": over.groups,
+            "tools": over.tools,
+            "channels": over.channels,
+            "mcp": over.mcp,
+            "any_over": over.any_over,
+        },
+    }
+
+
+@router.get("/subscription/requests")
+async def list_subscription_requests(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT sr.id, sr.status, sr.note, sr.amount_paid_vnd, sr.transfer_content,
+                   sr.billing_months,
+                   sr.reviewer_note, sr.refund_requested, sr.created_at, sr.reviewed_at,
+                   sr.cancelled_at,
+                   p.name AS plan_name, p.label AS plan_label
+            FROM subscription_requests sr
+            JOIN plans p ON p.id = sr.plan_id
+            WHERE sr.boss_id = $1
+            ORDER BY sr.created_at DESC
+            """,
+            ctx.boss_id,
+        )
+    result = []
+    for r in rows:
+        d = dict(r)
+        if d.get("created_at"):
+            d["created_at"] = d["created_at"].isoformat()
+        if d.get("reviewed_at"):
+            d["reviewed_at"] = d["reviewed_at"].isoformat()
+        if d.get("cancelled_at"):
+            d["cancelled_at"] = d["cancelled_at"].isoformat()
+        result.append(d)
+    return result
+
+
+@router.post("/subscription/requests", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_subscription_request(
+    plan_id: int = Form(...),
+    note: str | None = Form(None),
+    amount_paid_vnd: int | None = Form(None),
+    transfer_content: str | None = Form(None),
+    billing_months: int = Form(1),
+    payment_proof: UploadFile = File(...),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    async with db.acquire() as c:
+        plan = await c.fetchrow(
+            "SELECT id, name, prices_json FROM plans WHERE id=$1 AND is_active=TRUE", plan_id
+        )
+        if not plan:
+            raise HTTPException(404, "Plan not found")
+        prices = plan["prices_json"]
+        if isinstance(prices, str):
+            prices = json.loads(prices)
+        prices = prices or {}
+        if prices and str(billing_months) not in prices:
+            raise HTTPException(422, tr(ctx, vi="Gói không hỗ trợ chu kỳ thanh toán này", en="The plan does not support this billing cycle"))
+        proof_path = await save_upload(payment_proof, "payment_proofs")
+        try:
+            row = await c.fetchrow(
+                """
+                INSERT INTO subscription_requests
+                  (boss_id, plan_id, note, payment_proof_path, amount_paid_vnd,
+                   transfer_content, billing_months)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                RETURNING id, status
+                """,
+                ctx.boss_id,
+                plan_id,
+                note,
+                proof_path,
+                amount_paid_vnd,
+                transfer_content,
+                billing_months,
+            )
+        except Exception as e:
+            if "uq_one_pending_per_boss" in str(e):
+                raise HTTPException(409, "Already have a pending request")
+            raise
+    return {"id": row["id"], "status": row["status"], "plan_name": plan["name"]}
+
+
+@router.post(
+    "/subscription/requests/{req_id}/cancel",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def cancel_subscription_request(
+    req_id: int,
+    cancel_reason: str | None = Form(None),
+    refund_requested: bool = Form(False),
+    refund_qr: UploadFile | None = File(None),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    qr_path = None
+    if refund_requested and refund_qr and refund_qr.filename:
+        qr_path = await save_upload(refund_qr, "refund_qr")
+    async with db.acquire() as c:
+        req = await c.fetchrow(
+            "SELECT id, boss_id, status FROM subscription_requests WHERE id=$1",
+            req_id,
+        )
+        if not req or req["boss_id"] != ctx.boss_id:
+            raise HTTPException(404, "Request not found")
+        if req["status"] != "pending":
+            raise HTTPException(400, "Can only cancel pending requests")
+        await c.execute(
+            """
+            UPDATE subscription_requests SET
+              status='cancelled', cancel_reason=$2,
+              refund_requested=$3, refund_qr_path=$4,
+              cancelled_at=NOW()
+            WHERE id=$1
+            """,
+            req_id,
+            cancel_reason,
+            refund_requested,
+            qr_path,
+        )
+    return {"status": "cancelled", "refund_requested": refund_requested}
+
+
+# ===========================================================================
+# Tools — List & Toggle
+# ===========================================================================
+
+from src.tools import registry as _tool_registry  # noqa: E402
+
+
+@router.get("/tools")
+async def list_tools(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+        )
+    active_names = {r["tool_name"] for r in rows}
+    return [
+        {
+            "name": name,
+            "description": t.description,
+            "active": name in active_names,
+        }
+        for name, t in _tool_registry._REGISTRY.items()
+    ]
+
+
+@router.patch("/tools/{name}/toggle", dependencies=[Depends(verify_json_csrf)])
+async def toggle_tool(
+    name: str,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    if name not in _tool_registry._REGISTRY:
+        raise HTTPException(404, "Tool not found")
+
+    async with db.acquire() as c:
+        exists = await c.fetchval(
+            "SELECT 1 FROM boss_active_tools WHERE boss_id=$1 AND tool_name=$2",
+            ctx.boss_id,
+            name,
+        )
+        if exists:
+            await c.execute(
+                "DELETE FROM boss_active_tools WHERE boss_id=$1 AND tool_name=$2",
+                ctx.boss_id,
+                name,
+            )
+            return {"name": name, "active": False}
+
+        lim = await get_effective_limits(db, ctx.boss_id)
+        if lim.max_active_tools is not None:
+            count = await c.fetchval(
+                "SELECT COUNT(*) FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+            )
+            if count >= lim.max_active_tools:
+                raise HTTPException(
+                    400,
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.max_active_tools} tool của gói hiện tại",
+                        en=f"Limit reached: max {lim.max_active_tools} active tools on your plan",
+                    ),
+                )
+        await c.execute(
+            "INSERT INTO boss_active_tools (boss_id, tool_name) VALUES ($1, $2)",
+            ctx.boss_id,
+            name,
+        )
+        return {"name": name, "active": True}
+
+
+# ===========================================================================
+# Chat — sếp chat với bot ngay trong web admin (đi qua web channel)
+#   GET  /api/v1/admin/chat/messages
+#   POST /api/v1/admin/chat/send
+#   GET  /api/v1/admin/chat/stream   (SSE)
+# ===========================================================================
+
+
+async def _boss_web_identity(db: asyncpg.Pool, ctx: BossContext) -> str:
+    from src.services.web_identity import get_or_create_boss_web_identity
+
+    return await get_or_create_boss_web_identity(db, ctx.boss_id)
+
+
+async def _conversation_uid(
+    db: asyncpg.Pool, ctx: BossContext, conversation_id: str | None
+) -> str:
+    """Resolve hội thoại: None → hội thoại mặc định (tự tạo nếu chưa có)."""
+    if conversation_id is None:
+        return await _boss_web_identity(db, ctx)
+    async with db.acquire() as c:
+        ok = await c.fetchval(
+            "SELECT 1 FROM web_users WHERE id=$1 AND boss_user_id=$2 AND is_boss",
+            conversation_id,
+            ctx.boss_id,
+        )
+    if not ok:
+        raise HTTPException(404, "Conversation not found")
+    return conversation_id
+
+
+@router.get("/chat/messages")
+async def chat_messages(
+    limit: int = Query(50, le=200),
+    conversation_id: str | None = Query(None),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    uid = await _conversation_uid(db, ctx, conversation_id)
+    chat_id = f"dm:{uid}"
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT * FROM (
+              SELECT 'in'::text AS kind, m.id, m.sender_name, m.text, m.ts,
+                     m.media_kind, m.media_url
+              FROM messages m
+              WHERE m.provider='web' AND m.chat_id=$1
+              UNION ALL
+              SELECT 'out'::text AS kind, o.id, 'Bot' AS sender_name, o.content AS text, o.sent_at AS ts,
+                     'text' AS media_kind, NULL AS media_url
+              FROM outbound_messages o
+              WHERE o.provider='web' AND o.chat_id=$1
+            ) merged
+            ORDER BY ts DESC
+            LIMIT $2
+            """,
+            chat_id,
+            limit,
+        )
+    return [
+        {
+            "kind": r["kind"],
+            "id": r["id"],
+            "sender_name": r["sender_name"],
+            "text": r["text"],
+            "media_kind": r["media_kind"],
+            "media_url": r["media_url"],
+            "ts": r["ts"].isoformat(),
+        }
+        for r in reversed(rows)
+    ]
+
+
+@router.post("/chat/send", dependencies=[Depends(verify_json_csrf)])
+async def chat_send(
+    payload: dict,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Lưu tin nhắn ngay (history thấy tức thì) rồi xếp agent run vào hàng đợi
+    theo hội thoại — POST trả về ngay, không chờ agent; nhắn liên tục được
+    xử lý tuần tự; hủy được qua /chat/cancel."""
+    import uuid as _uuid
+    from datetime import datetime, timezone
+
+    from src.domain.message import NewMessage
+    from src.repositories.messages import MessagesRepo
+
+    text = (payload.get("text") or "").strip()
+    attachment = payload.get("attachment") or None
+    if not text and not attachment:
+        raise HTTPException(400, "text or attachment required")
+    uid = await _conversation_uid(db, ctx, payload.get("conversation_id"))
+    async with db.acquire() as c:
+        sender_name = await c.fetchval("SELECT name FROM web_users WHERE id=$1", uid)
+
+    media_url = attachment.get("url") if attachment else None
+    media_kind = attachment.get("kind") if attachment else None
+    agent_text = text
+    if attachment:
+        # Cho LLM biết có đính kèm (xử lý sâu nội dung file thuộc media pipeline)
+        label = attachment.get("name") or media_url
+        agent_text = f"{text}\n[Attachment {media_kind}: {label}]".strip()
+
+    chat_id = f"dm:{uid}"
+    repo = MessagesRepo(db, BossContext(boss_id=ctx.boss_id, user_role="boss"))
+    msg_id = await repo.insert(
+        NewMessage(
+            provider="web",
+            chat_id=chat_id,
+            chat_type="dm",
+            provider_msg_id=f"adm-{_uuid.uuid4().hex[:10]}",
+            sender_provider_id=uid,
+            sender_name=sender_name,
+            text=agent_text or None,
+            media_kind=media_kind or "text",
+            media_url=media_url,
+            media_text=None,
+            ts=datetime.now(tz=timezone.utc),
+        )
+    )
+    if msg_id is None:
+        return {"ok": True, "deduped": True}
+
+    request.app.state.chat_runs.submit(
+        f"web:{chat_id}",
+        request.app.state.bus.publish(
+            "message.captured",
+            {
+                "message_id": msg_id,
+                "boss_id": ctx.boss_id,
+                "provider": "web",
+                "chat_id": chat_id,
+                "chat_type": "dm",
+                "mentions_bot": False,
+                "sender_is_boss": True,
+                "text": agent_text,
+                "bot_account_id": None,
+            },
+        ),
+    )
+    return {"ok": True}
+
+
+@router.post("/chat/cancel", dependencies=[Depends(verify_json_csrf)])
+async def chat_cancel(
+    payload: dict,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Hủy các lượt agent đang chạy/đang chờ của hội thoại."""
+    uid = await _conversation_uid(db, ctx, payload.get("conversation_id"))
+    cancelled = request.app.state.chat_runs.cancel(f"web:dm:{uid}")
+    return {"cancelled": cancelled}
+
+
+@router.get("/chat/stream")
+async def chat_stream(
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+):
+    """SSE: đẩy event bot trả lời về cho admin chat (reuse sse_hub của web channel)."""
+    import asyncio as _asyncio
+
+    from fastapi.responses import StreamingResponse
+
+    registry = getattr(request.app.state, "channel_registry", None)
+    adapter = registry.get("web") if registry is not None else None
+    if adapter is None:
+        raise HTTPException(503, "web channel not loaded")
+
+    uid = await _conversation_uid(
+        db, ctx, request.query_params.get("conversation_id")
+    )
+    client = adapter.sse_hub.attach(uid)
+
+    async def gen():
+        try:
+            yield b": connected\n\n"
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    event = await _asyncio.wait_for(client.queue.get(), timeout=15.0)
+                    yield f"data: {json.dumps(event)}\n\n".encode()
+                except _asyncio.TimeoutError:
+                    yield b": heartbeat\n\n"
+        finally:
+            adapter.sse_hub.detach(client)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/tools/enable-all", dependencies=[Depends(verify_json_csrf)])
+async def enable_all_tools(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Bật toàn bộ tools trong một lần bấm, cắt theo max_active_tools của gói."""
+    from src.tools import registry as _reg
+
+    lim = await get_effective_limits(db, ctx.boss_id)
+    names = list(_reg._REGISTRY.keys())
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+        )
+        active = {r["tool_name"] for r in rows}
+        to_add = [n for n in names if n not in active]
+        if lim.max_active_tools is not None:
+            slots = max(0, lim.max_active_tools - len(active))
+            to_add = to_add[:slots]
+        if to_add:
+            await c.executemany(
+                """
+                INSERT INTO boss_active_tools (boss_id, tool_name)
+                VALUES ($1, $2) ON CONFLICT DO NOTHING
+                """,
+                [(ctx.boss_id, n) for n in to_add],
+            )
+    return {
+        "enabled": len(to_add),
+        "active": len(active) + len(to_add),
+        "total": len(names),
+        "limit": lim.max_active_tools,
+    }
+
+
+@router.patch("/groups/{group_id}/toggle-active", dependencies=[Depends(verify_json_csrf)])
+async def toggle_group_active(
+    group_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Bật/tắt nhóm — bật bị chặn khi vượt max_active_groups của gói."""
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT id, is_active FROM group_notes WHERE id=$1 AND boss_id=$2",
+            group_id,
+            ctx.boss_id,
+        )
+        if not row:
+            raise HTTPException(404, "Group not found")
+
+        if row["is_active"]:
+            await c.execute(
+                "UPDATE group_notes SET is_active=FALSE WHERE id=$1", group_id
+            )
+            return {"id": group_id, "is_active": False}
+
+        lim = await get_effective_limits(db, ctx.boss_id)
+        if lim.max_active_groups is not None:
+            count = await c.fetchval(
+                "SELECT COUNT(*) FROM group_notes WHERE boss_id=$1 AND is_active=TRUE",
+                ctx.boss_id,
+            )
+            if count >= lim.max_active_groups:
+                raise HTTPException(
+                    400,
+                    tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.max_active_groups} nhóm active của gói hiện tại",
+                        en=f"Reached the {lim.max_active_groups}-active-group limit of the current plan",
+                    ),
+                )
+        await c.execute(
+            "UPDATE group_notes SET is_active=TRUE WHERE id=$1", group_id
+        )
+        return {"id": group_id, "is_active": True}
+
+
+@router.post("/tools/disable-all", dependencies=[Depends(verify_json_csrf)])
+async def disable_all_tools(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Tắt toàn bộ tools trong một lần bấm."""
+    async with db.acquire() as c:
+        result = await c.execute(
+            "DELETE FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+        )
+    disabled = int(result.split()[-1]) if result else 0
+    return {"disabled": disabled, "active": 0}
+
+
+@router.post("/groups/enable-all", dependencies=[Depends(verify_json_csrf)])
+async def enable_all_groups(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Bật toàn bộ nhóm trong một lần bấm, cắt theo max_active_groups của gói."""
+    lim = await get_effective_limits(db, ctx.boss_id)
+    async with db.acquire() as c:
+        total = await c.fetchval(
+            "SELECT COUNT(*) FROM group_notes WHERE boss_id=$1", ctx.boss_id
+        )
+        active = await c.fetchval(
+            "SELECT COUNT(*) FROM group_notes WHERE boss_id=$1 AND is_active=TRUE",
+            ctx.boss_id,
+        )
+        slots = None
+        if lim.max_active_groups is not None:
+            slots = max(0, lim.max_active_groups - active)
+        if slots is None:
+            result = await c.execute(
+                "UPDATE group_notes SET is_active=TRUE WHERE boss_id=$1 AND is_active=FALSE",
+                ctx.boss_id,
+            )
+            enabled = int(result.split()[-1]) if result else 0
+        elif slots > 0:
+            # Bật các nhóm hoạt động gần nhất trước
+            result = await c.execute(
+                """
+                UPDATE group_notes SET is_active=TRUE
+                WHERE id IN (
+                  SELECT id FROM group_notes
+                  WHERE boss_id=$1 AND is_active=FALSE
+                  ORDER BY updated_at DESC NULLS LAST
+                  LIMIT $2
+                )
+                """,
+                ctx.boss_id,
+                slots,
+            )
+            enabled = int(result.split()[-1]) if result else 0
+        else:
+            enabled = 0
+    return {
+        "enabled": enabled,
+        "active": active + enabled,
+        "total": total,
+        "limit": lim.max_active_groups,
+    }
+
+
+@router.post("/groups/disable-all", dependencies=[Depends(verify_json_csrf)])
+async def disable_all_groups(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Tắt toàn bộ nhóm trong một lần bấm."""
+    async with db.acquire() as c:
+        result = await c.execute(
+            "UPDATE group_notes SET is_active=FALSE WHERE boss_id=$1 AND is_active=TRUE",
+            ctx.boss_id,
+        )
+    disabled = int(result.split()[-1]) if result else 0
+    return {"disabled": disabled, "active": 0}
+
+
+@router.get("/subscription/payment-info")
+async def subscription_payment_info(
+    plan_id: int = Query(...),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Thông tin chuyển khoản + nội dung gen sẵn để khách copy."""
+    from src.config import settings
+
+    async with db.acquire() as c:
+        plan_name = await c.fetchval(
+            "SELECT name FROM plans WHERE id=$1 AND is_active=TRUE", plan_id
+        )
+    if not plan_name:
+        raise HTTPException(404, "Plan not found")
+    return {
+        "transfer_content": f"SMART {plan_name.upper()} U{ctx.boss_id}",
+        "bank_account_number": settings.BANK_ACCOUNT_NUMBER or None,
+        "bank_account_name": settings.BANK_ACCOUNT_NAME or None,
+        "bank_bin": settings.BANK_BIN or None,
+    }
+
+
+# ===========================================================================
+# Group note — lõi của nhóm: xem / sửa / refresh / versions / template
+#   GET   /groups/:id/note
+#   PATCH /groups/:id/note            {content}
+#   POST  /groups/:id/note/refresh
+#   GET   /groups/:id/note/versions
+#   POST  /groups/:id/note/versions/:vid/restore
+#   GET   /note-templates             (read-only cho boss chọn)
+#   PATCH /groups/:id/template        {template_id}
+# ===========================================================================
+
+
+@router.get("/groups/{group_id}/note")
+async def get_group_note(
+    group_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            """
+            SELECT content, template_id, manually_edited_sections, updated_at
+            FROM group_notes WHERE id=$1
+            """,
+            group_id,
+        )
+    edited = row["manually_edited_sections"]
+    if isinstance(edited, str):
+        edited = json.loads(edited)
+    return {
+        "content": row["content"],
+        "template_id": row["template_id"],
+        "manually_edited_sections": edited,
+        "updated_at": row["updated_at"].isoformat() if row["updated_at"] else None,
+    }
+
+
+@router.patch("/groups/{group_id}/note", dependencies=[Depends(verify_json_csrf)])
+async def edit_group_note_web(
+    group_id: int,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    content = payload.get("content")
+    if content is None:
+        raise HTTPException(400, "content required")
+    await _require_group_owner(group_id, ctx, db)
+    from src.repositories.group_notes import GroupNotesRepo
+
+    repo = GroupNotesRepo(db, ctx)
+    await repo.update_content(group_id, content, emitted_by="boss_web")
+    return {"ok": True}
+
+
+@router.post("/groups/{group_id}/note/refresh", dependencies=[Depends(verify_json_csrf)])
+async def refresh_group_note_web(
+    group_id: int,
+    request: Request,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT provider, chat_id FROM group_notes WHERE id=$1", group_id
+        )
+    await request.app.state.bus.publish(
+        "op.note_updater.fire",
+        {
+            "reason": "on_demand_web",
+            "boss_id": ctx.boss_id,
+            "source_event": {
+                "boss_id": ctx.boss_id,
+                "provider": row["provider"],
+                "chat_id": row["chat_id"],
+            },
+        },
+    )
+    return {"ok": True, "message": "Bot is updating the note"}
+
+
+@router.get("/groups/{group_id}/note/versions")
+async def list_note_versions(
+    group_id: int,
+    limit: int = Query(20, le=100),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT id, emitted_by, emitted_at, LENGTH(content) AS content_len
+            FROM group_note_versions
+            WHERE group_note_id=$1
+            ORDER BY id DESC LIMIT $2
+            """,
+            group_id,
+            limit,
+        )
+    return [
+        {
+            "id": r["id"],
+            "emitted_by": r["emitted_by"],
+            "emitted_at": r["emitted_at"].isoformat(),
+            "content_len": r["content_len"],
+        }
+        for r in rows
+    ]
+
+
+@router.post(
+    "/groups/{group_id}/note/versions/{version_id}/restore",
+    dependencies=[Depends(verify_json_csrf)],
+)
+async def restore_note_version(
+    group_id: int,
+    version_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    async with db.acquire() as c:
+        content = await c.fetchval(
+            "SELECT content FROM group_note_versions WHERE id=$1 AND group_note_id=$2",
+            version_id,
+            group_id,
+        )
+    if content is None:
+        raise HTTPException(404, "Version not found")
+    from src.repositories.group_notes import GroupNotesRepo
+
+    repo = GroupNotesRepo(db, ctx)
+    await repo.update_content(group_id, content, emitted_by=f"restore_v{version_id}")
+    return {"ok": True}
+
+
+@router.get("/note-templates")
+async def list_note_templates_admin(
+    ctx: BossContext = Depends(require_boss),  # noqa: ARG001
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            "SELECT id, name, description FROM note_templates ORDER BY name"
+        )
+    return [dict(r) for r in rows]
+
+
+@router.patch("/groups/{group_id}/template", dependencies=[Depends(verify_json_csrf)])
+async def set_group_template(
+    group_id: int,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    await _require_group_owner(group_id, ctx, db)
+    template_id = payload.get("template_id")
+    async with db.acquire() as c:
+        if template_id is not None:
+            exists = await c.fetchval(
+                "SELECT 1 FROM note_templates WHERE id=$1", template_id
+            )
+            if not exists:
+                raise HTTPException(404, "Template not found")
+        await c.execute(
+            "UPDATE group_notes SET template_id=$2 WHERE id=$1", group_id, template_id
+        )
+    return {"ok": True, "template_id": template_id}
+
+
+# ---------------------------------------------------------------------------
+# Chat conversations — quản lý nhiều hội thoại với trợ lý
+# ---------------------------------------------------------------------------
+
+
+@router.get("/chat/conversations")
+async def list_conversations(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> list[dict]:
+    # Đảm bảo luôn có ít nhất 1 hội thoại
+    await _boss_web_identity(db, ctx)
+    async with db.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT w.id, w.name, w.created_at,
+                   (SELECT MAX(ts) FROM messages m
+                    WHERE m.provider='web' AND m.chat_id='dm:'||w.id) AS last_message_at,
+                   (SELECT text FROM messages m
+                    WHERE m.provider='web' AND m.chat_id='dm:'||w.id
+                    ORDER BY ts DESC LIMIT 1) AS last_message
+            FROM web_users w
+            WHERE w.boss_user_id=$1 AND w.is_boss
+            ORDER BY COALESCE(
+              (SELECT MAX(ts) FROM messages m
+               WHERE m.provider='web' AND m.chat_id='dm:'||w.id),
+              w.created_at) DESC
+            """,
+            ctx.boss_id,
+        )
+    return [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "created_at": r["created_at"].isoformat(),
+            "last_message_at": r["last_message_at"].isoformat() if r["last_message_at"] else None,
+            "last_message": (r["last_message"] or "")[:80] or None,
+        }
+        for r in rows
+    ]
+
+
+@router.post("/chat/conversations", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def create_conversation(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.channels.web.state_repo import WebUsersRepo
+
+    name = (payload.get("name") or "").strip() or "New conversation"
+    uid = await WebUsersRepo(db).create(
+        name=name, is_boss=True, boss_user_id=ctx.boss_id
+    )
+    async with db.acquire() as c:
+        await c.execute(
+            """
+            INSERT INTO account_links (boss_id, provider, provider_user_id)
+            VALUES ($1, 'web', $2) ON CONFLICT DO NOTHING
+            """,
+            ctx.boss_id,
+            uid,
+        )
+    return {"id": uid, "name": name}
+
+
+@router.patch("/chat/conversations/{conversation_id}", dependencies=[Depends(verify_json_csrf)])
+async def rename_conversation(
+    conversation_id: str,
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    await _conversation_uid(db, ctx, conversation_id)
+    async with db.acquire() as c:
+        await c.execute(
+            "UPDATE web_users SET name=$2 WHERE id=$1", conversation_id, name
+        )
+    return {"id": conversation_id, "name": name}
+
+
+@router.delete("/chat/conversations/{conversation_id}", status_code=204, dependencies=[Depends(verify_json_csrf)])
+async def delete_conversation(
+    conversation_id: str,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> None:
+    await _conversation_uid(db, ctx, conversation_id)
+    chat_id = f"dm:{conversation_id}"
+    async with db.acquire() as c:
+        await c.execute(
+            "DELETE FROM messages WHERE boss_id=$1 AND provider='web' AND chat_id=$2",
+            ctx.boss_id,
+            chat_id,
+        )
+        await c.execute(
+            "DELETE FROM outbound_messages WHERE boss_id=$1 AND provider='web' AND chat_id=$2",
+            ctx.boss_id,
+            chat_id,
+        )
+        await c.execute(
+            "DELETE FROM account_links WHERE provider='web' AND provider_user_id=$1",
+            conversation_id,
+        )
+        await c.execute("DELETE FROM web_users WHERE id=$1", conversation_id)
+
+
+@router.post("/chat/upload", dependencies=[Depends(verify_json_csrf)])
+async def chat_upload(
+    file: UploadFile = File(...),
+    ctx: BossContext = Depends(require_boss),
+) -> dict:
+    from src.web.uploads import save_upload
+
+    allowed = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".pdf",
+               ".docx", ".xlsx", ".csv", ".txt", ".md"}
+    path = await save_upload(file, f"chat/{ctx.boss_id}", allowed=allowed)
+    filename = path.rsplit("/", 1)[-1]
+    ext = filename.rsplit(".", 1)[-1].lower()
+    kind = "image" if ext in ("jpg", "jpeg", "png", "gif", "webp") else "file"
+    return {
+        "url": f"/api/v1/admin/chat/files/{filename}",
+        "name": file.filename or filename,
+        "kind": kind,
+    }
+
+
+@router.get("/chat/files/{filename}")
+async def chat_file(
+    filename: str,
+    ctx: BossContext = Depends(require_boss),
+):
+    from pathlib import Path as _Path
+
+    from fastapi.responses import FileResponse
+
+    safe = _Path(filename).name
+    candidate = _Path("uploads") / "chat" / str(ctx.boss_id) / safe
+    if not candidate.exists():
+        raise HTTPException(404, "File not found")
+    return FileResponse(str(candidate))
+
+
+# ===========================================================================
+# Tích hợp — MCP servers (theo slot gói) + plugins nội bộ
+# ===========================================================================
+
+
+@router.get("/integrations")
+async def list_integrations(
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.plugins_loader import list_available_plugins
+    from src.services.subscription import get_effective_limits
+
+    lim = await get_effective_limits(db, ctx.boss_id)
+    async with db.acquire() as c:
+        catalog = await c.fetch(
+            "SELECT id, name, description, icon_url FROM mcp_catalog WHERE is_active ORDER BY name"
+        )
+        servers = await c.fetch(
+            """
+            SELECT s.id, s.name, s.url, s.enabled, s.created_at, s.catalog_id
+            FROM mcp_servers s WHERE s.boss_id=$1 ORDER BY s.created_at
+            """,
+            ctx.boss_id,
+        )
+        plug_rows = await c.fetch(
+            "SELECT plugin_id, enabled FROM boss_integrations WHERE boss_id=$1",
+            ctx.boss_id,
+        )
+    plug_state = {r["plugin_id"]: r["enabled"] for r in plug_rows}
+    used = sum(1 for s in servers if s["enabled"])
+    return {
+        "mcp_slots": lim.mcp_slots,
+        "mcp_used": used,
+        "catalog": [dict(r) for r in catalog],
+        "servers": [
+            {**dict(r), "created_at": r["created_at"].isoformat()} for r in servers
+        ],
+        "plugins": [
+            {
+                "plugin_id": p["id"],
+                "name": p.get("name") or p["id"],
+                "description": p.get("description"),
+                "enabled": plug_state.get(p["id"], False),
+            }
+            for p in list_available_plugins()
+        ],
+    }
+
+
+@router.post("/mcp-servers", status_code=201, dependencies=[Depends(verify_json_csrf)])
+async def add_mcp_server(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.services.subscription import get_effective_limits
+
+    catalog_id = payload.get("catalog_id")
+    if not catalog_id:
+        raise HTTPException(400, "catalog_id required")
+    lim = await get_effective_limits(db, ctx.boss_id)
+    async with db.acquire() as c:
+        cat = await c.fetchrow(
+            "SELECT name, url FROM mcp_catalog WHERE id=$1 AND is_active", catalog_id
+        )
+        if not cat:
+            raise HTTPException(404, "Catalog item not found")
+        if lim.mcp_slots is not None:
+            used = await c.fetchval(
+                "SELECT COUNT(*) FROM mcp_servers WHERE boss_id=$1 AND enabled", ctx.boss_id
+            )
+            if used >= lim.mcp_slots:
+                raise HTTPException(
+                    400, tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.mcp_slots} integration của gói hiện tại",
+                        en=f"Reached the {lim.mcp_slots}-integration limit of the current plan",
+                    )
+                )
+        dup = await c.fetchval(
+            "SELECT 1 FROM mcp_servers WHERE boss_id=$1 AND catalog_id=$2",
+            ctx.boss_id, catalog_id,
+        )
+        if dup:
+            raise HTTPException(409, tr(ctx, vi="Integration này đã được thêm", en="This integration is already added"))
+        sid = await c.fetchval(
+            """
+            INSERT INTO mcp_servers (boss_id, catalog_id, name, url, enabled)
+            VALUES ($1, $2, $3, $4, TRUE) RETURNING id
+            """,
+            ctx.boss_id, catalog_id, cat["name"], cat["url"],
+        )
+    return {"id": sid, "name": cat["name"], "enabled": True}
+
+
+@router.patch("/mcp-servers/{server_id}/toggle", dependencies=[Depends(verify_json_csrf)])
+async def toggle_mcp_server(
+    server_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.services.subscription import get_effective_limits
+
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT enabled FROM mcp_servers WHERE id=$1 AND boss_id=$2",
+            server_id, ctx.boss_id,
+        )
+        if not row:
+            raise HTTPException(404, "Integration not found")
+        if row["enabled"]:
+            await c.execute(
+                "UPDATE mcp_servers SET enabled=FALSE WHERE id=$1", server_id
+            )
+            return {"id": server_id, "enabled": False}
+        lim = await get_effective_limits(db, ctx.boss_id)
+        if lim.mcp_slots is not None:
+            used = await c.fetchval(
+                "SELECT COUNT(*) FROM mcp_servers WHERE boss_id=$1 AND enabled", ctx.boss_id
+            )
+            if used >= lim.mcp_slots:
+                raise HTTPException(
+                    400, tr(
+                        ctx,
+                        vi=f"Đã đạt giới hạn {lim.mcp_slots} integration của gói hiện tại",
+                        en=f"Reached the {lim.mcp_slots}-integration limit of the current plan",
+                    )
+                )
+        await c.execute("UPDATE mcp_servers SET enabled=TRUE WHERE id=$1", server_id)
+        return {"id": server_id, "enabled": True}
+
+
+@router.delete("/mcp-servers/{server_id}", status_code=204, dependencies=[Depends(verify_json_csrf)])
+async def delete_mcp_server(
+    server_id: int,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> None:
+    async with db.acquire() as c:
+        deleted = await c.fetchval(
+            "DELETE FROM mcp_servers WHERE id=$1 AND boss_id=$2 RETURNING id",
+            server_id, ctx.boss_id,
+        )
+    if not deleted:
+        raise HTTPException(404, "Integration not found")
+
+
+@router.patch("/integrations/plugins/{plugin_id}/toggle", dependencies=[Depends(verify_json_csrf)])
+async def toggle_plugin(
+    plugin_id: str,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.plugins_loader import list_available_plugins
+
+    if plugin_id not in {p["id"] for p in list_available_plugins()}:
+        raise HTTPException(404, "Plugin not found")
+    async with db.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT enabled FROM boss_integrations WHERE boss_id=$1 AND plugin_id=$2",
+            ctx.boss_id, plugin_id,
+        )
+        new_state = not (row and row["enabled"])
+        await c.execute(
+            """
+            INSERT INTO boss_integrations (boss_id, plugin_id, enabled)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (boss_id, plugin_id) DO UPDATE SET enabled=EXCLUDED.enabled
+            """,
+            ctx.boss_id, plugin_id, new_state,
+        )
+    return {"plugin_id": plugin_id, "enabled": new_state}

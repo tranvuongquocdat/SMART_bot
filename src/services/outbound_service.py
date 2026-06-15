@@ -46,6 +46,7 @@ class OutboundService:
         content: str,
         trigger: str,
         reply_to_message_id: int | None = None,
+        chat_type: str | None = None,
     ) -> int | None:
         outbound_id = await self._persist_queued(
             boss_id, provider, chat_id, content, trigger, reply_to_message_id
@@ -73,7 +74,11 @@ class OutboundService:
             status = "failed"
         else:
             text = adapter.normalize_text(content)
-            thread_kind = adapter.classify_thread_kind(chat_id)
+            # chat_type tường minh (từ message.captured) thắng heuristic độ dài.
+            if chat_type is not None:
+                thread_kind = "group" if chat_type == "group" else "user"
+            else:
+                thread_kind = adapter.classify_thread_kind(chat_id)
             try:
                 await adapter.send_text(bot_acc, chat_id, text, thread_kind)
                 status = "sent"

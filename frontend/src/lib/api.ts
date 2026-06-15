@@ -13,6 +13,16 @@ export class ApiError extends Error {
   }
 }
 
+/** Lấy `detail` từ ApiError để toast cho người dùng; fallback nếu không có. */
+export function errorMessage(e: unknown, fallback: string): string {
+  if (e instanceof ApiError && e.body && typeof e.body === 'object') {
+    const d = (e.body as { detail?: unknown }).detail;
+    if (typeof d === 'string' && d) return d;
+  }
+  if (e instanceof Error && e.message && !e.message.startsWith('API ')) return e.message;
+  return fallback;
+}
+
 export async function api<T = unknown>(
   path: string,
   init: RequestInit = {}

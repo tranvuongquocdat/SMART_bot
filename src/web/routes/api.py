@@ -26,8 +26,8 @@ async def partial_group_note(
             chat_id,
         )
     if not note:
-        return HTMLResponse("<div class='text-sm text-gray-400'>(chưa có note)</div>")
+        return HTMLResponse("<div class='text-sm text-gray-400'>(no note yet)</div>")
     return HTMLResponse(
         f"<pre class='whitespace-pre-wrap text-sm'>{(note['content'] or '')}</pre>"
-        f"<div class='text-xs text-gray-400 mt-2'>cập nhật: {note['updated_at']}</div>"
+        f"<div class='text-xs text-gray-400 mt-2'>updated: {note['updated_at']}</div>"
     )

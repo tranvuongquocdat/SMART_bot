@@ -10,7 +10,7 @@ import asyncio
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
@@ -32,6 +32,20 @@ def _adapter(request: Request):
     if adapter is None:
         raise HTTPException(404, "web channel not enabled")
     return adapter
+
+
+async def _web_bot_account_id(adapter):
+    """Resolve (and cache on adapter) the single active 'web' bot_account id —
+    InboundIngest scope candidates theo bot_account_id (assignment provider='web')."""
+    cached = getattr(adapter, "web_bot_account_id", None)
+    if cached is not None:
+        return cached
+    async with adapter.pool.acquire() as c:
+        bid = await c.fetchval(
+            "SELECT id FROM bot_accounts WHERE provider='web' AND status='active' LIMIT 1"
+        )
+    adapter.web_bot_account_id = bid
+    return bid
 
 
 class CreateUserBody(BaseModel):
@@ -152,7 +166,7 @@ async def list_chats(request: Request, as_: str = "", as_alt: str = ""):
         return []
     groups = await a.groups_repo.list_for_user(uid)
     chats = [
-        {"chat_id": f"dm:{uid}", "name": f"DM with Bot", "kind": "dm"},
+        {"chat_id": f"dm:{uid}", "name": "DM with Bot", "kind": "dm"},
     ]
     chats.extend(
         {"chat_id": g["id"], "name": g["name"], "kind": "group"}
@@ -177,19 +191,88 @@ async def send_inbound(request: Request):
         raise HTTPException(404, "sender not found")
 
     import uuid as _uuid
-    await a.bus.publish(
-        "inbound.raw.web",
-        {
-            "web_user_id": as_uid,
-            "chat_id": chat_id,
-            "chat_type": "dm" if chat_id.startswith("dm:") else "group",
-            "text": text,
-            "mention_bot": mention_bot,
-            "provider_msg_id": f"w-{_uuid.uuid4().hex[:10]}",
-            "sender_name": sender["name"],
-        },
+    from datetime import datetime, timezone
+
+    from src.channels.base import InboundMessage
+
+    msg = InboundMessage(
+        bot_account_id=await _web_bot_account_id(a),
+        provider="web",
+        chat_id=chat_id,
+        chat_type="dm" if chat_id.startswith("dm:") else "group",
+        provider_msg_id=f"w-{_uuid.uuid4().hex[:10]}",
+        sender_provider_id=as_uid,
+        sender_name=sender["name"],
+        text=text,
+        mentions_bot=mention_bot,
+        reply_to_provider_msg_id=None,
+        media_kind="text",
+        media_url=None,
+        ts=datetime.now(tz=timezone.utc),
     )
+    await a.bus.publish("inbound.normalized", {"message": msg})
     return {"ok": True}
+
+
+@router.post("/api/extract")
+async def fire_extract(request: Request):
+    """Harness control: fire the knowledge_extract op NOW for a group, bypassing
+    the 10m-debounce / 30-msg threshold. Publishes ``op.knowledge_extract.fire``;
+    the in-memory bus awaits handlers so this returns once extraction completes.
+
+    Body: {chat_id, reset?:bool}. ``reset`` rewinds the extraction cursor to 0 so
+    the whole conversation is re-extracted (use after a prompt/code change).
+    Only mounted when ENABLE_WEB_TEST_CHANNEL=true.
+    """
+    a = _adapter(request)
+    body = await request.json()
+    chat_id = body.get("chat_id")
+    if not chat_id:
+        raise HTTPException(400, "chat_id required")
+    reset = bool(body.get("reset"))
+
+    from src.repositories.base import BossContext
+    from src.repositories.group_notes import GroupNotesRepo
+
+    candidates = await _candidates_for_web(a)
+    tracked = await GroupNotesRepo(
+        a.pool, BossContext(boss_id=0, user_role="superadmin")
+    ).bosses_tracking("web", chat_id)
+    bosses = [b for b in tracked if b in candidates]
+
+    if reset:
+        for boss_id in bosses:
+            await GroupNotesRepo(
+                a.pool, BossContext(boss_id=boss_id, user_role="boss")
+            ).set_last_extracted("web", chat_id, 0)
+
+    for boss_id in bosses:
+        await a.bus.publish(
+            "op.knowledge_extract.fire",
+            {
+                "reason": "manual",
+                "boss_id": boss_id,
+                "source_event": {
+                    "provider": "web",
+                    "chat_id": chat_id,
+                    "chat_type": "group",
+                },
+            },
+        )
+    return {"fired_for": bosses, "reset": reset}
+
+
+async def _candidates_for_web(adapter) -> list[int]:
+    bot_acc_id = await _web_bot_account_id(adapter)
+    if bot_acc_id is None:
+        return []
+    async with adapter.pool.acquire() as c:
+        rows = await c.fetch(
+            "SELECT boss_id FROM bot_account_assignments "
+            "WHERE bot_account_id=$1 AND status='active'",
+            bot_acc_id,
+        )
+    return [r["boss_id"] for r in rows]
 
 
 @router.get("/stream")

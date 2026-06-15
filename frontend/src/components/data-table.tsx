@@ -12,9 +12,10 @@ export type DataTableProps<T> = {
   data: T[];
   mobileLabel?: (col: ColumnDef<T, any>) => string;
   empty?: ReactNode;
+  onRowClick?: (row: T) => void;
 };
 
-export function DataTable<T>({ columns, data, mobileLabel, empty }: DataTableProps<T>) {
+export function DataTable<T>({ columns, data, mobileLabel, empty, onRowClick }: DataTableProps<T>) {
   const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() });
 
   if (data.length === 0 && empty) return <>{empty}</>;
@@ -40,8 +41,10 @@ export function DataTable<T>({ columns, data, mobileLabel, empty }: DataTablePro
           {table.getRowModel().rows.map(row => (
             <tr
               key={row.id}
+              onClick={onRowClick ? () => onRowClick(row.original) : undefined}
               className={cn(
                 'transition-colors hover:bg-[hsl(var(--hover))]',
+                onRowClick && 'cursor-pointer',
                 'max-md:block max-md:p-3.5 max-md:border-b max-md:border-border'
               )}
             >

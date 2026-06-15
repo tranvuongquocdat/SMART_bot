@@ -28,3 +28,11 @@ def should_drop(data: dict[str, Any]) -> bool:
     if not text.strip() and not has_media and not has_attachments:
         return True
     return False
+
+
+def should_drop_normalized(msg) -> bool:
+    """Như should_drop nhưng cho InboundMessage đã chuẩn hoá (dùng bởi InboundIngest)."""
+    text = (msg.text or "").strip()
+    if not text and not msg.media_url:
+        return True
+    return False

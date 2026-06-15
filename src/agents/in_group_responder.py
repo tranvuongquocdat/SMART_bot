@@ -32,6 +32,7 @@ _QUICK_ACK_THRESHOLD = 60  # chars
     feature="qa_with_search",
     memory_scopes=["semantic", "episodic", "prospective"],
     tools={
+        "search_knowledge",
         "search_history",
         "count_messages",
         "read_group_note",
@@ -42,6 +43,7 @@ _QUICK_ACK_THRESHOLD = 60  # chars
         "pin_message",
         "list_action_items",
         "mark_action_item",
+        "workload_summary",
         "fetch_url",
         "remember",
         "current_time",
@@ -52,6 +54,13 @@ _QUICK_ACK_THRESHOLD = 60  # chars
 )
 class InGroupResponder:
     async def handle(self, event: dict, ctx: InGroupCtx):
+        from src.services.subscription import is_group_active
+
+        if not await is_group_active(
+            ctx.db, ctx.boss.id, event["provider"], event["chat_id"]
+        ):
+            return  # nhóm đã bị tắt trên web admin
+
         text = event.get("text", "") or ""
 
         # Predict-long heuristic: any tagged message > 60 chars is likely Q&A
@@ -63,6 +72,7 @@ class InGroupResponder:
                 chat_id=event["chat_id"],
                 content=_QUICK_ACK_TEXT,
                 trigger="quick_ack",
+                chat_type="group",
             )
 
         answer = await run_agent(InGroupResponder, event, ctx)
@@ -75,4 +85,5 @@ class InGroupResponder:
             content=answer,
             trigger="mention",
             reply_to_message_id=event.get("message_id"),
+            chat_type="group",
         )

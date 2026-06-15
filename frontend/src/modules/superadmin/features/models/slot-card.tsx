@@ -1,14 +1,16 @@
 import type { LucideIcon } from 'lucide-react';
 import { StatusDot } from '@/components/status-dot';
+import { useT } from '@/lib/i18n';
 import type { Slot } from './api';
 
 export function SlotCard({ slot, icon: Icon }: { slot: Slot; icon: LucideIcon }) {
+  const t = useT();
   const status =
     slot.status === 'active' ? 'ok' :
     slot.status === 'fallback' ? 'warn' : 'warn';
   const statusLabel =
-    slot.status === 'active' ? 'Hoạt động' :
-    slot.status === 'fallback' ? 'Fallback' : 'Thiếu cấu hình';
+    slot.status === 'active' ? t('sa.models.slotActive') :
+    slot.status === 'fallback' ? 'Fallback' : t('sa.models.slotMissing');
 
   return (
     <div className="rounded-[10px] bg-card p-4 shadow-[0_0_0_1px_hsl(var(--border-strong)),0_1px_2px_rgba(0,0,0,.04)] transition-transform hover:-translate-y-[1px]">
@@ -17,7 +19,7 @@ export function SlotCard({ slot, icon: Icon }: { slot: Slot; icon: LucideIcon })
       </div>
       <div className="text-[10.5px] uppercase tracking-wider text-[hsl(var(--dim))] font-medium mb-1 capitalize">{slot.slot}</div>
       <div className={`text-[15px] font-medium tracking-tight ${!slot.model ? 'text-muted-foreground' : ''}`}>
-        {slot.model ?? 'Chưa cấu hình'}
+        {slot.model ?? t('sa.models.notConfigured')}
       </div>
       <div className="text-xs text-muted-foreground mt-0.5 mb-4">
         {slot.provider ?? 'Fallback → Smart slot'}
@@ -25,7 +27,7 @@ export function SlotCard({ slot, icon: Icon }: { slot: Slot; icon: LucideIcon })
       <div className="flex items-center justify-between pt-3.5 border-t border-border text-xs">
         <StatusDot status={status as any} label={statusLabel} />
         <a className="text-primary font-medium hover:underline underline-offset-[3px] cursor-pointer">
-          {slot.status === 'missing' ? 'Thiết lập' : 'Đổi'}
+          {slot.status === 'missing' ? t('sa.models.setup') : t('sa.models.change')}
         </a>
       </div>
     </div>

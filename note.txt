@@ -73,3 +73,38 @@ Note:
   ├────────────────────────────────┼──────────────────┼──────────┼────────────────────────┤
   │ Superadmin (/app/superadmin/*) │ admin@local.test │ admin123 │ /app/superadmin/models │
   └────────────────────────────────┴──────────────────┴──────────┴────────────────────────┘
+
+
+  giao diện hiện tại bị nhiều lỗi quá, bị đè lên nhau, render ko hợp lý
+  cái giao diện này đang được build thủ công ko dùng framework nào à vd nexJS chẳng hạn?
+  ngôn ngữ các thứ cũng ko đồng bộ, nhiều tính năng ko hoạt động vd trang cá nhân, tìm kiếm
+  element thì chồng chéo lên nhau, dùng rất xấu, màu sắc cũng rất khó nhìn
+  animation thì ko có gì, dùng cảm giác rất nhàm chán
+  b có skill nào handle được tốt UX UI ko
+
+  Note:
+  - phát triển full phần tính năng gói và cấu hình, phần mà admin chọn gói để đăng ký ấy, và luồng để superadmin phê duyệt
+  - limit chỉ có 1 superadmin, user được config trong .env
+
+
+  Note 11/6/2026:
+  - check xem dự án này hoàn thiện tới đâu rồi
+  - Cần hoàn thiện bộ khung xung quanh gọn gàng để có thể đi sâu vào custom flow agent phía bên trong
+  - Check để build nốt các tính năng để web ready cho user dùng
+  - Tạo ra các gói và page hiển thị các gói hơp lý, check full flow của admin và user admin hiện tại
+  - check các tính năng bổ trợ xung quanh đã hoạt động ổn định chưa: config model, thêm/ bớt api key, check api key sống hay không khi add,...
+  - đề xuất xem hệ thống đã hoàn thiện đươcj bao nhiêu % rồi, và cần hoàn thiện những gì ưu tiên
+  - nhớ là cần tạo base để sau mở rộng dễ hơn, vd set up để sau thêm tool dễ, hoặc integrate các phần khác, hoặc là chat được ngay trong web quản lý để keep track dự án, check note tuần vừa rồi,...
+  - có thể tham khảo thêm những hệ thống khác để tham khảo cách handle vd openclaw,...
+
+  Note:
+  - phần config model ở giao diện web chưa mở rộng được thêm các model khác
+  - vd chọn groq làm provider thì chưa thể chọn được linh hoạt các model của groq
+  - chưa phân biệt được rõ model được cấp và model của bản thân
+  - logic phần connect với kênh zalo chưa chuẩn, bản thân kênh zalo là boss phải set up 1 acc phụ để nghe ngóng, cần login acc phụ đó vào
+  - phần giao diện vẫn còn lủng củng và chưa tối ưu, cần tham khảo thêm các trang khác vd vbee, vercel,... để tối ưu trải nghiệm sử dụng
+  - và check xem tối ưu các phần khác oke chưa, hoặc vd tôi gặp hiện tượng là khi chat, nhấn enter thì tin nhắn cứ ở trong inbox box, ko khoá lại và hiện đang chạy, ko huỷ tin nhắn giữa chừng được, chưa có cơ chế handle nhắn liên tục, vd nhắn 1 tin, r nhắn liên tục liên tục, kiểu này sẽ tự nhiên hơn
+  - và check kỹ những phần khác, tạo base tốt cho phát triển cái lõi agent
+  - nhớ check cả phần superadmin xem tối ưu chưa
+  - thiết kế limit của các gói và price tham khảo luôn, có thanh toán theo 1 tháng, 3 tháng, 1 năm các kiểu, phần config này tôi có thể chỉnh ở trang Superadmin
+  - tối ưu lại trang superadmin luôn cho trực quan và dễ sử dụng

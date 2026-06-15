@@ -11,26 +11,26 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useT, useI18n, type Lang } from '@/lib/i18n';
 import { generalQuery, patchGeneral } from './api';
 
-const LANGUAGE_OPTIONS = [
-  { value: 'vi', label: 'Tiếng Việt' },
-  { value: 'en', label: 'English' },
-];
-
 export default function GeneralTab() {
+  const t = useT();
+  const { lang, setLang } = useI18n();
   const qc = useQueryClient();
   const { data, isLoading } = useQuery(generalQuery);
 
   const [name, setName] = useState('');
   const [tz, setTz] = useState('');
-  const [language, setLanguage] = useState('vi');
+  const [uiLanguage, setUiLanguage] = useState<Lang>(lang);
+  const [botLanguage, setBotLanguage] = useState('vi'); // vi | en | auto
 
   useEffect(() => {
     if (data) {
       setName(data.name ?? '');
       setTz(data.tz ?? 'Asia/Ho_Chi_Minh');
-      setLanguage(data.language ?? 'vi');
+      if (data.ui_language === 'vi' || data.ui_language === 'en') setUiLanguage(data.ui_language);
+      setBotLanguage(data.language ?? 'vi');
     }
   }, [data]);
 
@@ -39,32 +39,40 @@ export default function GeneralTab() {
       patchGeneral({
         name: name || undefined,
         tz: tz || undefined,
-        language: language || undefined,
+        language: botLanguage || undefined,
+        ui_language: uiLanguage || undefined,
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: generalQuery.queryKey });
-      toast.success('Đã lưu cài đặt chung.');
+      toast.success(t('settings.general.saved'));
     },
-    onError: () => toast.error('Lưu thất bại.'),
+    onError: () => toast.error(t('common.saveError')),
   });
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Đang tải…</p>;
+  // Đổi ngôn ngữ giao diện → flip ngay (không cần bấm Lưu); Lưu để ghi vào tài khoản.
+  const onUiLanguageChange = (v: string) => {
+    const next = v as Lang;
+    setUiLanguage(next);
+    setLang(next);
+  };
+
+  if (isLoading) return <p className="text-sm text-muted-foreground">{t('common.loading')}</p>;
   if (!data) return null;
 
   return (
     <div className="space-y-4 max-w-md">
       <div className="space-y-2">
-        <Label htmlFor="gen-name">Tên hiển thị</Label>
+        <Label htmlFor="gen-name">{t('settings.general.displayName')}</Label>
         <Input
           id="gen-name"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Tên hiển thị"
+          placeholder={t('settings.general.displayNamePlaceholder')}
         />
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="gen-tz">Múi giờ</Label>
+        <Label htmlFor="gen-tz">{t('settings.general.tz')}</Label>
         <Input
           id="gen-tz"
           value={tz}
@@ -74,23 +82,36 @@ export default function GeneralTab() {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="gen-lang">Ngôn ngữ</Label>
-        <Select value={language} onValueChange={setLanguage}>
-          <SelectTrigger id="gen-lang">
+        <Label htmlFor="gen-ui-lang">{t('settings.general.uiLanguage')}</Label>
+        <Select value={uiLanguage} onValueChange={onUiLanguageChange}>
+          <SelectTrigger id="gen-ui-lang">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {LANGUAGE_OPTIONS.map((opt) => (
-              <SelectItem key={opt.value} value={opt.value}>
-                {opt.label}
-              </SelectItem>
-            ))}
+            <SelectItem value="vi">{t('lang.vi')}</SelectItem>
+            <SelectItem value="en">{t('lang.en')}</SelectItem>
           </SelectContent>
         </Select>
+        <p className="text-xs text-muted-foreground">{t('settings.general.uiLanguageHint')}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="gen-bot-lang">{t('settings.general.botLanguage')}</Label>
+        <Select value={botLanguage} onValueChange={setBotLanguage}>
+          <SelectTrigger id="gen-bot-lang">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="auto">{t('lang.auto')}</SelectItem>
+            <SelectItem value="vi">{t('lang.vi')}</SelectItem>
+            <SelectItem value="en">{t('lang.en')}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{t('settings.general.botLanguageHint')}</p>
       </div>
 
       <Button onClick={() => mut.mutate()} disabled={mut.isPending}>
-        {mut.isPending ? 'Đang lưu…' : 'Lưu'}
+        {mut.isPending ? t('common.saving') : t('common.save')}
       </Button>
     </div>
   );

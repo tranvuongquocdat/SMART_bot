@@ -47,7 +47,10 @@ async def lifespan(app: FastAPI):
     configure_logging()
     app.state.db_pool = await create_pool()
     app.state.qdrant = create_qdrant()
-    app.state.bus = InMemoryEventBus()
+    # Bus timeout phải LỚN HƠN timeout_s dài nhất của các op (note_updater=120s)
+    # — mặc định 10s từng giết agent chạy dài giữa chừng (tool chain, fetch_url).
+    # Giới hạn thật per-op do dispatcher enforce theo cfg.timeout_s.
+    app.state.bus = InMemoryEventBus(handler_timeout_s=180.0)
     app.state.rate_limiter = InMemoryRateLimiter()
     app.state.model_registry = ModelRegistry(app.state.db_pool, app.state.bus)
     _admin_ctx = BossContext(boss_id=0, user_role="superadmin")
@@ -69,9 +72,17 @@ async def lifespan(app: FastAPI):
     app.state.trigger_engine = TriggerEngine(app.state.bus)
     app.state.trigger_engine.attach_all()
 
+    from src.services.chat_runs import ChatRunRegistry
+
+    app.state.chat_runs = ChatRunRegistry()
+
     # H2: Prometheus subscribers — must register AFTER op registry is loaded so
     # we can attach per-op `op.<name>.fire` counters.
     register_metrics(app.state.bus)
+
+    # Gom file/link từ tin nhắn nhóm vào group_artifacts (tab Tệp & link).
+    from src.services.artifact_collector import register as register_artifacts
+    register_artifacts(app.state.bus, app.state.db_pool)
 
     # Channel adapters — auto-discovered from src/channels/<provider>/.
     _admin_repo = BotAccountsRepo(app.state.db_pool, _admin_ctx)
@@ -83,6 +94,13 @@ async def lifespan(app: FastAPI):
         app.state.channel_registry,
         _admin_repo,
     )
+    # Wrapper định danh + lọc nhóm dùng chung — subscriber DUY NHẤT cho
+    # inbound.normalized. Đăng ký TRƯỚC khi channels boot_inbound emit tin.
+    from src.channels.ingest import InboundIngest
+
+    InboundIngest(
+        app.state.db_pool, app.state.bus, app.state.outbound_service
+    ).register()
     _setup_ctx = ChannelSetupContext(
         bus=app.state.bus,
         pool=app.state.db_pool,
@@ -95,6 +113,14 @@ async def lifespan(app: FastAPI):
     import logging as _log
     _log.getLogger(__name__).info("channels loaded: %s", loaded_channels)
     await boot_inbound_for_all(app.state.channel_registry, _admin_repo)
+
+    from src.services.zalo_qr_login import ZaloQrLoginManager
+
+    app.state.zalo_qr_login = ZaloQrLoginManager(
+        app.state.db_pool,
+        app.state.bus,
+        lambda: {a.provider: a for a in app.state.channel_registry.adapters()},
+    )
 
     # Plugins — scan plugins/ and import each plugin's tools module so
     # any @tool decorators register before the dispatcher is hit.
@@ -141,6 +167,9 @@ app.include_router(api_auth.router)
 
 from src.web.routes import api_superadmin
 app.include_router(api_superadmin.router)
+
+from src.web.routes import api_superadmin_bosses
+app.include_router(api_superadmin_bosses.router)
 
 from src.web.routes import api_admin
 app.include_router(api_admin.router)

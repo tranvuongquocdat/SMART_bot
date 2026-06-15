@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/select';
 import { patchBotAccount } from './api';
 import type { BotAccount } from './api';
+import { useT } from '@/lib/i18n';
 
 type Props = {
   account: BotAccount | null;
@@ -27,6 +28,7 @@ type Props = {
 };
 
 export function EditDialog({ account, onOpenChange }: Props) {
+  const t = useT();
   const qc = useQueryClient();
   const open = account !== null;
 
@@ -55,10 +57,10 @@ export function EditDialog({ account, onOpenChange }: Props) {
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'bot-accounts'] });
-      toast.success('Đã cập nhật account');
+      toast.success(t('sa.acct.updated'));
       onOpenChange(false);
     },
-    onError: () => toast.error('Cập nhật thất bại'),
+    onError: () => toast.error(t('sa.common.updateError')),
   });
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -68,12 +70,12 @@ export function EditDialog({ account, onOpenChange }: Props) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[440px]">
         <DialogHeader>
-          <DialogTitle>Sửa bot account</DialogTitle>
+          <DialogTitle>{t('sa.acct.editTitle')}</DialogTitle>
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
-            <Label>Tên hiển thị (label)</Label>
+            <Label>{t('sa.acct.fieldLabel')}</Label>
             <Input
               value={form.label}
               onChange={e => set('label', e.target.value)}
@@ -81,7 +83,7 @@ export function EditDialog({ account, onOpenChange }: Props) {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Loại tài khoản</Label>
+            <Label>{t('sa.acct.fieldKind')}</Label>
             <Select value={form.account_kind} onValueChange={v => set('account_kind', v)}>
               <SelectTrigger>
                 <SelectValue />
@@ -94,14 +96,14 @@ export function EditDialog({ account, onOpenChange }: Props) {
           </div>
 
           <div className="grid gap-1.5">
-            <Label>Ownership</Label>
+            <Label>{t('sa.acct.ownership')}</Label>
             <Select value={form.ownership} onValueChange={v => set('ownership', v)}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="platform">Platform (dùng chung)</SelectItem>
-                <SelectItem value="boss_owned">Boss owned (riêng)</SelectItem>
+                <SelectItem value="platform">{t('sa.acct.ownPlatform')}</SelectItem>
+                <SelectItem value="boss_owned">{t('sa.acct.ownBoss')}</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -109,13 +111,13 @@ export function EditDialog({ account, onOpenChange }: Props) {
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             disabled={!valid || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang lưu...' : 'Lưu'}
+            {mutation.isPending ? t('sa.common.saving') : t('sa.common.save')}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -6,10 +6,13 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Kbd } from '@/components/ui/kbd';
 import { ThemeToggle } from './theme-toggle';
 import { UserMenu } from './user-menu';
+import { NotificationBell } from './notification-bell';
+import { LanguageToggle } from './language-toggle';
 import { CommandPalette } from './command-palette';
 import type { Me } from '@/lib/auth';
 import { cn } from '@/lib/utils';
 import { spring } from '@/lib/motion';
+import { useT } from '@/lib/i18n';
 
 export type NavItem = { label: string; href: string; icon: LucideIcon };
 export type NavSection = { label: string; items: NavItem[] };
@@ -25,6 +28,7 @@ export function AppShell({
   breadcrumb: ReactNode;
   children: ReactNode;
 }) {
+  const t = useT();
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -93,7 +97,7 @@ export function AppShell({
           </div>
           <button
             onClick={() => setCollapsed(!collapsed)}
-            aria-label={collapsed ? 'Mở rộng' : 'Thu gọn'}
+            aria-label={collapsed ? t('common.expand') : t('common.collapse')}
             className="h-[26px] w-[26px] rounded-md grid place-items-center text-[hsl(var(--dim))] hover:text-foreground hover:bg-[hsl(var(--hover))] transition-colors"
           >
             <ChevronLeft className={cn('h-3.5 w-3.5 transition-transform', collapsed && 'rotate-180')} />
@@ -105,7 +109,7 @@ export function AppShell({
             <div key={section.label}>
               {!collapsed && (
                 <div className="text-[10px] uppercase tracking-wider text-[hsl(var(--dim))] px-2.5 pt-4 pb-1.5 font-medium">
-                  {section.label}
+                  {t(section.label)}
                 </div>
               )}
               {section.items.map((item) => {
@@ -127,15 +131,13 @@ export function AppShell({
                       className={cn('h-[15px] w-[15px] shrink-0', active && 'text-[hsl(var(--primary))]')}
                       strokeWidth={1.8}
                     />
-                    {!collapsed && <span className="truncate">{item.label}</span>}
+                    {!collapsed && <span className="truncate">{t(item.label)}</span>}
                   </Link>
                 );
               })}
             </div>
           ))}
         </nav>
-
-        <UserMenu me={me} collapsed={collapsed} />
       </motion.aside>
 
       <main>
@@ -144,7 +146,7 @@ export function AppShell({
             <button
               onClick={() => setMobileOpen(true)}
               className="md:hidden h-[30px] w-[30px] rounded-md border border-[hsl(var(--divider))] grid place-items-center"
-              aria-label="Mở menu"
+              aria-label={t('common.openMenu')}
             >
               <Menu className="h-4 w-4" />
             </button>
@@ -154,14 +156,17 @@ export function AppShell({
             <button
               type="button"
               onClick={() => setPaletteOpen(true)}
-              aria-label="Tìm kiếm"
+              aria-label={t('common.search')}
               className="h-[30px] px-[10px] rounded-[7px] bg-transparent text-[hsl(var(--muted-foreground))] flex items-center gap-2 text-[11px] surface-section hover:bg-[hsl(var(--hover))] transition-colors"
             >
               <Search className="h-3.5 w-3.5" />
-              <span className="max-sm:hidden">Tìm kiếm</span>
+              <span className="max-sm:hidden">{t('common.search')}</span>
               <Kbd className="max-sm:hidden">⌘K</Kbd>
             </button>
+            <LanguageToggle />
             <ThemeToggle />
+            <NotificationBell />
+            <UserMenu me={me} placement="topbar" />
           </div>
         </div>
 

@@ -3,6 +3,7 @@ import { createBrowserRouter, RouterProvider } from 'react-router-dom';
 import { adminRoutes } from './modules/admin/routes';
 import { superadminRoutes } from './modules/superadmin/routes';
 import { requireAuth } from './lib/rbac';
+import { I18nProvider } from './lib/i18n';
 import { Toaster } from '@/components/ui/sonner';
 import LoginPage from './routes/login-page';
 
@@ -20,8 +21,10 @@ const router = createBrowserRouter([
 export default function App() {
   return (
     <QueryClientProvider client={qc}>
-      <RouterProvider router={router} />
-      <Toaster />
+      <I18nProvider>
+        <RouterProvider router={router} />
+        <Toaster />
+      </I18nProvider>
     </QueryClientProvider>
   );
 }

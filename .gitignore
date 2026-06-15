@@ -35,3 +35,7 @@ reference for SMART/
 frontend/node_modules
 frontend/dist
 src/web/static/app/
+
+# git worktrees
+.worktrees/
+uploads/

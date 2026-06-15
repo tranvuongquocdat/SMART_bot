@@ -7,6 +7,7 @@ import asyncpg
 class BossContext:
     boss_id: int
     user_role: str  # 'boss' | 'superadmin'
+    ui_language: str = "vi"  # 'vi' | 'en' — web UI language for localizing API messages
 
 
 class BossScopedRepo:

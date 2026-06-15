@@ -28,7 +28,7 @@ import src.tools  # noqa: F401
 from src.agents.dispatcher import OperationDispatcher
 from src.agents.triggers import TriggerEngine
 from src.channels.registry import ChannelRegistry
-from src.channels.zalo import normalizer as zalo_normalizer
+from src.channels.ingest import InboundIngest
 from src.channels.zalo.adapter import ZaloAdapter
 from src.events.bus import InMemoryEventBus
 from src.llm.base import LLMResponse, LLMUsage
@@ -160,8 +160,8 @@ async def e2e(clean_db):
     OperationDispatcher(bus, state).attach_all()
     TriggerEngine(bus).attach_all()
 
-    # Real Zalo normalizer wired to bus (handshake uses outbound_service).
-    zalo_normalizer.register(bus, db_pool, state.outbound_service)
+    # Wrapper chung InboundIngest wired to bus (handshake uses outbound_service).
+    InboundIngest(db_pool, bus, state.outbound_service).register()
 
     yield {
         "db_pool": db_pool,
@@ -177,6 +177,36 @@ async def e2e(clean_db):
 # --------------------------------------------------------------------------
 # Helpers
 # --------------------------------------------------------------------------
+
+async def _emit_zalo(bus, bot_acc_id: int, data: dict) -> None:
+    """Mô phỏng adapter Zalo: dựng InboundMessage từ payload bridge rồi đẩy vào
+    ``inbound.normalized`` (đường wrapper chung). Thay cho publish inbound.raw cũ."""
+    from datetime import datetime, timezone
+
+    from src.channels.base import InboundMessage
+
+    ms = data.get("ts") or 0
+    try:
+        ts = datetime.fromtimestamp(int(ms) / 1000, tz=timezone.utc)
+    except Exception:
+        ts = datetime.now(tz=timezone.utc)
+    msg = InboundMessage(
+        bot_account_id=bot_acc_id,
+        provider="zalo",
+        chat_id=str(data.get("threadId") or ""),
+        chat_type="dm" if data.get("type") == 0 else "group",
+        provider_msg_id=(str(data.get("msgId") or "") or None),
+        sender_provider_id=str(data.get("uidFrom") or ""),
+        sender_name=data.get("dName"),
+        text=data.get("text") or data.get("content") or "",
+        mentions_bot=bool(data.get("is_mentioned")),
+        reply_to_provider_msg_id=None,
+        media_kind=data.get("content_type") or "text",
+        media_url=data.get("media_url"),
+        ts=ts,
+    )
+    await bus.publish("inbound.normalized", {"message": msg})
+
 
 async def _seed_boss_and_superadmin(pool) -> tuple[int, int]:
     """Bootstrap a fresh boss + a superadmin row. Returns (boss_id, admin_id)."""
@@ -263,20 +293,17 @@ async def test_full_flow_register_link_capture_reply_reminder(e2e):
 
     sender_uid = "user-e2e-uid"
     # Simulate the raw inbound the Node bridge would emit.
-    await bus.publish(
-        "inbound.raw.zalo",
+    await _emit_zalo(
+        bus,
+        bot_acc_id,
         {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "botuid-e2e",
-            "data": {
-                "type": 0,  # DM
-                "threadId": sender_uid,
-                "uidFrom": sender_uid,
-                "dName": "Boss",
-                "msgId": "p-start",
-                "content": f"/start {token}",
-                "ts": 1700000000000,
-            },
+            "type": 0,  # DM
+            "threadId": sender_uid,
+            "uidFrom": sender_uid,
+            "dName": "Boss",
+            "msgId": "p-start",
+            "content": f"/start {token}",
+            "ts": 1700000000000,
         },
     )
     await asyncio.sleep(0)
@@ -296,27 +323,30 @@ async def test_full_flow_register_link_capture_reply_reminder(e2e):
         "kết nối" in (p.get("content") or "").lower() for p in sent_outbound
     ), sent_outbound
 
-    # --- Flow 4: Capture group message ----------------------------------
+    # --- Flow 4: Group capture (boss-spoke gating) ----------------------
     group_chat_id = "group-e2e-1"
-    # Pre-publish a few message.captured events directly *via* the
-    # normalizer to exercise message persistence.
+    # Tin từ member TRƯỚC khi boss nói -> drop (nhóm chưa được track).
+    await _emit_zalo(bus, bot_acc_id, {
+        "type": 1, "threadId": group_chat_id, "uidFrom": "member-early",
+        "dName": "Early", "msgId": "g-early", "content": "spam sớm",
+        "ts": 1700000000000})
+    await asyncio.sleep(0)
+    async with db_pool.acquire() as c:
+        pre = await c.fetchval(
+            "SELECT COUNT(*) FROM messages WHERE boss_id=$1 AND chat_id=$2",
+            boss_id, group_chat_id)
+    assert pre == 0  # boss chưa nói -> chưa track -> drop
+
+    # Boss-spoke: acc chính (sender_uid, đã link Flow 3) nói -> track nhóm.
+    await _emit_zalo(bus, bot_acc_id, {
+        "type": 1, "threadId": group_chat_id, "uidFrom": sender_uid,
+        "dName": "Boss", "msgId": "g-boss", "content": "chào team",
+        "ts": 1700000000100})
     for i in range(5):
-        await bus.publish(
-            "inbound.raw.zalo",
-            {
-                "bot_account_id": bot_acc_id,
-                "own_uid": "botuid-e2e",
-                "data": {
-                    "type": 1,  # group
-                    "threadId": group_chat_id,
-                    "uidFrom": f"member-{i}",
-                    "dName": f"User{i}",
-                    "msgId": f"g-{i}",
-                    "content": f"hello {i}",
-                    "ts": 1700000000000 + i,
-                },
-            },
-        )
+        await _emit_zalo(bus, bot_acc_id, {
+            "type": 1, "threadId": group_chat_id, "uidFrom": f"member-{i}",
+            "dName": f"User{i}", "msgId": f"g-{i}", "content": f"hello {i}",
+            "ts": 1700000000200 + i})
     await asyncio.sleep(0)
 
     async with db_pool.acquire() as c:
@@ -325,25 +355,22 @@ async def test_full_flow_register_link_capture_reply_reminder(e2e):
             boss_id,
             group_chat_id,
         )
-    assert msg_count == 5
+    assert msg_count == 6  # 1 boss + 5 member (sau khi boss-spoke kích hoạt track)
 
     # --- Flow 5: Tag bot in group → in_group_responder runs --------------
     sent_outbound.clear()
-    await bus.publish(
-        "inbound.raw.zalo",
+    await _emit_zalo(
+        bus,
+        bot_acc_id,
         {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "botuid-e2e",
-            "data": {
-                "type": 1,
-                "threadId": group_chat_id,
-                "uidFrom": "member-mention",
-                "dName": "MentionUser",
-                "msgId": "g-mention",
-                "content": "@bot tóm tắt nhóm giúp anh nha em",
-                "is_mentioned": True,
-                "ts": 1700000010000,
-            },
+            "type": 1,
+            "threadId": group_chat_id,
+            "uidFrom": "member-mention",
+            "dName": "MentionUser",
+            "msgId": "g-mention",
+            "content": "@bot tóm tắt nhóm giúp anh nha em",
+            "is_mentioned": True,
+            "ts": 1700000010000,
         },
     )
     # Give the loop a beat for op handler → tool dispatch → outbound.
@@ -413,20 +440,17 @@ async def test_full_flow_register_link_capture_reply_reminder(e2e):
 
     # --- Flow 7: Boss DMs the bot → dm_responder replies ------------------
     sent_outbound.clear()
-    await bus.publish(
-        "inbound.raw.zalo",
+    await _emit_zalo(
+        bus,
+        bot_acc_id,
         {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "botuid-e2e",
-            "data": {
-                "type": 0,
-                "threadId": sender_uid,
-                "uidFrom": sender_uid,
-                "dName": "Boss",
-                "msgId": "p-dm-1",
-                "content": "Em ơi, hôm nay anh phải làm gì?",
-                "ts": 1700000020000,
-            },
+            "type": 0,
+            "threadId": sender_uid,
+            "uidFrom": sender_uid,
+            "dName": "Boss",
+            "msgId": "p-dm-1",
+            "content": "Em ơi, hôm nay anh phải làm gì?",
+            "ts": 1700000020000,
         },
     )
     for _ in range(5):
@@ -439,20 +463,17 @@ async def test_full_flow_register_link_capture_reply_reminder(e2e):
     # --- Flow 8: set_reminder tool fires + ReminderFirer sends ------------
     sent_outbound.clear()
     llm.reply_with_tool_call = True  # next dm_general will call set_reminder
-    await bus.publish(
-        "inbound.raw.zalo",
+    await _emit_zalo(
+        bus,
+        bot_acc_id,
         {
-            "bot_account_id": bot_acc_id,
-            "own_uid": "botuid-e2e",
-            "data": {
-                "type": 0,
-                "threadId": sender_uid,
-                "uidFrom": sender_uid,
-                "dName": "Boss",
-                "msgId": "p-dm-2",
-                "content": "Nhắc anh nộp báo cáo Q2 lúc 3pm",
-                "ts": 1700000030000,
-            },
+            "type": 0,
+            "threadId": sender_uid,
+            "uidFrom": sender_uid,
+            "dName": "Boss",
+            "msgId": "p-dm-2",
+            "content": "Nhắc anh nộp báo cáo Q2 lúc 3pm",
+            "ts": 1700000030000,
         },
     )
     for _ in range(5):

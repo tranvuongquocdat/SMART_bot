@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { promptsQuery, createPrompt, deletePrompt, patchPrompt } from './api';
 import type { PromptRow } from './api';
+import { useT, useI18n } from '@/lib/i18n';
 
 // ---------------------------------------------------------------------------
 // Create dialog
@@ -40,6 +41,7 @@ function CreateDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({ key: '', body: '', notes: '' });
 
@@ -52,11 +54,11 @@ function CreateDialog({
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'prompts'] });
-      toast.success('Đã tạo prompt mới');
+      toast.success(t('sa.prompt.created'));
       setForm({ key: '', body: '', notes: '' });
       onOpenChange(false);
     },
-    onError: () => toast.error('Tạo prompt thất bại'),
+    onError: () => toast.error(t('sa.prompt.createError')),
   });
 
   const set = (k: keyof typeof form, v: string) => setForm(f => ({ ...f, [k]: v }));
@@ -65,7 +67,7 @@ function CreateDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[540px]">
         <DialogHeader>
-          <DialogTitle>Thêm prompt mới</DialogTitle>
+          <DialogTitle>{t('sa.prompt.addTitle')}</DialogTitle>
         </DialogHeader>
         <div className="grid gap-4 py-2">
           <div className="grid gap-1.5">
@@ -81,13 +83,13 @@ function CreateDialog({
             <Textarea
               rows={8}
               className="font-mono text-xs"
-              placeholder="Nội dung prompt..."
+              placeholder={t('sa.prompt.bodyPlaceholder')}
               value={form.body}
               onChange={(e: ChangeEvent<HTMLTextAreaElement>) => set('body', e.target.value)}
             />
           </div>
           <div className="grid gap-1.5">
-            <Label>Ghi chú (tuỳ chọn)</Label>
+            <Label>{t('sa.prompt.notesOptional')}</Label>
             <Input
               placeholder="v1: initial"
               value={form.notes}
@@ -97,13 +99,13 @@ function CreateDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             disabled={mutation.isPending || !form.key.trim() || !form.body.trim()}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang tạo...' : 'Tạo version mới'}
+            {mutation.isPending ? t('sa.common.creating') : t('sa.prompt.createVersion')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -122,36 +124,37 @@ function DeleteDialog({
   prompt: PromptRow | null;
   onClose: () => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const mutation = useMutation({
     mutationFn: () => deletePrompt(prompt!.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'prompts'] });
-      toast.success('Đã xoá prompt');
+      toast.success(t('sa.prompt.deleted'));
       onClose();
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('sa.common.deleteError')),
   });
 
   return (
     <Dialog open={prompt !== null} onOpenChange={v => !v && onClose()}>
       <DialogContent className="sm:max-w-[400px]">
         <DialogHeader>
-          <DialogTitle>Xoá prompt</DialogTitle>
+          <DialogTitle>{t('sa.prompt.deleteTitle')}</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground py-2">
-          Xoá <strong>{prompt?.key} v{prompt?.version}</strong>? Không thể hoàn tác.
+          {t('sa.prompt.deleteConfirmPre')}<strong>{prompt?.key} v{prompt?.version}</strong>{t('sa.prompt.deleteConfirmPost')}
         </p>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>
-            Huỷ
+            {t('sa.common.cancel')}
           </Button>
           <Button
             variant="destructive"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            {mutation.isPending ? 'Đang xoá...' : 'Xoá'}
+            {mutation.isPending ? t('sa.common.deleting') : t('sa.common.delete')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -164,6 +167,8 @@ function DeleteDialog({
 // ---------------------------------------------------------------------------
 
 export default function PromptsListPage() {
+  const { t, lang } = useI18n();
+  const locale = lang === 'en' ? 'en-US' : 'vi-VN';
   const prompts = useQuery(promptsQuery);
   const qc = useQueryClient();
 
@@ -174,9 +179,9 @@ export default function PromptsListPage() {
     mutationFn: (id: number) => patchPrompt(id, { is_active: true }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'prompts'] });
-      toast.success('Đã kích hoạt prompt');
+      toast.success(t('sa.prompt.activated'));
     },
-    onError: () => toast.error('Kích hoạt thất bại'),
+    onError: () => toast.error(t('sa.prompt.activateError')),
   });
 
   const columns: ColumnDef<PromptRow>[] = [
@@ -213,7 +218,7 @@ export default function PromptsListPage() {
       ),
     },
     {
-      header: 'Ghi chú',
+      header: t('sa.prompt.colNotes'),
       accessorKey: 'notes',
       cell: ({ row }) => (
         <span className="text-sm text-muted-foreground truncate max-w-[200px] block">
@@ -222,14 +227,14 @@ export default function PromptsListPage() {
       ),
     },
     {
-      header: 'Tạo lúc',
+      header: t('sa.prompt.colCreated'),
       accessorKey: 'created_at',
       cell: ({ row }) => {
         const d = row.original.created_at;
         if (!d) return <span className="text-muted-foreground">—</span>;
         return (
           <span className="text-sm text-muted-foreground">
-            {new Date(d).toLocaleString('vi-VN', {
+            {new Date(d).toLocaleString(locale, {
               day: '2-digit',
               month: '2-digit',
               hour: '2-digit',
@@ -252,13 +257,13 @@ export default function PromptsListPage() {
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem asChild>
-                <Link to={`/app/superadmin/prompts/${row.original.id}`}>Mở chi tiết</Link>
+                <Link to={`/app/superadmin/prompts/${row.original.id}`}>{t('sa.prompt.openDetail')}</Link>
               </DropdownMenuItem>
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
                 onClick={() => setDeleteTarget(row.original)}
               >
-                Xoá
+                {t('sa.common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -270,12 +275,12 @@ export default function PromptsListPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Prompts"
-        subtitle="Quản lý system prompts theo version cho từng key."
+        title={t('nav.sa.prompts')}
+        subtitle={t('sa.prompt.subtitle')}
         actions={
           <Button onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1" />
-            Thêm prompt
+            {t('sa.prompt.addBtn')}
           </Button>
         }
       />
@@ -291,8 +296,8 @@ export default function PromptsListPage() {
             empty={
               <EmptyState
                 icon={FileCode}
-                title="Chưa có prompt nào"
-                action={{ label: '+ Thêm prompt', onClick: () => setCreateOpen(true) }}
+                title={t('sa.prompt.empty')}
+                action={{ label: t('sa.prompt.emptyAction'), onClick: () => setCreateOpen(true) }}
               />
             }
           />

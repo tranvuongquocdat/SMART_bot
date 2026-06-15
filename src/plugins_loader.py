@@ -70,3 +70,28 @@ def load_all(plugins_dir: Path | None = None) -> list[str]:
         except Exception:
             log.exception("plugin load failed plugin=%s", name)
     return registered
+
+
+def list_available_plugins(plugins_dir: Path | None = None) -> list[dict]:
+    """Liệt kê plugin có manifest (không import) — cho trang Tích hợp."""
+    base = plugins_dir or PLUGINS_DIR
+    out: list[dict] = []
+    if not base.exists():
+        return out
+    for p in sorted(base.iterdir()):
+        manifest_path = p / "manifest.toml"
+        if not p.is_dir() or not manifest_path.exists():
+            continue
+        try:
+            manifest = tomllib.loads(manifest_path.read_text())
+        except Exception:
+            log.exception("plugin manifest parse failed plugin=%s", p.name)
+            continue
+        out.append(
+            {
+                "id": p.name,
+                "name": manifest.get("name") or p.name,
+                "description": manifest.get("description"),
+            }
+        )
+    return out

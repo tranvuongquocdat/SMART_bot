@@ -1,6 +1,7 @@
 import { Users, MessageSquare, Clock, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { formatNumber, relativeTime } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import type { Group } from './api';
 
 const CHANNEL_LABEL: Record<string, string> = {
@@ -8,6 +9,7 @@ const CHANNEL_LABEL: Record<string, string> = {
 };
 
 export function GroupHeader({ group }: { group: Group }) {
+  const t = useT();
   const initials = group.name.split(' ').slice(0, 2).map(w => w[0]).join('').toUpperCase();
   return (
     <div className="flex items-start gap-4 mb-7 flex-wrap">
@@ -22,14 +24,14 @@ export function GroupHeader({ group }: { group: Group }) {
           </span>
         </h1>
         <div className="text-[13px] text-muted-foreground flex items-center gap-3 flex-wrap mt-0.5">
-          <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-[hsl(var(--dim))]" />{group.members_count} thành viên</span>
-          <span className="inline-flex items-center gap-1.5"><MessageSquare className="h-3.5 w-3.5 text-[hsl(var(--dim))]" />{formatNumber(group.messages_30d)} tin nhắn / 30 ngày</span>
-          <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-[hsl(var(--dim))]" />Hoạt động cuối: {relativeTime(group.last_active_at)}</span>
+          <span className="inline-flex items-center gap-1.5"><Users className="h-3.5 w-3.5 text-[hsl(var(--dim))]" />{t('grp.hdr.members', { n: group.members_count })}</span>
+          <span className="inline-flex items-center gap-1.5"><MessageSquare className="h-3.5 w-3.5 text-[hsl(var(--dim))]" />{t('grp.hdr.messages30d', { n: formatNumber(group.messages_30d) })}</span>
+          <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-[hsl(var(--dim))]" />{t('grp.hdr.lastActive', { time: relativeTime(group.last_active_at) })}</span>
         </div>
       </div>
       <div className="flex gap-1.5">
-        <Button variant="ghost" size="sm"><Download className="h-3.5 w-3.5" />Xuất</Button>
-        <Button variant="outline" size="sm">Cấu hình nhóm</Button>
+        <Button variant="ghost" size="sm"><Download className="h-3.5 w-3.5" />{t('grp.hdr.export')}</Button>
+        <Button variant="outline" size="sm">{t('grp.hdr.configure')}</Button>
       </div>
     </div>
   );

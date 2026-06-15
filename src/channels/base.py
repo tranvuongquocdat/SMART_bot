@@ -4,12 +4,12 @@ Each channel implementation (Zalo, Telegram, Lark…) implements this Protocol
 so the rest of the system (agents, services) can stay provider-neutral.
 
 Wire-level events:
-  - Adapter publishes ``inbound.raw.<provider>`` with raw provider payload.
-  - A per-provider Normalizer subscribes, transforms, and publishes
-    ``message.captured`` (canonical schema in ``src/events/schema.py``).
+  - Adapter dịch wire-format -> ``InboundMessage`` rồi gọi ``_emit_inbound``
+    (publish ``inbound.normalized``). Adapter KHÔNG resolve boss / persist.
+  - ``InboundIngest`` (subscriber duy nhất của ``inbound.normalized``) lo
+    handshake + định danh + lọc nhóm + publish ``message.captured``.
 
-Adapter is also a sender: ``send_text`` is invoked by the per-provider
-``outbound.send`` subscriber.
+Adapter is also a sender: ``send_text`` is invoked by ``OutboundService``.
 """
 
 from __future__ import annotations
@@ -35,6 +35,20 @@ class InboundMessage:
     media_url: str | None
     ts: datetime | None
     raw: Any = None
+
+
+class BaseChannelAdapter:
+    """Base cho adapter: cung cấp đường DUY NHẤT đẩy tin vào hệ thống.
+
+    Adapter chỉ việc dịch wire-format -> InboundMessage rồi gọi _emit_inbound.
+    Toàn bộ định danh/lọc/persist do InboundIngest (subscriber inbound.normalized).
+    """
+
+    def __init__(self, bus, *args, **kwargs):
+        self.bus = bus
+
+    async def _emit_inbound(self, msg: "InboundMessage") -> None:
+        await self.bus.publish("inbound.normalized", {"message": msg})
 
 
 class ChannelAdapter(Protocol):

@@ -1,10 +1,13 @@
+import { useT } from '@/lib/i18n';
+
 export default function RootError() {
+  const t = useT();
   return (
     <div className="min-h-screen grid place-items-center p-8">
       <div className="text-center max-w-sm">
-        <h1 className="text-xl font-semibold mb-2">Có lỗi xảy ra</h1>
+        <h1 className="text-xl font-semibold mb-2">{t('common.errorTitle')}</h1>
         <p className="text-muted-foreground text-sm mb-4">
-          Không tải được trang. Thử reload, hoặc đăng nhập lại.
+          {t('common.errorDesc')}
         </p>
         <button
           onClick={() => window.location.reload()}

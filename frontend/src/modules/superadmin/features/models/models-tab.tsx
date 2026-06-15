@@ -23,6 +23,7 @@ import {
   deleteModel,
 } from './api';
 import type { Model } from './api';
+import { useT } from '@/lib/i18n';
 import {
   Select,
   SelectContent,
@@ -48,6 +49,7 @@ function AddModelDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({
     name: '',
@@ -77,10 +79,10 @@ function AddModelDialog({
     }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'models'] });
-      toast.success('Đã thêm model');
+      toast.success(t('sa.models.added'));
       onOpenChange(false);
     },
-    onError: () => toast.error('Thêm model thất bại'),
+    onError: () => toast.error(t('sa.models.addError')),
   });
 
   const set = (k: keyof typeof form, v: unknown) =>
@@ -90,12 +92,12 @@ function AddModelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Thêm model mới</DialogTitle>
+          <DialogTitle>{t('sa.models.addTitle')}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3 mt-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <Label>Tên model</Label>
+              <Label>{t('sa.models.fieldName')}</Label>
               <Input value={form.name} onChange={e => set('name', e.target.value)} placeholder="gpt-4o-mini" />
             </div>
             <div className="flex flex-col gap-1.5">
@@ -181,16 +183,16 @@ function AddModelDialog({
           </div>
           <div className="flex flex-col gap-1.5">
             <Label>Notes</Label>
-            <Input value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Ghi chú tùy chọn" />
+            <Input value={form.notes} onChange={e => set('notes', e.target.value)} placeholder={t('sa.models.notesPlaceholder')} />
           </div>
         </div>
         <DialogFooter className="mt-4">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Huỷ</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('sa.common.cancel')}</Button>
           <Button
             disabled={!form.name.trim() || !form.provider.trim() || mutation.isPending}
             onClick={() => mutation.mutate()}
           >
-            Thêm
+            {t('sa.models.add')}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -211,6 +213,7 @@ function EditModelDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [form, setForm] = useState({
     tier: model.tier,
@@ -235,10 +238,10 @@ function EditModelDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'models'] });
       qc.invalidateQueries({ queryKey: ['superadmin', 'model-slots'] });
-      toast.success('Đã cập nhật model');
+      toast.success(t('sa.models.updated'));
       onOpenChange(false);
     },
-    onError: () => toast.error('Cập nhật thất bại'),
+    onError: () => toast.error(t('sa.models.updateError')),
   });
 
   const set = (k: keyof typeof form, v: unknown) =>
@@ -248,7 +251,7 @@ function EditModelDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Sửa model — {model.name}</DialogTitle>
+          <DialogTitle>{t('sa.models.editTitle', { name: model.name })}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-3 mt-2">
           <div className="grid grid-cols-2 gap-3">
@@ -318,8 +321,8 @@ function EditModelDialog({
           </div>
         </div>
         <DialogFooter className="mt-4">
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>Huỷ</Button>
-          <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>Lưu</Button>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t('sa.common.cancel')}</Button>
+          <Button disabled={mutation.isPending} onClick={() => mutation.mutate()}>{t('sa.common.save')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -331,6 +334,7 @@ function EditModelDialog({
 // ---------------------------------------------------------------------------
 
 export function ModelsTab() {
+  const t = useT();
   const qc = useQueryClient();
   const models = useQuery(modelsQuery);
   const [addOpen, setAddOpen] = useState(false);
@@ -341,9 +345,9 @@ export function ModelsTab() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['superadmin', 'models'] });
       qc.invalidateQueries({ queryKey: ['superadmin', 'model-slots'] });
-      toast.success('Đã xoá model');
+      toast.success(t('sa.models.deleted'));
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('sa.common.deleteError')),
   });
 
   const columns: ColumnDef<Model>[] = [
@@ -352,7 +356,12 @@ export function ModelsTab() {
       accessorKey: 'name',
       cell: ({ row }) => (
         <div>
-          <div className="font-medium tracking-tight">{row.original.name}</div>
+          <div className="font-medium tracking-tight flex items-center gap-1.5">
+            {row.original.name}
+            {row.original.owner_boss_id != null && (
+              <Badge variant="outline" className="text-[10px]">BYO boss #{row.original.owner_boss_id}</Badge>
+            )}
+          </div>
           <div className="text-xs text-muted-foreground font-mono">{row.original.provider}</div>
         </div>
       ),
@@ -416,7 +425,7 @@ export function ModelsTab() {
             size="sm"
             className="h-7 w-7 p-0 text-destructive hover:text-destructive"
             onClick={() => {
-              if (confirm(`Xoá model "${row.original.name}"?`)) {
+              if (confirm(t('sa.models.deleteConfirm', { name: row.original.name }))) {
                 deleteMutation.mutate(row.original.id);
               }
             }}
@@ -434,12 +443,12 @@ export function ModelsTab() {
         <div>
           <h2 className="text-[14.5px] font-semibold tracking-tight">Models</h2>
           <p className="text-[12.5px] text-muted-foreground mt-0.5">
-            Quản lý danh sách model LLM trong hệ thống.
+            {t('sa.models.listDesc')}
           </p>
         </div>
         <Button size="sm" onClick={() => setAddOpen(true)}>
           <Plus className="h-3.5 w-3.5" />
-          Thêm model
+          {t('sa.models.addBtn')}
         </Button>
       </div>
       {models.isLoading ? (

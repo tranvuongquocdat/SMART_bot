@@ -4,6 +4,7 @@ import type { LoaderFunction } from 'react-router-dom';
 import type { QueryClient } from '@tanstack/react-query';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useT } from '@/lib/i18n';
 import { GroupHeader } from './group-header';
 import { SummaryCard } from './summary-card';
 import { ItemsList } from './items-list';
@@ -20,6 +21,7 @@ export const groupDetailLoader = (qc: QueryClient): LoaderFunction => async ({ p
 };
 
 export default function GroupDetail() {
+  const t = useT();
   const { groupId } = useParams();
   const id = groupId!;
   const group = useQuery(groupQuery(id));
@@ -41,12 +43,12 @@ export default function GroupDetail() {
 
       <Tabs defaultValue="summary" className="mb-6">
         <TabsList>
-          <TabsTrigger value="summary">Tóm tắt</TabsTrigger>
-          <TabsTrigger value="timeline">Dòng thời gian</TabsTrigger>
-          <TabsTrigger value="tasks">Tác vụ ({stats.data?.tasks ?? 0})</TabsTrigger>
-          <TabsTrigger value="reminders">Nhắc lịch ({stats.data?.reminders ?? 0})</TabsTrigger>
-          <TabsTrigger value="decisions">Quyết định ({stats.data?.decisions ?? 0})</TabsTrigger>
-          <TabsTrigger value="files">Tệp &amp; link</TabsTrigger>
+          <TabsTrigger value="summary">{t('grp.detailTab.summary')}</TabsTrigger>
+          <TabsTrigger value="timeline">{t('grp.detailTab.timeline')}</TabsTrigger>
+          <TabsTrigger value="tasks">{t('grp.detailTab.tasks')} ({stats.data?.tasks ?? 0})</TabsTrigger>
+          <TabsTrigger value="reminders">{t('grp.detailTab.reminders')} ({stats.data?.reminders ?? 0})</TabsTrigger>
+          <TabsTrigger value="decisions">{t('grp.detailTab.decisions')} ({stats.data?.decisions ?? 0})</TabsTrigger>
+          <TabsTrigger value="files">{t('grp.detailTab.files')}</TabsTrigger>
         </TabsList>
       </Tabs>
 
@@ -54,11 +56,11 @@ export default function GroupDetail() {
         <div>
           {summary.data && <SummaryCard summary={summary.data} />}
           <div className="flex items-center justify-between mt-7 mb-3.5">
-            <h2 className="text-[13.5px] font-semibold tracking-tight">Mục được trích xuất hôm nay</h2>
+            <h2 className="text-[13.5px] font-semibold tracking-tight">{t('grp.detail.extractedToday')}</h2>
           </div>
           {items.data && <ItemsList items={items.data} />}
           <div className="flex items-center justify-between mt-7 mb-3.5">
-            <h2 className="text-[13.5px] font-semibold tracking-tight">Dòng thời gian</h2>
+            <h2 className="text-[13.5px] font-semibold tracking-tight">{t('grp.detailTab.timeline')}</h2>
           </div>
           {timeline.data && <TimelineCard messages={timeline.data.messages} />}
         </div>

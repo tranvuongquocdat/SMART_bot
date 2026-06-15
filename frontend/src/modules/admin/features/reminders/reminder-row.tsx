@@ -20,6 +20,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { relativeTime } from '@/lib/format';
+import { useT } from '@/lib/i18n';
 import { patchReminder, deleteReminder, remindersQuery, type Reminder } from './api';
 
 function statusBadgeVariant(status: Reminder['status']): 'default' | 'secondary' | 'outline' {
@@ -41,6 +42,7 @@ export function ReminderRow({
   reminder: Reminder;
   activeStatus: string;
 }) {
+  const t = useT();
   const qc = useQueryClient();
   const [confirmDelete, setConfirmDelete] = useState(false);
 
@@ -56,19 +58,19 @@ export function ReminderRow({
       patchReminder(reminder.id, body),
     onSuccess: () => {
       invalidate();
-      toast.success('Đã cập nhật nhắc lịch');
+      toast.success(t('rem.updated'));
     },
-    onError: () => toast.error('Cập nhật thất bại'),
+    onError: () => toast.error(t('common.updateError')),
   });
 
   const deleteMut = useMutation({
     mutationFn: () => deleteReminder(reminder.id),
     onSuccess: () => {
       invalidate();
-      toast.success('Đã xoá nhắc lịch');
+      toast.success(t('rem.deleted'));
       setConfirmDelete(false);
     },
-    onError: () => toast.error('Xoá thất bại'),
+    onError: () => toast.error(t('common.deleteError')),
   });
 
   const isDone = reminder.status !== 'pending';
@@ -96,21 +98,21 @@ export function ReminderRow({
         <td className="p-3">
           <Badge variant={statusBadgeVariant(reminder.status)}>
             {reminder.status === 'pending'
-              ? 'Đang chờ'
+              ? t('rem.tab.pending')
               : reminder.status === 'done'
-              ? 'Đã xong'
-              : 'Đã huỷ'}
+              ? t('rem.tab.done')
+              : t('rem.status.cancelled')}
           </Badge>
         </td>
         <td className="p-3 text-sm text-muted-foreground">
-          {reminder.scope === 'group' ? 'Nhóm' : 'DM'}
+          {reminder.scope === 'group' ? t('rem.scope.group') : t('rem.scope.dm')}
         </td>
         <td className="p-3 text-right">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" size="sm" className="h-7 w-7 p-0">
                 <MoreHorizontal className="h-4 w-4" />
-                <span className="sr-only">Tuỳ chọn</span>
+                <span className="sr-only">{t('common.options')}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -122,7 +124,7 @@ export function ReminderRow({
                     }
                   >
                     <CheckCircle2 className="mr-2 h-4 w-4" />
-                    Đánh dấu xong
+                    {t('rem.markDone')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
@@ -133,7 +135,7 @@ export function ReminderRow({
                     }
                   >
                     <Clock className="mr-2 h-4 w-4" />
-                    Nhắc lại sau 30 phút
+                    {t('rem.snooze30m')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() =>
@@ -143,7 +145,7 @@ export function ReminderRow({
                     }
                   >
                     <Clock className="mr-2 h-4 w-4" />
-                    Nhắc lại sau 1 giờ
+                    {t('rem.snooze1h')}
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onClick={() =>
@@ -153,7 +155,7 @@ export function ReminderRow({
                     }
                   >
                     <Clock className="mr-2 h-4 w-4" />
-                    Nhắc lại sau 1 ngày
+                    {t('rem.snooze1d')}
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
                 </>
@@ -163,7 +165,7 @@ export function ReminderRow({
                 onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 className="mr-2 h-4 w-4" />
-                Xoá
+                {t('common.delete')}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -174,10 +176,10 @@ export function ReminderRow({
       <Dialog open={confirmDelete} onOpenChange={setConfirmDelete}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle>Xác nhận xoá nhắc lịch</DialogTitle>
+            <DialogTitle>{t('rem.deleteConfirm.title')}</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground mt-1">
-            Nhắc lịch "{reminder.text}" sẽ bị xoá vĩnh viễn. Hành động này không thể hoàn tác.
+            {t('rem.deleteConfirm.desc', { text: reminder.text })}
           </p>
           <DialogFooter className="mt-4">
             <Button
@@ -185,14 +187,14 @@ export function ReminderRow({
               onClick={() => setConfirmDelete(false)}
               disabled={deleteMut.isPending}
             >
-              Huỷ
+              {t('common.cancel')}
             </Button>
             <Button
               variant="destructive"
               onClick={() => deleteMut.mutate()}
               disabled={deleteMut.isPending}
             >
-              {deleteMut.isPending ? 'Đang xoá...' : 'Xoá'}
+              {deleteMut.isPending ? t('common.deleting') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

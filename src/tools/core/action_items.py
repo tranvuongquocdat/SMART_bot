@@ -43,6 +43,37 @@ async def list_action_items(
 
 
 @tool(
+    name="workload_summary",
+    description=(
+        "Tổng hợp KHỐI LƯỢNG CÔNG VIỆC theo người: mỗi người bao nhiêu việc đang mở / quá hạn / "
+        "đã xong + tỷ lệ hoàn thành (by_assignee), KÈM danh sách việc quá hạn cụ thể (overdue_items: "
+        "{assignee, what, due}) để nêu ĐÚNG việc nào trễ. Dùng cho 'ai đang quá tải', 'ai nhiều việc "
+        "nhất', 'việc NÀO/ai đang trễ hạn', 'tiến độ/hiệu suất team'. group_id=null = TẤT CẢ nhóm; "
+        "truyền group_id để xem 1 nhóm/team. Đã xếp người nhiều việc-quá-hạn/đang-mở lên trước."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "group_id": {
+                "type": "string",
+                "description": "Lọc 1 nhóm/team; null = tổng hợp mọi nhóm của sếp",
+            },
+        },
+    },
+    available_to={"dm_responder", "in_group_responder"},
+    parallel_safe=True,
+)
+async def workload_summary(ctx, group_id: str | None = None) -> ToolResult:
+    # Nguồn = SPINE knowledge (item có assignee_name): active=đang làm, resolved=đã xong.
+    from src.repositories.knowledge import KnowledgeRepo
+    from src.tools.core.search import _scope_group
+
+    group_id = _scope_group(ctx, group_id)
+    repo = KnowledgeRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
+    return ToolResult(content=await repo.workload_summary(chat_id=group_id))
+
+
+@tool(
     name="mark_action_item",
     description="Đánh dấu việc done/cancel",
     parameters={

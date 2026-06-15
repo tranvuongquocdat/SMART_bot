@@ -91,6 +91,9 @@ async def google_callback(request: Request):
                     sub,
                 )
             )
+            from src.services.subscription import provision_new_boss
+
+            await provision_new_boss(c, uid)
 
     response = RedirectResponse("/app", status_code=302)
     response.set_cookie(

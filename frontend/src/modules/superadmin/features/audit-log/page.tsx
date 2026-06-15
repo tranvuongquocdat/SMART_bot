@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
+import { useT } from '@/lib/i18n';
 import { fetchAuditLog } from './api';
 import type { AuditLogItem } from './api';
 
@@ -72,6 +73,7 @@ function AuditRow({ item }: { item: AuditLogItem }) {
 // ---------------------------------------------------------------------------
 
 export default function AuditLogPage() {
+  const t = useT();
   const [actorFilter, setActorFilter] = useState('');
   const [actionFilter, setActionFilter] = useState('');
   const [appliedActor, setAppliedActor] = useState('');
@@ -121,21 +123,21 @@ export default function AuditLogPage() {
   return (
     <PageWrap>
       <PageHeader
-        title="Audit log"
-        subtitle="Lịch sử hành động của super-admin. Chỉ đọc."
+        title={t('nav.sa.audit')}
+        subtitle={t('sa.audit.subtitle')}
       />
 
       <PageSection>
         <div className="flex gap-2 flex-wrap">
           <Input
-            placeholder="Actor (email / tên)"
+            placeholder={t('sa.audit.actorPlaceholder')}
             value={actorFilter}
             onChange={e => setActorFilter(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applyFilters()}
             className="w-52"
           />
           <Input
-            placeholder="Action (vd: update_model)"
+            placeholder={t('sa.audit.actionPlaceholder')}
             value={actionFilter}
             onChange={e => setActionFilter(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && applyFilters()}
@@ -143,7 +145,7 @@ export default function AuditLogPage() {
           />
           <Button variant="secondary" size="default" onClick={applyFilters}>
             <Search className="h-3.5 w-3.5 mr-1" />
-            Lọc
+            {t('sa.audit.filter')}
           </Button>
         </div>
       </PageSection>
@@ -152,15 +154,15 @@ export default function AuditLogPage() {
         {result.isLoading ? (
           <Skeleton className="h-[320px] rounded-[12px]" />
         ) : result.isError ? (
-          <p className="text-destructive text-sm py-4">Lỗi tải dữ liệu.</p>
+          <p className="text-destructive text-sm py-4">{t('sa.audit.loadError')}</p>
         ) : allItems.length === 0 ? (
-          <EmptyState icon={FileText} title="Chưa có sự kiện nào" />
+          <EmptyState icon={FileText} title={t('sa.audit.empty')} />
         ) : (
           <div className="rounded-[12px] bg-card-grad surface-section overflow-hidden">
             <table className="w-full text-sm">
               <thead className="bg-[hsl(var(--muted))]">
                 <tr>
-                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Thời gian</th>
+                  <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">{t('sa.audit.colTime')}</th>
                   <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Actor</th>
                   <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Action</th>
                   <th className="px-4 py-2.5 text-left text-xs font-medium text-muted-foreground">Target</th>
@@ -177,7 +179,7 @@ export default function AuditLogPage() {
             {nextCursor && (
               <div className="flex justify-center py-3 border-t border-border">
                 <Button variant="outline" size="sm" onClick={loadMore} disabled={loadingMore}>
-                  {loadingMore ? 'Đang tải...' : 'Tải thêm'}
+                  {loadingMore ? t('sa.common.loading') : t('sa.audit.loadMore')}
                 </Button>
               </div>
             )}

@@ -6,7 +6,7 @@ export type Group = {
   members_count: number; messages_30d: number; last_active_at: string | null;
 };
 export type GroupListItem = {
-  id: number; name: string; channel: string;
+  id: number; name: string; channel: string; is_active: boolean;
   members_count: number; updated_at: string | null;
 };
 export type Summary = { body: string | null; updated_at: string | null };
@@ -80,3 +80,66 @@ export const peopleSearchQuery = (q: string) => queryOptions({
   queryFn: () => api<PersonResult[]>(`/api/v1/admin/people?q=${encodeURIComponent(q)}`),
   enabled: q.length >= 1,
 });
+
+export const toggleGroupActive = (id: number) =>
+  api<{ id: number; is_active: boolean }>(
+    `/api/v1/admin/groups/${id}/toggle-active`,
+    { method: 'PATCH' },
+  );
+
+export const enableAllGroups = () =>
+  api<{ enabled: number; active: number; total: number; limit: number | null }>(
+    '/api/v1/admin/groups/enable-all',
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+
+export const disableAllGroups = () =>
+  api<{ disabled: number; active: number }>(
+    '/api/v1/admin/groups/disable-all',
+    { method: 'POST', body: JSON.stringify({}) },
+  );
+
+// Group note — lõi của nhóm
+export type GroupNote = {
+  content: string;
+  template_id: number | null;
+  manually_edited_sections: string[];
+  updated_at: string | null;
+};
+export type NoteVersion = {
+  id: number;
+  emitted_by: string;
+  emitted_at: string;
+  content_len: number;
+};
+export type NoteTemplate = { id: number; name: string; description: string | null };
+
+export const noteQuery = (id: string) => queryOptions({
+  queryKey: ['admin', 'group', id, 'note'],
+  queryFn: () => api<GroupNote>(`${base(id)}/note`),
+});
+export const noteVersionsQuery = (id: string) => queryOptions({
+  queryKey: ['admin', 'group', id, 'note-versions'],
+  queryFn: () => api<NoteVersion[]>(`${base(id)}/note/versions`),
+});
+export const noteTemplatesQuery = () => queryOptions({
+  queryKey: ['admin', 'note-templates'],
+  queryFn: () => api<NoteTemplate[]>('/api/v1/admin/note-templates'),
+});
+
+export const patchNote = (id: string, content: string) =>
+  api<{ ok: boolean }>(`${base(id)}/note`, {
+    method: 'PATCH', body: JSON.stringify({ content }),
+  });
+export const refreshNote = (id: string) =>
+  api<{ ok: boolean; message: string }>(`${base(id)}/note/refresh`, {
+    method: 'POST', body: JSON.stringify({}),
+  });
+export const restoreNoteVersion = (id: string, versionId: number) =>
+  api<{ ok: boolean }>(`${base(id)}/note/versions/${versionId}/restore`, {
+    method: 'POST', body: JSON.stringify({}),
+  });
+export const setGroupTemplate = (id: string, templateId: number | null) =>
+  api<{ ok: boolean }>(`${base(id)}/template`, {
+    method: 'PATCH', body: JSON.stringify({ template_id: templateId }),
+  });

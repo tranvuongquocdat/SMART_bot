@@ -27,7 +27,7 @@ async def get_current_boss(request: Request) -> BossContext:
     pool: asyncpg.Pool = request.app.state.db_pool
     async with pool.acquire() as c:
         row = await c.fetchrow(
-            "SELECT id, email, role FROM users WHERE id=$1", uid
+            "SELECT id, email, role, ui_language FROM users WHERE id=$1", uid
         )
     if not row:
         raise HTTPException(status_code=401, detail="user not found")
@@ -41,7 +41,11 @@ async def get_current_boss(request: Request) -> BossContext:
         or db_role == "superadmin"
         else db_role
     )
-    ctx = BossContext(boss_id=int(row["id"]), user_role=role)
+    ctx = BossContext(
+        boss_id=int(row["id"]),
+        user_role=role,
+        ui_language=(row["ui_language"] or "vi"),
+    )
     request.state.boss = ctx
     return ctx
 
