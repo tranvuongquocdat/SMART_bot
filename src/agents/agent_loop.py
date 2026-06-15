@@ -31,6 +31,10 @@ _slog = structlog.get_logger()
 _FALLBACK_REPLY = "Em xin lỗi, hệ thống đang gặp trục trặc — sếp thử lại sau ít phút."
 _LOOP_REPLY = "(em xin lỗi, em hơi loạn — vui lòng thử lại)"
 
+# Responder là thư ký bám sát dữ kiện — temp thấp để bớt trôi/bịa và trả lời nhất
+# quán (extract dùng 0.2, reconcile 0.1). Mặc định LLMRequest là 0.7 (quá cao cho QA).
+_RESPONDER_TEMPERATURE = 0.3
+
 
 async def _load_prompt(prompt_key: str, ctx) -> str:
     if not prompt_key:
@@ -68,8 +72,11 @@ def _current_time_directive(tz: str | None) -> str:
     return (
         f"Bối cảnh thời gian hiện tại: {weekday}, {now:%d/%m/%Y %H:%M} "
         f"(múi giờ {zone}). Dùng đúng mốc này cho mọi suy luận thời gian "
-        "(hôm nay, ngày mai, cuối tuần, '2 tiếng nữa'…). Tuyệt đối KHÔNG nói "
-        "rằng bạn không biết ngày giờ hiện tại."
+        "(hôm nay, ngày mai, cuối tuần, '2 tiếng nữa'…). "
+        "Khi xếp hạng/đánh giá deadline: mốc đã QUA so với hiện tại là việc 'trễ hạn' "
+        "(nêu riêng), KHÔNG được tính là 'sắp tới'; 'sắp tới hạn' CHỈ gồm các mốc còn ở "
+        "tương lai, gần nhất = mốc tương lai sớm nhất. Tuyệt đối KHÔNG nói rằng bạn "
+        "không biết ngày giờ hiện tại."
     )
 
 
@@ -244,6 +251,7 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
             tools=tools or None,
             cache_prefix_hint=cfg.cache_prefix_hint or "after_semantic_memory",
             routing_hints={"op": op_name},
+            temperature=_RESPONDER_TEMPERATURE,
         )
         try:
             resp = await ctx.llm.complete(req)
@@ -251,6 +259,11 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
             log.exception("llm.complete raised in agent_loop")
             return _FALLBACK_REPLY
 
+        _slog.info(
+            "agent_llm_turn", op=op_name, finish=resp.finish_reason,
+            content_len=len(resp.content or ""), n_tools=len(resp.tool_calls),
+            content_tail=(resp.content or "")[-120:],
+        )
         if resp.status != "ok":
             log.warning("llm response non-ok status=%s err=%s", resp.status, resp.error)
             return resp.content or _FALLBACK_REPLY

@@ -1,0 +1,93 @@
+{
+  "_doc": "Gold cases cho Q&A spine. Mỗi BUG tìm qua harness → thêm 1 case (D6). Chạy: uv run python scripts/harness.py gold. must_include khớp KHÔNG phân biệt hoa/thường (hỗ trợ token động {days_until:YYYY-MM-DD}); must_exclude PHÂN BIỆT hoa/thường (token cụ thể/tên riêng, tránh false-positive). ask_in: apollo | beta | dm (mặc định apollo). State giả định = harness setup tái lập (Apollo: An backend FastAPI 10/7, Bình UI/UX wireframe done, Châu test+PM, DB=Supabase, demo 15/7, VNPay risk đã resolved, báo cáo tiến độ hạn 10/6 TRỄ; Beta: Bình backend Django, Châu frontend, An tích hợp ngân hàng, demo 20/8).",
+  "cases": [
+    {
+      "id": "backend-owner-apollo",
+      "q": "Ai phụ trách backend?",
+      "ask_in": "apollo",
+      "must_include": ["An"],
+      "must_exclude": ["Django"],
+      "note": "Ownership Apollo backend = An; KHÔNG lẫn backend Beta (Django) -> leak guard."
+    },
+    {
+      "id": "backend-owner-beta",
+      "q": "Ai phụ trách backend?",
+      "ask_in": "beta",
+      "must_include": ["Bình"],
+      "must_exclude": ["FastAPI"],
+      "note": "Hỏi trong Beta -> Bình; KHÔNG lẫn backend Apollo (FastAPI). Scope nhóm 2 chiều."
+    },
+    {
+      "id": "frontend-owner-beta",
+      "q": "Ai làm frontend của dự án này?",
+      "ask_in": "beta",
+      "must_include": ["Châu"],
+      "must_exclude": [],
+      "note": "Ownership Beta frontend = Châu."
+    },
+    {
+      "id": "database-supabase",
+      "q": "Database dự án này dùng gì?",
+      "ask_in": "apollo",
+      "must_include": ["Supabase"],
+      "must_exclude": [],
+      "note": "Reconcile PostgreSQL -> Supabase: phải trả Supabase (quyết định mới nhất)."
+    },
+    {
+      "id": "deadline-demo-days-apollo",
+      "q": "Deadline bản demo là khi nào, còn mấy ngày nữa tính từ hôm nay?",
+      "ask_in": "apollo",
+      "must_include": ["15/7", "{days_until:2026-07-15}"],
+      "must_exclude": ["20/8", "Beta"],
+      "note": "Time-arithmetic (số ngày tới 15/7, token động) + KHÔNG lẫn demo Beta 20/8 (bug group_id='')."
+    },
+    {
+      "id": "multi-hop-an-deadline",
+      "q": "An phụ trách phần gì và deadline của An là ngày nào?",
+      "ask_in": "apollo",
+      "must_include": ["backend", "10/7"],
+      "must_exclude": [],
+      "note": "Multi-hop: ghép ownership (backend) + deadline riêng của An (10/7)."
+    },
+    {
+      "id": "nearest-deadline-apollo",
+      "q": "Việc nào sắp tới hạn nhất trong dự án này?",
+      "ask_in": "apollo",
+      "must_include": ["10/7"],
+      "must_exclude": [],
+      "note": "Ranking thời gian: mốc SẮP TỚI gần nhất là backend 10/7 (trước demo 15/7)."
+    },
+    {
+      "id": "overdue-apollo",
+      "q": "Có việc nào đang trễ hạn không?",
+      "ask_in": "apollo",
+      "must_include": ["báo cáo"],
+      "must_exclude": [],
+      "note": "Suy luận thời gian: báo cáo tiến độ hạn 10/6 đã quá hạn so với hôm nay -> phải nhận ra là trễ."
+    },
+    {
+      "id": "no-budget-info-apollo",
+      "q": "Ngân sách dự án Apollo là bao nhiêu?",
+      "ask_in": "apollo",
+      "must_include": ["chưa"],
+      "must_exclude": [],
+      "note": "Không bịa: không có dữ liệu ngân sách -> phải nói chưa có thông tin."
+    },
+    {
+      "id": "projects-list-dm",
+      "q": "Hiện công ty đang chạy những dự án nào?",
+      "ask_in": "dm",
+      "must_include": ["Apollo", "Beta"],
+      "must_exclude": [],
+      "note": "Tổng hợp chéo nhóm (DM scope=mọi nhóm): liệt kê đủ Apollo + Beta. Đường Pha B."
+    },
+    {
+      "id": "cross-nearest-deadline-dm",
+      "q": "Trong tất cả dự án, mốc deadline sắp tới gần nhất là việc nào?",
+      "ask_in": "dm",
+      "must_include": ["10/7"],
+      "must_exclude": [],
+      "note": "Ranking thời gian XUYÊN nhóm trong DM: gần nhất sắp tới = backend Apollo 10/7."
+    }
+  ]
+}

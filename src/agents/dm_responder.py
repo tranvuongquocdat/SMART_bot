@@ -42,6 +42,7 @@ class DMContext:
         "fetch_url",
         "list_action_items",
         "mark_action_item",
+        "workload_summary",
         "edit_group_note",
         "read_group_note",
         "refresh_group_note",

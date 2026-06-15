@@ -47,6 +47,7 @@ class OpenAICompatibleClient:
                 usage=LLMUsage(0, 0, 0, int((time.time() - t0) * 1000), model, "openai_compat"),
             )
         choice = resp.choices[0].message
+        finish_reason = resp.choices[0].finish_reason
         usage = resp.usage
         cached = 0
         details = getattr(usage, "prompt_tokens_details", None)
@@ -71,6 +72,7 @@ class OpenAICompatibleClient:
                 provider="openai_compat",
             ),
             status="ok",
+            finish_reason=finish_reason,
         )
 
     @staticmethod

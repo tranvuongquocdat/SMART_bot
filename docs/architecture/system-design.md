@@ -502,6 +502,154 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
   plugin/groups/normalizer). Test `test_api_tools_toggle.py` viết lại theo contract mới (core read-only, toggle/
   disable-all bị từ chối, enable-all uncapped).
 
+**2026-06-14 — Q&A deep-tune vòng 1 (Pha A) ✅ + gold-set materialized.**
+- **BUG (scope leak đa nhóm) — đã sửa:** responder đôi khi gọi `search_knowledge(group_id="")`
+  (chuỗi rỗng thay vì bỏ trống). Scope-default cũ chỉ kích hoạt khi `group_id is None` → `""`
+  lọt xuống index như "không lọc nhóm" → câu hỏi trong nhóm Apollo **lẫn tri thức nhóm Beta**
+  (demo 20/8 hiện ra khi chỉ hỏi demo Apollo). Sửa: helper `_scope_group(ctx, gid)` chuẩn hoá
+  falsy→None rồi áp scope nhóm hiện tại; dùng chung cho cả 4 search tool (`search_knowledge`,
+  `search_history`, `count_messages`, `find_exact_quote`). Verify: hỏi cùng câu trong Apollo và
+  Beta → đáp đúng từng nhóm, KHÔNG lẫn.
+- **Responder temperature 0.7→0.3:** `agent_loop` không set temperature → mặc định `LLMRequest`
+  0.7 (quá cao cho thư ký bám dữ kiện). Hạ về 0.3 (extract 0.2 / reconcile 0.1) → bớt trôi/bịa,
+  trả lời nhất quán hơn (ổn định gold-set).
+- **Observability:** thêm `finish_reason` vào `LLMResponse` (capture ở openai_compat) + log
+  `agent_llm_turn` (finish/content_len/n_tools/content_tail) mỗi vòng loop — để phân biệt
+  "model trả thiếu" vs "bị cắt do token" vs "lỗi tool". (Lần này xác nhận model trả ĐỦ, finish=stop.)
+- **Gold-set (D6) đã hiện thực hoá:** `scripts/gold_cases.json` (7 case: ownership 2 nhóm, reconcile
+  Supabase, time-arithmetic + chống lẫn nhóm, multi-hop, ranking deadline, no-info không bịa) +
+  lệnh `harness.py gold` (assert must_include không phân biệt hoa/thường, must_exclude phân biệt;
+  bỏ qua quick-ack; ask_in apollo|beta; exit≠0 nếu fail). **7/7 PASS.**
+- **Bài học harness:** `harness.py ask` in ĐẦY ĐỦ câu trả lời (đa dòng). Lần đầu mình lọc
+  `grep '^(Q|BOT):'` → cắt mất mọi dòng sau newline đầu → TƯỞNG bot trả lời cụt; thực ra bot trả
+  đủ (list bullet + time-math chuẩn). Đừng grep output harness.
+- **Phát hiện còn MỞ (chưa sửa, cần quyết hướng):** câu "còn rủi ro VNPay không?" — risk VNPay đã
+  resolved nên bị **soft-delete** (biến mất khỏi search). Bot không thấy item "đã xử lý" nên dựng
+  lại "rủi ro" từ các fact dời-deadline-vì-thanh-toán → khung câu trả lời thành "có rủi ro thanh
+  toán" (grounded nhưng nhập nhằng với rủi ro đã đóng). Tension thiết kế: resolved-risk nên DELETE
+  (gọn) hay giữ `status=resolved` (trả lời "đã xử lý" tốt hơn)? → đưa user quyết ở vòng sau.
+- **Giới hạn harness lộ ra:** `ask` luôn post vào 1 nhóm → KHÔNG test được câu **all-scope/DM**
+  (tổng hợp chéo nhóm) — vốn cũng là đường Pha B (sếp hỏi ở web admin, scope=mọi nhóm). Vòng sau
+  cần mở DM-ask.
+
+**2026-06-15 — Q&A deep-tune vòng 2 (Pha A): kịch bản TÁI LẬP + fix lõi extract/time + gold ổn định.**
+- **Kịch bản tự đủ + tái lập:** `harness.py setup` giờ tạo CẢ Apollo (16 tin) + Beta (5 tin); CONVO
+  gồm đủ phân công, đổi DB (Postgres→Supabase), risk VNPay rồi RESOLVED, wireframe hoàn thành, dời
+  deadline (demo 30/6→15/7, backend 10/7), 1 việc TRỄ HẠN (báo cáo 10/6), nhiễu. Bỏ ngày tương đối
+  ("thứ 6 tuần này") vì không tái lập + làm sai xếp hạng.
+- **BUG harness #1 (race ingest) — sửa:** `inbound.normalized` ingest BẤT ĐỒNG BỘ → `setup`→`extract`
+  chạy trên window THIẾU (lần đầu chỉ trích 5/16 tin Apollo, Beta 0). Thêm `_wait_ingested` poll tới
+  khi đủ tin mới extract. Sau fix: 1 lần extract ra đủ ~17-19 item, provenance đúng.
+- **BUG harness #2 (capture) — sửa:** `_ask_capture` đếm out-msg rồi cắt [n:] → khi nhóm tích luỹ
+  >100 tin (gold chạy nhiều lần) cửa sổ limit lệch → tưởng "(no reply)" dù bot trả ĐÚNG (log
+  `agent_llm_turn` xác nhận finish=stop, content đủ). Đổi sang **diff theo ID tin out** (limit 200).
+  ⚠️ Bài học lặp lại: nhiều "bug" là artifact của HARNESS, không phải sản phẩm — luôn soi `outbound_messages`/log trước khi kết luận.
+- **BUG lõi (extract within-batch) — sửa:** trong CÙNG 1 window, reconcile chỉ so với existing (rỗng
+  ở pass đầu) → KHÔNG khử mâu thuẫn nội bộ batch: demo "30/6" + "dời 15/7" cùng active → câu "deadline
+  sắp tới gần nhất" lúc lấy nhầm 30/6. Sửa prompt extract **v4**: hợp nhất giá trị bị thay trong cùng
+  đoạn thành 1 mục trạng thái mới nhất; RIÊNG ngày/deadline dời thì content chỉ ghi MỐC MỚI (bỏ mốc cũ
+  để khỏi lẫn khi xếp hạng). (Reconcile cross-batch UPDATE/DELETE vẫn lo phần đa-pass như cũ.)
+- **BUG lõi (time-reasoning) — sửa:** bot xếp việc TRỄ HẠN (báo cáo 10/6, đã qua) là "sắp tới gần
+  nhất". Bổ sung vào `_current_time_directive` (dùng chung mọi responder): mốc đã QUA = 'trễ hạn' nêu
+  riêng, KHÔNG tính 'sắp tới'; 'sắp tới' chỉ gồm mốc tương lai. → câu ranking ổn định.
+- **dm_general v2:** trước RỖNG (responder DM chạy KHÔNG system prompt) → viết v2 (thư ký, search_knowledge-first,
+  scope MỌI nhóm cho tổng hợp chéo, placeholder-free). Đã `seed_prompts.py` nạp đủ 7 prompt vào DB.
+- **DM = đường tổng hợp chéo nhóm (và là đường Pha B):** web test channel sẵn `chat_id="dm:<boss>"`
+  (`sender_is_boss` wired) → harness thêm `ask_in="dm"`. Verify: "có dự án nào / deadline gần nhất toàn
+  công ty" → bot gộp đúng Apollo+Beta, xếp hạng xuyên nhóm.
+- **Gold-set mở rộng 11 case** (thêm overdue, frontend Beta, projects-list DM, cross-nearest DM) + runner:
+  token động `{days_until:YYYY-MM-DD}` (assert số ngày không "hết hạn"), khớp tên riêng phân biệt hoa/thường.
+  **3 lần chạy liên tiếp 11/11 PASS, tất định.**
+- **VNPay resolved-risk (đưa user quyết):** single-pass extract giữ CẢ risk + fact "đã mở sandbox/đã gỡ"
+  → bot trả lời chuẩn ("rủi ro đã được gỡ vì sandbox đã mở"). Việc "biến mất" chỉ xảy ra ở cross-batch
+  reconcile DELETE (vòng build trước). → Khuyến nghị: resolved-risk nên GIỮ vết (status=resolved / +fact)
+  thay vì hard-DELETE, để trả lời "đã xử lý" được. Cần user chốt hướng reconcile cho risk.
+
+**2026-06-15 — Q&A deep-tune vòng 3 (Pha A): reconcile đa-pass + resolved-risk GIỮ VẾT (user chốt).**
+- **Quyết định user:** risk/việc đã giải quyết → KHÔNG hard-DELETE mà **status='resolved' (giữ vết)** để
+  trả lời "đã xử lý" thay vì im/bịa. Hướng đi: "Cả hai — Pha A trước" rồi mới Pha B.
+- **Lõi (status=resolved):** thêm `KnowledgeStatus.RESOLVED` + `RevisionOp.RESOLVE` + `RETRIEVABLE_STATUSES`.
+  `KnowledgeRepo.resolve()` (status=resolved, GIỮ Qdrant point, optional ghi đè content cho khớp trạng
+  thái); `search_fts`+`get_many` mở rộng `status IN ('active','resolved')`; `search_knowledge` trả thêm
+  field `status`. `_apply` thêm nhánh RESOLVE: enrich content "— [Đã xử lý: <reason>]" + re-index.
+- **Reconcile v4 (prompt):** thêm op **RESOLVE** (đã xử lý/xong → giữ vết) TÁCH khỏi **DELETE** (sai/trùng/
+  phủ định → xoá hẳn); **UPDATE** bao gồm đổi công nghệ/hạ tầng/nhà cung cấp (AWS→Vercel, Postgres→Supabase)
+  — đừng DELETE khi chỉ là đổi-giá-trị (mất thông tin mới); reason viết TỰ NHIÊN (không lộ "candidate").
+- **Responder v4 (in_group+dm):** item `status='resolved'` → trả lời "KHÔNG còn, đã xử lý" (dù content mô tả
+  vấn đề ở thì hiện tại = mô tả gốc); không liệt kê resolved vào "đang mở/còn lại".
+- **Verify (harness `multipass` — lệnh MỚI, regression cross-batch):** Pass1 (risk license + AWS + deadline
+  30/6 + task rà soát) → extract reset; Pass2 (đã mua license / dời 20/7 / rà soát xong / đổi sang Vercel)
+  → extract incremental. Kết quả ĐÚNG + ỔN ĐỊNH: risk→resolved (content enrich), task→resolved, hosting
+  AWS→Vercel (UPDATE, không mất), deadline→20/7; câu hỏi "còn rủi ro X?"→"không còn, đã xử lý". **6/6 PASS ×2.**
+  Gold single-pass vẫn **11/11**.
+- **Lưu ý non-determinism:** cross-batch đôi khi đạt "đã đóng" bằng ADD-fact thay vì RESOLVE (đã nudge ưu
+  tiên RESOLVE). Câu trả lời vẫn đúng cả hai cơ chế → `multipass` assert THEO OUTCOME (Q&A) là cổng chính,
+  DB-status là phụ. Cơ chế sạch nhất (RESOLVE) tốt cho câu "liệt kê rủi ro đang mở".
+
+**2026-06-15 — PHA B khảo sát + bắt đầu build (workload/hiệu suất) — core-out.**
+- **Khảo sát (verify, không giả định):** `action_items` {assignee_name TEXT, **due_at**, status open/done/
+  cancelled, group_note_id, project_id} ĐANG được populate bởi pipeline note (`note_service`). Membership ở
+  `group_members`/`web_group_members`. FE đã có `components/charts.tsx` (BarChart xu hướng + RankBars xếp
+  hạng, tự code, không lib ngoài) + mẫu trang admin `usage` (page→api→chart). CHƯA có: tầng aggregation,
+  `list_members`, đường đưa biểu đồ cho admin. ⚠️ assignee_name FREE-TEXT + thưa (extraction note cần soi
+  riêng); workload nên gộp trên action_items (có cấu trúc) chứ không phải knowledge spine.
+- **Quyết định user:** (1) biểu đồ = **A) trang admin + endpoint tổng hợp (deterministic)**, AI trả lời
+  workload bằng CHỮ qua cùng tool — KHÔNG đi hướng AI-sinh-chart-spec (để sau). (2) entity = **lean
+  free-text trước** (assignee + group=team + bucket '(chưa gán)'), dựng model people/team sau khi cần.
+- **Đã build (core-out bước a):** `ActionItemsRepo.workload_summary(group_id?)` — gộp theo người: open/
+  overdue(due<now & open)/done/cancelled + completion_rate + bucket '(chưa gán)' + totals, xếp người
+  nhiều quá-hạn/đang-mở lên trước. Tool `workload_summary` (dm + in_group). list_members DEFER (assignee
+  đã lộ trong summary; roster cross-provider rườm rà — làm khi cần "ai đang rảnh").
+- **Verify (harness `workload` — lệnh MỚI, regression):** seed 14 action_items (An 3open/1qh/2done, Bình
+  1open/3done, Châu 4open/2qh, 1 chưa gán) → AI trả lời ĐÚNG + sâu sắc: "ai quá tải"→Châu (breakdown
+  đúng), "việc trễ hạn"→3 (Châu 2/An 1), "tóm tắt hiệu suất"→completion-rate + nhận định lệch tải +
+  khuyến nghị ưu tiên 3 việc quá hạn. **4/4 PASS.** AI tự đi tổng hợp team→task→insight = đúng mục tiêu Pha B (dạng text).
+- **CÒN LẠI Pha B:** (b) endpoint `/api/...workload` + trang admin "Hiệu suất" render RankBars/BarChart
+  (mảnh render — chưa làm); (c) soi/tune chất lượng extraction assignee+due của pipeline note (dữ liệu thật
+  thưa assignee); (sau) list_members; (sau) AI-sinh chart-spec nếu cần.
+
+**2026-06-15 — PHA B: SPINE làm nguồn workload (user chốt) ✅ built + verified e2e.**
+- **Phát hiện then chốt khi "soi extraction":** `action_items` KHÔNG được trích từ hội thoại bởi bất kỳ
+  pipeline nào (`ActionItemsRepo.insert` không có caller) — chỉ seed demo. Pipeline note chỉ sinh markdown.
+  → quyết định (user): **spine knowledge làm nguồn workload** (không dựng pipeline action_items thứ 2).
+- **Build:** migration **0017** thêm `assignee_name` + `due_at` vào `knowledge_items` (+ index theo assignee).
+  Domain/repo `KnowledgeItem` + `add()/update()/_snapshot` mang 2 field. `KnowledgeRepo.workload_summary(chat_id?)`
+  gộp item CÓ assignee: open=active / done=resolved / overdue=active&due<now + completion_rate, xếp quá-hạn↑.
+  Tool `workload_summary` đổi đọc từ KnowledgeRepo (qua `_scope_group`). Gỡ `ActionItemsRepo.workload_summary` (chết).
+- **Extract v5:** thêm field tùy chọn `assignee` (tên người nếu phân-công) + `due` (ISO, suy năm từ mốc
+  `{{ today }}` được inject). Service `_parse_due` (date-only→cuối ngày, tz-aware) + ADD/UPDATE điền 2 field
+  (UPDATE chỉ ghi đè khi candidate có nêu — không xoá giá trị cũ). status active=đang làm, resolved=xong (vòng 3).
+- **Verify e2e:** setup Apollo+Beta → extract → knowledge_items CÓ assignee/due đúng (An backend due 10/7,
+  Châu báo cáo due 10/6, …); `workload_summary` gộp đúng (Châu 3 mở/1 quá hạn…); AI trả lời "ai nhiều việc
+  nhất + deadline gần nhất" → Châu + báo cáo 10/6 trễ 5 ngày. **Lệnh `harness.py workload` (seed
+  knowledge_items) 4/4 PASS ×3.** gold 11/11 + multipass 6/6 không regress.
+- **Prompt responder v5 (in_group+dm):** câu khối lượng/quá tải/TRỄ HẠN/hiệu suất → ưu tiên `workload_summary`
+  (trước chỉ search_knowledge-first → "trễ hạn" lúc ra lúc không vì content không có tín hiệu quá hạn).
+- **Polish (v6/v7 extract + tool):** (1) `due` CHỈ điền khi có HẠN RÕ RÀNG — KHÔNG suy từ ước lượng mơ hồ
+  ("estimate 2 tuần" → đừng đặt deadline phantom làm sai ranking). (2) content giữ ngày kiểu VN "15/7", ISO chỉ
+  ở field `due` (trước extraction nhét ISO vào content → bot trả "2026-07-15"). (3) `search_knowledge` trả thêm
+  `assignee`+`due` (responder cần field cấu trúc, không thì ngày nằm trong due_at là vô hình). (4) `workload_summary`
+  trả thêm `overdue_items` {assignee, what, due} để trả lời "việc NÀO trễ" chứ không chỉ đếm. (5) gold matcher
+  chuẩn hoá ngày ('20/7' khớp cả '20/07/2026'). Sau polish: gold 11/11 · multipass 6/6 · workload 4/4 (xanh CÙNG lúc).
+- **Còn lại Pha B:** (b) endpoint + trang admin "Hiệu suất" render charts.tsx (mảnh render — CHƯA làm);
+  polish: extract đôi khi tách "phân công backend" + "deadline backend" thành 2 item cùng người (đếm hơi dư);
+  list_members + AI-sinh chart-spec để sau. ⚠️ Lưu ý lặp lại: query DB phải dùng boss từ harness state — id
+  nhóm/boss là hex ngẫu nhiên, `ORDER BY id DESC` VÔ NGHĨA (đã suýt kết luận sai "extraction không điền assignee").
+
+**2026-06-15 — PHA B: trang admin "Hiệu suất" (mảnh render) ✅ built + verified API.**
+- **BE:** `GET /api/v1/admin/workload?group_id=` (api_admin.py, `require_boss`) → `KnowledgeRepo.workload_summary`
+  (scope/totals/by_assignee/overdue_items). Thin wrapper trên repo đã verified.
+- **FE:** feature mới `admin/features/performance` (page.tsx + api.ts) — render **RankBars** khối lượng theo
+  người (bar=việc đang mở, sub=quá hạn·đã xong·% hoàn thành) + bảng **việc quá hạn** (việc/người/hạn) + 4
+  summary card (người/mở/quá hạn/đã xong). Tái dùng `charts.tsx` + mẫu trang `usage`. Thêm nav "Hiệu suất"
+  (Gauge, workspace section) + route `/app/admin/performance` + i18n vi/en (`perf.*`, `nav.admin.performance`).
+- **Verify:** `npm run build` sạch (typecheck/lint/build). Endpoint test với session bid thật (make_session)
+  → 200, dữ liệu đúng từ spine đã extract: Châu 3 mở/1 quá hạn · An 3 · Bình 3; overdue_items nêu đúng
+  "Báo cáo tiến độ còn thiếu" hạn 10/6. (Chưa chụp ảnh UI — render dùng component đã chứng minh ở trang usage.)
+- **PHA B coi như xong lõi:** workload theo người (chữ qua bot + biểu đồ trên admin) chạy e2e từ spine.
+  Còn (polish, sau): extraction đôi khi tách phân-công + deadline cùng người thành 2 item (đếm hơi dư);
+  list_members (ai rảnh/đủ roster); AI-sinh chart-spec inline; bộ lọc theo nhóm/dự án trên trang Hiệu suất.
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).

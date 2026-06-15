@@ -58,6 +58,7 @@ class LLMResponse:
     usage: LLMUsage
     status: Literal["ok", "error", "rate_limited"]
     error: str | None = None
+    finish_reason: str | None = None
 
 
 class LLMGateway(Protocol):

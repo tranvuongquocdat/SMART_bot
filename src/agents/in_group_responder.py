@@ -43,6 +43,7 @@ _QUICK_ACK_THRESHOLD = 60  # chars
         "pin_message",
         "list_action_items",
         "mark_action_item",
+        "workload_summary",
         "fetch_url",
         "remember",
         "current_time",

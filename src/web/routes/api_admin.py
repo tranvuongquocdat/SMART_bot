@@ -1702,6 +1702,24 @@ async def disconnect_channel(
 
 
 # ===========================================================================
+# Workload / Hiệu suất  –  GET /api/v1/admin/workload?group_id=
+# Tổng hợp khối lượng việc theo người TỪ SPINE (knowledge_items có assignee):
+# open=active, done=resolved, overdue=active&due<now + completion_rate + overdue_items.
+# ===========================================================================
+
+@router.get("/workload")
+async def get_workload(
+    group_id: str | None = Query(None),
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    from src.repositories.knowledge import KnowledgeRepo
+
+    repo = KnowledgeRepo(db, ctx)
+    return await repo.workload_summary(chat_id=group_id or None)
+
+
+# ===========================================================================
 # Usage  –  GET /api/v1/admin/usage?range=30d
 # ===========================================================================
 

@@ -19,13 +19,20 @@ class KnowledgeKind(str, Enum):
 class KnowledgeStatus(str, Enum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
+    RESOLVED = "resolved"  # việc đã xong / rủi ro đã xử lý — GIỮ vết, vẫn tra được
     DELETED = "deleted"  # soft-delete; KHÔNG bao giờ xoá cứng
+
+
+# Trạng thái còn "đáng tra cứu" (hiển thị trong search/recall). 'deleted' bị loại;
+# 'resolved' vẫn giữ để trả lời "việc/rủi ro X đã xử lý chưa".
+RETRIEVABLE_STATUSES = (KnowledgeStatus.ACTIVE.value, KnowledgeStatus.RESOLVED.value)
 
 
 class RevisionOp(str, Enum):
     ADD = "add"
     UPDATE = "update"
     DELETE = "delete"
+    RESOLVE = "resolve"  # đóng nhưng giữ vết (status=resolved)
     RESTORE = "restore"
 
 
@@ -54,6 +61,10 @@ class KnowledgeItem:
     confidence: float | None = None
     valid_from: datetime | None = None
     valid_to: datetime | None = None
+    # Task metadata (Pha B workload): item phân-công/cam-kết. assignee free-text;
+    # status active=đang làm, resolved=đã xong. NULL = không phải task có chủ/hạn.
+    assignee_name: str | None = None
+    due_at: datetime | None = None
     qdrant_point_id: str | None = None
     meta: dict[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None

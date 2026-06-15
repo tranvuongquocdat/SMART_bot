@@ -1,21 +1,32 @@
 key: knowledge_reconcile
-version: 2
+version: 4
 is_active: true
-notes: v2 — UPDATE vs DELETE rõ ràng (đổi giá trị=UPDATE; việc/rủi ro khép lại=DELETE). Placeholder：{{ candidates }} {{ existing }}
+notes: v4 — UPDATE bao gồm đổi công nghệ/hạ tầng/nhà cung cấp (AWS→Vercel); đừng DELETE khi chỉ là đổi-giá-trị. v3 — thêm RESOLVE. Placeholder：{{ candidates }} {{ existing }}
 body: |
   Bạn hợp nhất tri thức mới với tri thức đã có cho trợ lý thư ký.
   Với mỗi CANDIDATE (đánh số theo index), quyết một thao tác so với EXISTING (mỗi cái có id):
   - ADD: tri thức mới, chưa có existing nào tương ứng → {"op":"ADD","candidate_index":<i>}
-  - UPDATE: candidate ĐÍNH CHÍNH / BỔ SUNG CHI TIẾT cho một existing mà BẢN CHẤT việc giữ nguyên
-    (vd: dời deadline, sửa số liệu, thêm chi tiết, đổi người phụ trách) →
+  - UPDATE: candidate ĐỔI GIÁ TRỊ / ĐÍNH CHÍNH / BỔ SUNG cho một existing mà vẫn CÙNG một hạng mục
+    đang theo dõi (vd: dời deadline, sửa số liệu, đổi người phụ trách, ĐỔI lựa chọn cho cùng hạng mục
+    như công nghệ/công cụ/hạ tầng/nhà cung cấp — AWS→Vercel, Postgres→Supabase) → cập nhật existing
+    sang GIÁ TRỊ MỚI (KHÔNG dùng DELETE cho loại đổi-giá-trị này, kẻo mất thông tin mới) →
     {"op":"UPDATE","candidate_index":<i>,"target_id":<id>,"reason":"..."}
-  - DELETE: candidate cho thấy một existing ĐÃ HẾT HIỆU LỰC — đã xong & không cần theo dõi nữa,
-    rủi ro đã được xử lý/giải quyết, hoặc bị một quyết định mới phủ định hẳn →
-    {"op":"DELETE","target_id":<id>,"reason":"..."}
+  - RESOLVE: candidate cho thấy một existing ĐÃ ĐƯỢC GIẢI QUYẾT / ĐÃ HOÀN THÀNH nhưng nên GIỮ VẾT
+    (rủi ro đã xử lý xong, việc đã làm xong, vấn đề đã khắc phục) → đánh dấu đã đóng nhưng vẫn tra
+    cứu được → {"op":"RESOLVE","target_id":<id>,"reason":"..."}. ƯU TIÊN RESOLVE chính existing đó
+    thay vì chỉ ADD một fact "đã xong" rời rạc (để existing không còn bị coi là đang mở).
+  - DELETE: candidate cho thấy một existing là THÔNG TIN SAI / TRÙNG / bị một quyết định mới phủ định
+    HẲN (không còn đúng nữa) → loại khỏi kho → {"op":"DELETE","target_id":<id>,"reason":"..."}
   - NOOP: candidate trùng / không thêm gì so với existing → {"op":"NOOP","candidate_index":<i>}
 
-  NGUYÊN TẮC then chốt: "đổi giá trị nhưng vẫn cùng một việc đang theo dõi" = UPDATE;
-  "việc/rủi ro đó đã khép lại, không còn là việc cần nhớ ở trạng thái hiện tại" = DELETE.
+  NGUYÊN TẮC then chốt:
+  - "đổi giá trị / đổi lựa chọn cho CÙNG một hạng mục" (dời deadline, đổi người, đổi công nghệ/hạ tầng) = UPDATE.
+  - "việc/rủi ro đã XONG/đã XỬ LÝ, cần nhớ là 'đã đóng'" = RESOLVE (giữ vết, KHÔNG xoá).
+  - "thông tin SAI/lỗi/trùng, không đáng giữ" = DELETE.
+  Mặc định: khép lại do hoàn thành/giải quyết → RESOLVE; đổi sang giá trị khác → UPDATE; chỉ DELETE khi
+  thông tin sai/trùng. ĐỪNG DELETE một quyết định chỉ vì nó bị thay bằng lựa chọn mới — đó là UPDATE.
+  "reason" phải là câu ngắn TỰ NHIÊN tiếng Việt mô tả thay đổi (vd "đã mua license, hết rủi ro"); KHÔNG
+  dùng từ kỹ thuật như "candidate/existing/id" — reason có thể hiển thị cho sếp đọc.
 
   Trả về DUY NHẤT JSON: {"decisions": [ ... ]}.
 

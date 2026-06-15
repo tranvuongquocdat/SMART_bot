@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import asyncpg
@@ -36,6 +37,7 @@ def _row_to_item(r: asyncpg.Record) -> KnowledgeItem:
         chat_id=r["chat_id"], project_id=r["project_id"],
         importance=r["importance"], confidence=r["confidence"],
         valid_from=r["valid_from"], valid_to=r["valid_to"],
+        assignee_name=r["assignee_name"], due_at=r["due_at"],
         qdrant_point_id=r["qdrant_point_id"], meta=meta or {},
         created_at=r["created_at"], updated_at=r["updated_at"],
     )
@@ -47,6 +49,8 @@ def _snapshot(item: KnowledgeItem) -> dict[str, Any]:
         "status": item.status, "importance": item.importance,
         "confidence": item.confidence, "project_id": item.project_id,
         "provider": item.provider, "chat_id": item.chat_id,
+        "assignee_name": item.assignee_name,
+        "due_at": item.due_at.isoformat() if item.due_at else None,
         "valid_from": item.valid_from.isoformat() if item.valid_from else None,
         "valid_to": item.valid_to.isoformat() if item.valid_to else None,
         "meta": item.meta,
@@ -109,7 +113,7 @@ class KnowledgeRepo(BossScopedRepo):
                 SELECT *, ts_rank(fts, plainto_tsquery('simple', unaccent($2))) AS rank
                 FROM knowledge_items
                 WHERE boss_id=$1
-                  AND status='active'
+                  AND status IN ('active','resolved')
                   AND fts @@ plainto_tsquery('simple', unaccent($2))
                   AND ($3::text        IS NULL OR provider=$3)
                   AND ($4::text        IS NULL OR chat_id=$4)
@@ -122,13 +126,65 @@ class KnowledgeRepo(BossScopedRepo):
             )
         return [_row_to_item(r) for r in rows]
 
+    async def workload_summary(
+        self, *, chat_id: str | None = None, now: datetime | None = None,
+    ) -> dict:
+        """Tổng hợp workload theo người TRÊN SPINE: chỉ item có assignee_name (task có chủ).
+        open=status'active', done=status'resolved' (đã xong), overdue=active & due_at<now.
+        Trả {scope, totals, by_assignee:[{assignee, open, overdue, done, total,
+        completion_rate}]} — xếp người nhiều quá-hạn/đang-mở lên trước."""
+        now = now or datetime.now(timezone.utc)
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT title, content, assignee_name, status, due_at FROM knowledge_items
+                WHERE boss_id=$1 AND assignee_name IS NOT NULL
+                  AND status IN ('active','resolved')
+                  AND ($2::text IS NULL OR chat_id=$2)
+                """,
+                self.ctx.boss_id, chat_id,
+            )
+        agg: dict[str, dict] = {}
+        overdue_items = []
+        for r in rows:
+            name = (r["assignee_name"] or "").strip()
+            if not name:
+                continue
+            b = agg.setdefault(name, {"open": 0, "overdue": 0, "done": 0})
+            if r["status"] == "active":
+                b["open"] += 1
+                if r["due_at"] and r["due_at"] < now:
+                    b["overdue"] += 1
+                    overdue_items.append({
+                        "assignee": name,
+                        "what": r["title"] or (r["content"] or "")[:60],
+                        "due": r["due_at"].strftime("%Y-%m-%d"),
+                    })
+            elif r["status"] == "resolved":
+                b["done"] += 1
+        overdue_items.sort(key=lambda x: x["due"])
+        by = []
+        for name, b in agg.items():
+            total = b["open"] + b["done"]
+            by.append({
+                "assignee": name, **b, "total": total,
+                "completion_rate": round(b["done"] / total, 2) if total else None,
+            })
+        by.sort(key=lambda x: (x["overdue"], x["open"]), reverse=True)
+        totals = {k: sum(b[k] for b in agg.values()) for k in ("open", "overdue", "done")}
+        totals["assignees"] = len(agg)
+        return {
+            "scope": chat_id or "all_groups", "totals": totals, "by_assignee": by,
+            "overdue_items": overdue_items[:15],
+        }
+
     async def get_many(self, ids: list[int]) -> list[KnowledgeItem]:
         if not ids:
             return []
         async with self.pool.acquire() as c:
             rows = await c.fetch(
                 "SELECT * FROM knowledge_items WHERE id = ANY($1::bigint[]) "
-                "AND boss_id=$2 AND status='active'",
+                "AND boss_id=$2 AND status IN ('active','resolved')",
                 ids, self.ctx.boss_id,
             )
         return [_row_to_item(r) for r in rows]
@@ -139,6 +195,7 @@ class KnowledgeRepo(BossScopedRepo):
         provider: str | None = None, chat_id: str | None = None,
         project_id: int | None = None, importance: int | None = None,
         confidence: float | None = None, valid_from=None, valid_to=None,
+        assignee_name: str | None = None, due_at=None,
         meta: dict | None = None, qdrant_point_id: str | None = None,
         source_message_ids: list[int] | None = None,
         actor: str = RevisionActor.EXTRACTOR, reason: str | None = None,
@@ -149,14 +206,14 @@ class KnowledgeRepo(BossScopedRepo):
                     """
                     INSERT INTO knowledge_items
                       (boss_id, provider, chat_id, project_id, kind, title, content,
-                       importance, confidence, valid_from, valid_to, qdrant_point_id,
-                       meta_json)
-                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::jsonb)
+                       importance, confidence, valid_from, valid_to, assignee_name,
+                       due_at, qdrant_point_id, meta_json)
+                    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb)
                     RETURNING *
                     """,
                     self.ctx.boss_id, provider, chat_id, project_id, _v(kind), title,
                     content, importance, confidence, valid_from, valid_to,
-                    qdrant_point_id, json.dumps(meta or {}),
+                    assignee_name, due_at, qdrant_point_id, json.dumps(meta or {}),
                 )
                 item = _row_to_item(row)
                 for mid in (source_message_ids or []):
@@ -180,6 +237,7 @@ class KnowledgeRepo(BossScopedRepo):
         allowed = {
             "kind", "title", "content", "status", "importance", "confidence",
             "project_id", "valid_from", "valid_to", "qdrant_point_id",
+            "assignee_name", "due_at",
         }
         sets = {k: _v(v) for k, v in fields.items() if k in allowed}
         async with self.pool.acquire() as c:
@@ -238,6 +296,47 @@ class KnowledgeRepo(BossScopedRepo):
                     source_message_id=source_message_id,
                 )
         return True
+
+    async def resolve(
+        self, item_id: int, *, actor: str = RevisionActor.EXTRACTOR,
+        reason: str | None = None, source_message_id: int | None = None,
+        content: str | None = None,
+    ) -> KnowledgeItem | None:
+        """Đóng item nhưng GIỮ vết: status='resolved' (việc đã xong / rủi ro đã xử lý).
+        KHÁC soft_delete: KHÔNG gỡ Qdrant point → vẫn tra được để trả lời 'đã xử lý'.
+        `content` tuỳ chọn: ghi đè nội dung cho khớp trạng thái đã xử lý (tránh content
+        mô tả vấn đề ở thì hiện tại làm responder trả lời 'vẫn còn')."""
+        async with self.pool.acquire() as c:
+            async with c.transaction():
+                before = await c.fetchrow(
+                    "SELECT * FROM knowledge_items WHERE id=$1 AND boss_id=$2 FOR UPDATE",
+                    item_id, self.ctx.boss_id,
+                )
+                if before is None:
+                    return None
+                before_item = _row_to_item(before)
+                if content is not None:
+                    await c.execute(
+                        "UPDATE knowledge_items SET status='resolved', content=$3, "
+                        "updated_at=NOW() WHERE id=$1 AND boss_id=$2",
+                        item_id, self.ctx.boss_id, content,
+                    )
+                else:
+                    await c.execute(
+                        "UPDATE knowledge_items SET status='resolved', updated_at=NOW() "
+                        "WHERE id=$1 AND boss_id=$2",
+                        item_id, self.ctx.boss_id,
+                    )
+                after_item = _row_to_item(before)
+                after_item.status = KnowledgeStatus.RESOLVED.value
+                if content is not None:
+                    after_item.content = content
+                await self._log(
+                    c, item_id, RevisionOp.RESOLVE.value, _v(actor),
+                    _snapshot(before_item), _snapshot(after_item), reason,
+                    source_message_id=source_message_id,
+                )
+        return after_item
 
     async def add_provenance(self, item_id: int, message_ids: list[int]) -> None:
         async with self.pool.acquire() as c:

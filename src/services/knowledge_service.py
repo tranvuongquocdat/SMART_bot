@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from src.domain.knowledge import CANONICAL_KINDS, RevisionActor
 from src.llm.base import ChatMessage, LLMRequest
@@ -35,15 +37,29 @@ BỎ QUA: câu hỏi, lời chào, và tin nhắn hỏi-đáp/nhờ-vả gửi c
 phải tri thức. Chỉ lấy thông tin / sự kiện / quyết định / phân công / cam kết / deadline / rủi ro
 có giá trị lưu lại.
 
+HỢP NHẤT trong cùng đoạn: nếu một giá trị bị THAY ĐỔI/ĐÍNH CHÍNH ngay trong đoạn này (deadline dời,
+đổi công nghệ, đổi người phụ trách), chỉ tạo MỘT mục cho trạng thái MỚI NHẤT — KHÔNG tạo thêm mục
+riêng cho giá trị cũ đã bị thay. Riêng NGÀY THÁNG/DEADLINE bị dời: content chỉ ghi mốc MỚI NHẤT
+(vd "deadline demo là 15/7"), KHÔNG nhắc lại mốc cũ — mốc cũ lẫn vào sẽ làm sai khi xếp hạng thời gian.
+Đổi công nghệ/người thì có thể nêu cái cũ cho rõ ngữ cảnh. Kho tri thức luôn là trạng thái hiện hành.
+
 Mỗi mục có:
 - kind: một trong [decision, fact, note, risk]
 - title: tiêu đề ngắn
-- content: nội dung gọn, tự đủ nghĩa (tiếng Việt)
+- content: nội dung gọn, tự đủ nghĩa (tiếng Việt); NGÀY THÁNG trong content viết kiểu TỰ NHIÊN VN
+  (vd "15/7", "10/6"), KHÔNG dùng ISO trong content (ISO chỉ dùng cho field `due` bên dưới).
 - importance: 1-10
 - confidence: 0..1
+- assignee: (TÙY CHỌN) TÊN người phụ trách, nếu mục là PHÂN CÔNG / GIAO VIỆC / CAM KẾT của một
+  người cụ thể (vd "An" cho "An phụ trách backend"). Bỏ trống nếu không gắn với một người.
+- due: (TÙY CHỌN) hạn chót dạng ISO "YYYY-MM-DD" — CHỈ khi có HẠN RÕ RÀNG (deadline/hạn chót/"trước
+  ngày X"/"chốt ngày X"); suy năm từ MỐC HÔM NAY (vd hôm nay 2026-06-15, "10/7" → "2026-07-10").
+  TUYỆT ĐỐI KHÔNG suy due từ ƯỚC LƯỢNG mơ hồ ("khoảng 2 tuần", "dự kiến sớm", "vài hôm nữa"). Bỏ trống nếu không có hạn chốt.
 - source_message_ids: list id tin nhắn nguồn (lấy từ [id] đầu mỗi dòng)
 
 Trả về DUY NHẤT JSON: {"items": [ ... ]}. Nếu không có gì đáng lưu: {"items": []}.
+
+Hôm nay là: {{ today }}
 
 Hội thoại:
 {{ window }}"""
@@ -51,16 +67,27 @@ Hội thoại:
 _RECONCILE_PROMPT = """Bạn hợp nhất tri thức mới với tri thức đã có cho trợ lý thư ký.
 Với mỗi CANDIDATE (đánh số theo index), quyết một thao tác so với EXISTING (mỗi cái có id):
 - ADD: tri thức mới, chưa có existing nào tương ứng → {"op":"ADD","candidate_index":<i>}
-- UPDATE: candidate ĐÍNH CHÍNH / BỔ SUNG CHI TIẾT cho một existing mà BẢN CHẤT việc giữ nguyên
-  (vd: dời deadline, sửa số liệu, thêm chi tiết, đổi người phụ trách) →
+- UPDATE: candidate ĐỔI GIÁ TRỊ / ĐÍNH CHÍNH / BỔ SUNG cho một existing mà vẫn CÙNG một hạng mục
+  đang theo dõi (vd: dời deadline, sửa số liệu, đổi người phụ trách, ĐỔI lựa chọn cho cùng hạng mục
+  như công nghệ/công cụ/hạ tầng/nhà cung cấp — AWS→Vercel, Postgres→Supabase) → cập nhật existing
+  sang GIÁ TRỊ MỚI (KHÔNG dùng DELETE cho loại đổi-giá-trị này, kẻo mất thông tin mới) →
   {"op":"UPDATE","candidate_index":<i>,"target_id":<id>,"reason":"..."}
-- DELETE: candidate cho thấy một existing ĐÃ HẾT HIỆU LỰC — đã xong & không cần theo dõi nữa,
-  rủi ro đã được xử lý/giải quyết, hoặc bị một quyết định mới phủ định hẳn →
-  {"op":"DELETE","target_id":<id>,"reason":"..."}
+- RESOLVE: candidate cho thấy một existing ĐÃ ĐƯỢC GIẢI QUYẾT / ĐÃ HOÀN THÀNH nhưng nên GIỮ VẾT
+  (rủi ro đã xử lý xong, việc đã làm xong, vấn đề đã khắc phục) → đánh dấu đã đóng nhưng vẫn tra
+  cứu được → {"op":"RESOLVE","target_id":<id>,"reason":"..."}. ƯU TIÊN RESOLVE chính existing đó
+  thay vì chỉ ADD một fact "đã xong" rời rạc (để existing không còn bị coi là đang mở).
+- DELETE: candidate cho thấy một existing là THÔNG TIN SAI / TRÙNG / bị một quyết định mới phủ định
+  HẲN (không còn đúng nữa) → loại khỏi kho → {"op":"DELETE","target_id":<id>,"reason":"..."}
 - NOOP: candidate trùng / không thêm gì so với existing → {"op":"NOOP","candidate_index":<i>}
 
-NGUYÊN TẮC then chốt: "đổi giá trị nhưng vẫn cùng một việc đang theo dõi" = UPDATE;
-"việc/rủi ro đó đã khép lại, không còn là việc cần nhớ ở trạng thái hiện tại" = DELETE.
+NGUYÊN TẮC then chốt:
+- "đổi giá trị / đổi lựa chọn cho CÙNG một hạng mục" (dời deadline, đổi người, đổi công nghệ/hạ tầng) = UPDATE.
+- "việc/rủi ro đã XONG/đã XỬ LÝ, cần nhớ là 'đã đóng'" = RESOLVE (giữ vết, KHÔNG xoá).
+- "thông tin SAI/lỗi/trùng, không đáng giữ" = DELETE.
+Mặc định: khép lại do hoàn thành/giải quyết → RESOLVE; đổi sang giá trị khác → UPDATE; chỉ DELETE khi
+thông tin sai/trùng. ĐỪNG DELETE một quyết định chỉ vì nó bị thay bằng lựa chọn mới — đó là UPDATE.
+"reason" phải là câu ngắn TỰ NHIÊN tiếng Việt mô tả thay đổi (vd "đã mua license, hết rủi ro"); KHÔNG
+dùng từ kỹ thuật như "candidate/existing/id" — reason có thể hiển thị cho sếp đọc.
 
 Trả về DUY NHẤT JSON: {"decisions": [ ... ]}.
 
@@ -88,6 +115,24 @@ def _parse_json_block(text: str | None) -> dict:
     except (json.JSONDecodeError, ValueError):
         log.warning("knowledge: JSON parse failed: %.120s", text)
         return {}
+
+
+def _today_str() -> str:
+    return datetime.now(ZoneInfo("Asia/Ho_Chi_Minh")).strftime("%Y-%m-%d")
+
+
+def _parse_due(s: Any) -> datetime | None:
+    """Parse hạn ISO 'YYYY-MM-DD' (hoặc full ISO) → datetime tz-aware UTC. Date-only →
+    cuối ngày (23:59:59) để 'đến hạn hôm nay' chưa tính là trễ. Lỗi → None (khoan dung)."""
+    if not s or not isinstance(s, str):
+        return None
+    try:
+        d = datetime.fromisoformat(s.strip())
+    except ValueError:
+        return None
+    if "T" not in s and (d.hour, d.minute, d.second) == (0, 0, 0):
+        d = d.replace(hour=23, minute=59, second=59)
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
 def _valid_candidate(c: dict) -> bool:
@@ -144,7 +189,7 @@ class KnowledgeService:
 
     async def _extract(self, boss_id: int, window: str) -> list[dict]:
         tmpl = await self._load_prompt(boss_id, "knowledge_extract", _EXTRACT_PROMPT)
-        rendered = tmpl.replace("{{ window }}", window)
+        rendered = tmpl.replace("{{ window }}", window).replace("{{ today }}", _today_str())
         resp = await self.llm.complete(LLMRequest(
             feature="knowledge_extract", boss_id=boss_id,
             messages=[ChatMessage(role="system", content=rendered)],
@@ -184,7 +229,7 @@ class KnowledgeService:
         self, repo: KnowledgeRepo, decisions: list[dict], candidates: list[dict],
         provider: str, chat_id: str,
     ) -> dict[str, int]:
-        added = updated = deleted = 0
+        added = updated = deleted = resolved = 0
         for d in decisions:
             op = str(d.get("op", "")).upper()
             try:
@@ -196,6 +241,8 @@ class KnowledgeService:
                         kind=c["kind"], content=c["content"], title=c.get("title"),
                         provider=provider, chat_id=chat_id,
                         importance=c.get("importance"), confidence=c.get("confidence"),
+                        assignee_name=(c.get("assignee") or None),
+                        due_at=_parse_due(c.get("due")),
                         source_message_ids=c.get("source_message_ids") or None,
                         actor=RevisionActor.EXTRACTOR, reason="extract",
                     )
@@ -206,14 +253,43 @@ class KnowledgeService:
                     tid = d.get("target_id")
                     if c is None or tid is None:
                         continue
+                    fields = {
+                        "content": c["content"], "title": c.get("title"),
+                        "importance": c.get("importance"),
+                    }
+                    # Chỉ ghi đè assignee/due khi candidate có nêu (tránh xoá giá trị cũ).
+                    if c.get("assignee"):
+                        fields["assignee_name"] = c["assignee"]
+                    due = _parse_due(c.get("due"))
+                    if due:
+                        fields["due_at"] = due
                     item = await repo.update(
-                        int(tid), content=c["content"], title=c.get("title"),
-                        importance=c.get("importance"),
+                        int(tid), **fields,
                         actor=RevisionActor.EXTRACTOR, reason=d.get("reason"),
                         source_message_id=(c.get("source_message_ids") or [None])[0],
                     )
                     await self._index(repo, item)
                     updated += 1
+                elif op == "RESOLVE":
+                    # Rủi ro đã xử lý / việc đã xong → GIỮ vết (status=resolved), KHÔNG gỡ
+                    # Qdrant point để còn trả lời "X đã được xử lý". Ghi rõ kết quả xử lý vào
+                    # content để khớp trạng thái (tránh content mô tả vấn đề ở thì hiện tại).
+                    tid = d.get("target_id")
+                    if tid is None:
+                        continue
+                    existing = await repo.get(int(tid))
+                    reason = d.get("reason")
+                    new_content = (
+                        f"{existing.content} — [Đã xử lý: {reason}]"
+                        if existing and reason else None
+                    )
+                    item = await repo.resolve(
+                        int(tid), actor=RevisionActor.EXTRACTOR, reason=reason,
+                        content=new_content,
+                    )
+                    if item and new_content:
+                        await self._index(repo, item)  # re-embed nội dung đã cập nhật
+                    resolved += 1 if item else 0
                 elif op == "DELETE":
                     tid = d.get("target_id")
                     if tid is None:
@@ -229,7 +305,8 @@ class KnowledgeService:
                 # NOOP / unknown → bỏ qua
             except Exception:  # noqa: BLE001 — một quyết định lỗi không được làm hỏng cả batch
                 log.exception("knowledge: apply decision failed: %s", d)
-        return {"added": added, "updated": updated, "deleted": deleted}
+        return {"added": added, "updated": updated, "deleted": deleted,
+                "resolved": resolved}
 
     async def _index(self, repo: KnowledgeRepo, item) -> None:
         """Embed + upsert Qdrant (guarded — lỗi embed KHÔNG làm hỏng việc lưu DB)."""

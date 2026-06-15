@@ -18,6 +18,21 @@ def _parse_iso(s: str | None) -> datetime | None:
     return datetime.fromisoformat(s)
 
 
+def _scope_group(ctx, group_id: str | None) -> str | None:
+    """Chuẩn hoá group_id rồi áp scope mặc định = nhóm hiện tại.
+
+    Model đôi khi truyền group_id="" (chuỗi rỗng) thay vì bỏ trống — nếu để nguyên,
+    "" lọt xuống tầng truy vấn như "không lọc nhóm" → LẪN dữ liệu nhóm khác. Khi sếp
+    tag bot trong 1 nhóm, câu hỏi gần như luôn về nhóm đó nên mặc định scope về nhóm
+    hiện tại; muốn nhóm khác thì model truyền group_id tường minh. DM/web (chat_type≠
+    group) → None = mọi nhóm (đúng cho tổng hợp chéo)."""
+    if not group_id:
+        group_id = None
+    if group_id is None and ctx.chat_type == "group" and ctx.chat_id:
+        group_id = ctx.chat_id
+    return group_id
+
+
 @tool(
     name="search_history",
     description=(
@@ -71,6 +86,7 @@ async def search_history(
 ) -> ToolResult:
     if ctx.retriever_factory is None:
         return ToolResult(content=[], error="retriever_factory not available")
+    group_id = _scope_group(ctx, group_id)
     pipeline = await ctx.retriever_factory("qa_with_search")
     hits = await pipeline.run(
         query,
@@ -130,6 +146,7 @@ async def count_messages(
     after: str | None = None,
     before: str | None = None,
 ) -> ToolResult:
+    group_id = _scope_group(ctx, group_id)
     repo = MessagesRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
     count = await repo.count_filtered(
         query=query,
@@ -163,6 +180,7 @@ async def find_exact_quote(
     fragment: str,
     group_id: str | None = None,
 ) -> ToolResult:
+    group_id = _scope_group(ctx, group_id)
     repo = MessagesRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
     matches = await repo.fts_exact(fragment, group_id, limit=5)
     out = []
@@ -224,11 +242,7 @@ async def search_knowledge(
     after: str | None = None,
     before: str | None = None,
 ) -> ToolResult:
-    # Scope mặc định = nhóm hiện tại (khi sếp tag bot trong 1 nhóm, câu hỏi gần như
-    # luôn về nhóm đó). Model không truyền group_id → tự lấy chat_id hiện tại nếu đang
-    # ở group; muốn nhóm khác thì truyền group_id tường minh. DM/web → None = mọi nhóm.
-    if group_id is None and ctx.chat_type == "group" and ctx.chat_id:
-        group_id = ctx.chat_id
+    group_id = _scope_group(ctx, group_id)
     repo = KnowledgeRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
     index = KnowledgeIndex(ctx.pool, ctx.qdrant, ctx.llm)
     items = await index.search(
@@ -247,6 +261,9 @@ async def search_knowledge(
                 "title": it.title,
                 "content": it.content,
                 "importance": it.importance,
+                "status": it.status,  # 'active' | 'resolved' (đã xử lý/đã xong)
+                "assignee": it.assignee_name,
+                "due": it.due_at.strftime("%Y-%m-%d") if it.due_at else None,
                 "source_message_ids": prov[:5],
             }
         )
