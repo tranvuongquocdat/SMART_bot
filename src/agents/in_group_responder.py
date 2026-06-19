@@ -46,6 +46,7 @@ _QUICK_ACK_THRESHOLD = 60  # chars
         "workload_summary",
         "list_members",
         "fetch_url",
+        "web_search",
         "remember",
         "current_time",
     },

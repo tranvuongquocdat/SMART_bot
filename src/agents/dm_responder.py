@@ -40,6 +40,7 @@ class DMContext:
         "remember",
         "forget",
         "fetch_url",
+        "web_search",
         "list_action_items",
         "mark_action_item",
         "workload_summary",
