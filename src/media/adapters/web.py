@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 import httpx
 import trafilatura
@@ -40,6 +39,8 @@ class WebExtractor:
             return MediaExtractResult(media_text="")
         if "youtube.com" in url or "youtu.be" in url:
             return await self._youtube(url)
+        if "tiktok.com" in url:
+            return await self._tiktok(url)
         return await self._generic(url)
 
     async def _generic(self, url: str) -> MediaExtractResult:
@@ -58,39 +59,21 @@ class WebExtractor:
         return MediaExtractResult(media_text=extracted, title=title)
 
     async def _youtube(self, url: str) -> MediaExtractResult:
-        # yt-dlp is sync; running it inline is fine for MVP — the scheduler
-        # calls media extraction off the inbound hot path.
-        try:
-            import yt_dlp  # type: ignore
-        except ImportError:
-            return MediaExtractResult(media_text="")
-
-        opts = {
-            "skip_download": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["vi", "en"],
-            "quiet": True,
-            "no_warnings": True,
-        }
-        try:
-            with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-        except Exception:
-            log.exception("yt-dlp extract failed url=%s", url)
-            return MediaExtractResult(media_text="")
-        subtitle = _pick_subtitle(info)
-        title = info.get("title") or ""
-        body = subtitle or info.get("description") or ""
+        title, vid, desc = _yt_meta(url)
+        vid = vid or _yt_video_id(url)
+        transcript = _yt_transcript(vid) if vid else ""
+        body = transcript or desc  # transcript ưu tiên, fallback description
         text = (f"{title}\n\n{body}").strip()
         if len(text.encode("utf-8")) > MAX_BODY_BYTES:
-            text = text.encode("utf-8")[:MAX_BODY_BYTES].decode(
-                "utf-8", errors="ignore"
-            )
-        return MediaExtractResult(
-            media_text=text,
-            title=title or None,
-            extra={"video_id": info.get("id")},
-        )
+            text = text.encode("utf-8")[:MAX_BODY_BYTES].decode("utf-8", errors="ignore")
+        return MediaExtractResult(media_text=text, title=title or None, extra={"video_id": vid})
+
+    async def _tiktok(self, url: str) -> MediaExtractResult:
+        # Best-effort: title + description (yt-dlp metadata). Transcript đầy đủ cần
+        # ASR (phase sau) — TikTok hiếm khi expose phụ đề. KHÔNG dùng trafilatura.
+        title, _vid, desc = _yt_meta(url)
+        text = (f"{title}\n\n{desc}").strip()
+        return MediaExtractResult(media_text=text, title=title or None)
 
 
 _TITLE_RE = re.compile(r"<title[^>]*>(.*?)</title>", re.I | re.S)
@@ -103,15 +86,32 @@ def _extract_title(html: str) -> str | None:
     return re.sub(r"\s+", " ", m.group(1)).strip() or None
 
 
-def _pick_subtitle(info: dict[str, Any]) -> str | None:
-    """Pick first available auto-sub for vi → en. yt-dlp returns urls;
-    we don't dereference them in MVP — just signal we 'have subs' via
-    the description path for now to avoid extra http calls in tests."""
-    subs = (info.get("automatic_captions") or {}) | (info.get("subtitles") or {})
-    for lang in ("vi", "en"):
-        entries = subs.get(lang)
-        if entries:
-            # entries[0] is a dict with 'url' & 'ext'; we don't fetch it
-            # here to avoid a 2nd round-trip. Future: fetch + parse SRT/VTT.
-            return None
-    return None
+def _yt_video_id(url: str) -> str | None:
+    m = re.search(r"(?:v=|youtu\.be/|/shorts/|/embed/)([A-Za-z0-9_-]{11})", url or "")
+    return m.group(1) if m else None
+
+
+def _yt_transcript(video_id: str) -> str:
+    """Transcript thật (vi→en, cả auto-sub) qua youtube-transcript-api 1.x
+    (instance .fetch → .to_raw_data). Rỗng nếu không có / bị chặn IP."""
+    try:
+        from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
+
+        fetched = YouTubeTranscriptApi().fetch(video_id, languages=["vi", "en"])
+        return " ".join(s["text"] for s in fetched.to_raw_data() if s.get("text")).strip()
+    except Exception:
+        log.info("yt transcript unavailable/blocked vid=%s", video_id)
+        return ""
+
+
+def _yt_meta(url: str) -> tuple[str, str | None, str]:
+    """(title, video_id, description) qua yt-dlp; degrade rỗng nếu lỗi."""
+    try:
+        import yt_dlp  # type: ignore
+
+        with yt_dlp.YoutubeDL({"skip_download": True, "quiet": True, "no_warnings": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+        return (info.get("title") or "", info.get("id"), info.get("description") or "")
+    except Exception:
+        log.exception("yt-dlp meta failed url=%s", url)
+        return ("", _yt_video_id(url), "")
