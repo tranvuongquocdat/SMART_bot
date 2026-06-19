@@ -55,7 +55,11 @@ class ImageExtractor:
         if url and not content:
             import httpx
 
-            async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+            from src.media.adapters.web import BROWSER_UA
+
+            async with httpx.AsyncClient(
+                timeout=30, follow_redirects=True, headers={"User-Agent": BROWSER_UA}
+            ) as c:
                 r = await c.get(url)
                 r.raise_for_status()
                 content = r.content

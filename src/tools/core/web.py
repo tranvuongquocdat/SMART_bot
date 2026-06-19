@@ -11,7 +11,7 @@ from __future__ import annotations
 import httpx
 
 import src.media  # noqa: F401  (importing registers all media adapters)
-from src.media.adapters.web import MAX_BODY_BYTES
+from src.media.adapters.web import BROWSER_UA, MAX_BODY_BYTES
 from src.media.registry import find_adapter
 from src.tools.base import ToolResult
 from src.tools.registry import tool
@@ -45,7 +45,9 @@ async def _probe_content_type(url: str) -> str:
     """Cheap HEAD to learn content-type (many doc/image URLs have no extension).
     Returns "" on any failure — detection then falls back to URL extension."""
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as c:
+        async with httpx.AsyncClient(
+            follow_redirects=True, timeout=10, headers={"User-Agent": BROWSER_UA}
+        ) as c:
             r = await c.head(url)
             return r.headers.get("content-type", "")
     except Exception:
@@ -76,7 +78,9 @@ async def fetch_url(ctx, url: str) -> ToolResult:
         kind = _needs_bytes(url, content_type)
 
         if kind in _DOC_EXT:
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30) as c:
+            async with httpx.AsyncClient(
+                follow_redirects=True, timeout=30, headers={"User-Agent": BROWSER_UA}
+            ) as c:
                 r = await c.get(url)
                 r.raise_for_status()
             adapter = find_adapter(media_kind=kind)

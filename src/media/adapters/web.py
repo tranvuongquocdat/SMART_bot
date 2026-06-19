@@ -21,6 +21,12 @@ log = logging.getLogger(__name__)
 
 MAX_BODY_BYTES = 50_000
 
+# Nhiều site (Wikipedia, báo) trả 403 nếu request không có User-Agent trình duyệt.
+BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+
 
 @media_adapter(supports={"url", "youtube", "tiktok"})
 class WebExtractor:
@@ -37,7 +43,9 @@ class WebExtractor:
         return await self._generic(url)
 
     async def _generic(self, url: str) -> MediaExtractResult:
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as c:
+        async with httpx.AsyncClient(
+            timeout=30, follow_redirects=True, headers={"User-Agent": BROWSER_UA}
+        ) as c:
             r = await c.get(url)
             r.raise_for_status()
             html = r.text
