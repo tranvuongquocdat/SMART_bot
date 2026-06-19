@@ -2028,3 +2028,84 @@ async def delete_mcp_catalog(
         if used:
             raise HTTPException(400, f"{used} boss(es) are using this integration")
         await c.execute("DELETE FROM mcp_catalog WHERE id=$1", item_id)
+
+
+# ===========================================================================
+# Integrations (search provider key + cost + usage) — superadmin
+# ===========================================================================
+
+from src.repositories.platform_integrations import PlatformIntegrationsRepo  # noqa: E402
+
+_INTEGRATION_PROVIDERS = ("tavily",)
+
+
+@router.get("/integrations")
+async def list_integrations(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+):
+    repo = PlatformIntegrationsRepo(db)
+    out = []
+    for prov in _INTEGRATION_PROVIDERS:
+        cfg = await repo.get(prov) or {
+            "provider": prov, "unit_cost_usd": 0.0, "status": {},
+            "has_key": False, "updated_at": None,
+        }
+        out.append({**cfg, **(await repo.usage_totals(prov))})
+    return out
+
+
+@router.put("/integrations/{provider}", dependencies=[Depends(verify_json_csrf)])
+async def set_integration(
+    provider: str,
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+):
+    if provider not in _INTEGRATION_PROVIDERS:
+        raise HTTPException(404, "unknown provider")
+    repo = PlatformIntegrationsRepo(db)
+    await repo.set_config(
+        provider,
+        api_key=(payload.get("api_key") or None),
+        unit_cost_usd=payload.get("unit_cost_usd"),
+    )
+    return {"ok": True}
+
+
+@router.post("/integrations/{provider}/test", dependencies=[Depends(verify_json_csrf)])
+async def test_integration(
+    provider: str,
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+):
+    if provider not in _INTEGRATION_PROVIDERS:
+        raise HTTPException(404, "unknown provider")
+    repo = PlatformIntegrationsRepo(db)
+    key = await repo.get_api_key(provider)
+    if not key:
+        await repo.set_status(provider, False, "Chưa có key")
+        return {"ok": False, "message": "Chưa có key"}
+    from src.search.tavily import TavilyProvider
+
+    try:
+        await TavilyProvider(api_key=key).search("ping", max_results=1)
+        await repo.set_status(provider, True, "OK")
+        return {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        await repo.set_status(provider, False, str(e)[:200])
+        return {"ok": False, "message": str(e)[:200]}
+
+
+@router.get("/integrations/{provider}/usage")
+async def integration_usage(
+    provider: str,
+    range: int = Query(30),
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+):
+    repo = PlatformIntegrationsRepo(db)
+    return {
+        "totals": await repo.usage_totals(provider),
+        "daily": await repo.usage_daily(provider, range),
+    }
