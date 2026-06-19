@@ -720,16 +720,17 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
   VnExpress → tóm tắt súc tích tin thật ✓.
 - **web_search:** provider pluggable `src/search/` (Tavily qua httpx) + tool `web_search` (dm+in_group). Key/cost
   ở **superadmin**: migration **0018** `platform_integrations`(key Fernet + unit_cost + status) + `integration_usage`
-  (rollup ngày cho chart); `PlatformIntegrationsRepo`; endpoints superadmin (config/test-key/usage). FE trang
-  Integrations (charts) = CÒN LẠI. Test live web_search cần Tavily key (nhập qua superadmin).
+  (rollup ngày cho chart); `PlatformIntegrationsRepo`; endpoints superadmin (config/test-key/usage); **FE trang
+  Integrations** (`/app/superadmin/integrations`: nhập key + Kiểm tra + đơn giá + card + BarChart chi phí; nav+i18n)
+  — render verified + live test-key (key sai → 401 → status đỏ). Test live web_search cần Tavily key thật (nhập qua trang).
 - **Prompt responder v7** (dm+in_group): chủ động `fetch_url`/`web_search`, KHÔNG từ chối link khi chưa thử,
   tóm tắt link/video ngắn gọn.
 - **Regression:** gold 11/11 · multipass 6/6 · workload 6/6. ⚠️ **LIMITATION (ghi nhận):** GỘP-đầu-việc của
   extract v8 là **LLM-dependent** — gpt-5.4-mini (19/6) đôi khi tách deadline-ở-message-riêng/estimate thành item
   riêng cho cùng người → đếm dư 1. Rule "không heuristic" ⇒ không dedup bằng code; check `workload` đã NỚI về mục
   tiêu thực tế (deadline truy được + gắn đúng người + đếm dư ≤1) thay vì "đúng 1 item".
-- **CÒN LẠI:** FE trang Integrations superadmin (key/status/cost charts) · đường B (enrich media đính kèm
-  inbound — cần kênh thật/fixture để test) · backfill `youtube-transcript-api` vào env (đã thêm pyproject).
+- **CÒN LẠI:** đường B (enrich media đính kèm inbound — cần kênh thật/fixture để test; plan Task 15) ·
+  test live web_search khi có Tavily key thật. (FE Integrations đã XONG.)
 
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
