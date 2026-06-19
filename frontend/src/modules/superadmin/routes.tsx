@@ -35,6 +35,7 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
       { path: 'subscriptions', lazy: async () => ({ Component: (await import('./features/subscriptions/page')).default }), handle: { breadcrumb: 'nav.sa.subscriptions' } },
       { path: 'plans', lazy: async () => ({ Component: (await import('./features/plans/page')).default }), handle: { breadcrumb: 'nav.sa.plans' } },
       { path: 'mcp-catalog', lazy: async () => ({ Component: (await import('./features/mcp-catalog/page')).default }), handle: { breadcrumb: 'nav.sa.mcpCatalog' } },
+      { path: 'integrations', lazy: async () => ({ Component: (await import('./features/integrations/page')).default }), handle: { breadcrumb: 'nav.sa.integrations' } },
     ],
   };
 }
