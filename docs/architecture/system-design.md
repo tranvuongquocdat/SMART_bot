@@ -707,6 +707,30 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
   server-side → xuất PNG → gửi như ẢNH** (hạng mục TƯƠNG LAI riêng, không thuộc polish workload). ⇒ Pha B
   (workload theo người: chữ qua bot + biểu đồ trên admin + lọc nhóm + roster) coi như HOÀN TẤT.
 
+**2026-06-19 — ĐỌC LINK/MEDIA + web_search + integration superadmin (nhánh `feat/media-web-search`).**
+- **Bối cảnh:** nhánh "gỡ cứng nhắc" phần C. Spec+plan ở `docs/superpowers/{specs,plans}/2026-06-19-*`.
+- **Phát hiện gốc (khác giả định ban đầu):** adapters media KHÔNG hề "chưa cắm dây" — `src/media/__init__.py`
+  force-import sẵn. "Đọc link bị reject" thật ra do: (a) **thiếu User-Agent → site trả 403** (Wikipedia/báo),
+  (b) PDF/ảnh URL bị route sai (`_detect_from_url` chỉ biết youtube/tiktok/url), (c) YouTube transcript stub,
+  (d) ảnh chưa được inject vision-LLM, (e) prompt không bảo bot chủ động đọc.
+- **Làm (verified live):** `fetch_url` viết lại (route theo loại + fetch bytes cho doc/ảnh + inject `ctx.llm`
+  cho vision + error rõ ràng) · **BROWSER_UA** (vnexpress 200, hết 403) · **YouTube transcript THẬT** qua
+  `youtube-transcript-api` 1.2 (API mới `.fetch().to_raw_data()`; verified lấy 2089 ký tự) · TikTok best-effort
+  (metadata; transcript đầy đủ = ASR phase sau) · document/ảnh adapter (đã có, chỉ cần truyền bytes). Bot đọc
+  VnExpress → tóm tắt súc tích tin thật ✓.
+- **web_search:** provider pluggable `src/search/` (Tavily qua httpx) + tool `web_search` (dm+in_group). Key/cost
+  ở **superadmin**: migration **0018** `platform_integrations`(key Fernet + unit_cost + status) + `integration_usage`
+  (rollup ngày cho chart); `PlatformIntegrationsRepo`; endpoints superadmin (config/test-key/usage). FE trang
+  Integrations (charts) = CÒN LẠI. Test live web_search cần Tavily key (nhập qua superadmin).
+- **Prompt responder v7** (dm+in_group): chủ động `fetch_url`/`web_search`, KHÔNG từ chối link khi chưa thử,
+  tóm tắt link/video ngắn gọn.
+- **Regression:** gold 11/11 · multipass 6/6 · workload 6/6. ⚠️ **LIMITATION (ghi nhận):** GỘP-đầu-việc của
+  extract v8 là **LLM-dependent** — gpt-5.4-mini (19/6) đôi khi tách deadline-ở-message-riêng/estimate thành item
+  riêng cho cùng người → đếm dư 1. Rule "không heuristic" ⇒ không dedup bằng code; check `workload` đã NỚI về mục
+  tiêu thực tế (deadline truy được + gắn đúng người + đếm dư ≤1) thay vì "đúng 1 item".
+- **CÒN LẠI:** FE trang Integrations superadmin (key/status/cost charts) · đường B (enrich media đính kèm
+  inbound — cần kênh thật/fixture để test) · backfill `youtube-transcript-api` vào env (đã thêm pyproject).
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).
