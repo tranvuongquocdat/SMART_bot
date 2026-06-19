@@ -25,6 +25,7 @@ dependencies = [
   "tiktoken>=0.8",
   "trafilatura>=1.12",
   "yt-dlp>=2024.10",
+  "youtube-transcript-api>=1.0",
   "pypdf>=5.0",
   "python-docx>=1.1",
   "openpyxl>=3.1",
