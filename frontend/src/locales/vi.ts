@@ -199,6 +199,7 @@ export const vi: Record<string, string> = {
   'perf.col.what': 'Việc',
   'perf.col.assignee': 'Phụ trách',
   'perf.col.due': 'Hạn',
+  'perf.filter.allGroups': 'Tất cả nhóm',
   'usage.title': 'Sử dụng',
   'usage.subtitle': 'Thống kê tokens và chi phí AI theo ngày.',
   'usage.chart.dailyCost': 'Chi phí theo ngày (USD)',

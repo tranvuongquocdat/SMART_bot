@@ -1,10 +1,21 @@
+import { Suspense, useState } from 'react';
 import { useSuspenseQuery } from '@tanstack/react-query';
-import { BarChart3 } from 'lucide-react';
+import { BarChart3, Loader2 } from 'lucide-react';
 import { EmptyState } from '@/components/empty-state';
 import { PageWrap, PageHeader, PageSection } from '@/components/page-shell';
 import { RankBars } from '@/components/charts';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { groupsListQuery } from '@/modules/admin/features/groups/api';
 import { useT } from '@/lib/i18n';
 import { workloadQuery } from './api';
+
+const ALL_GROUPS = '__all__';
 
 // "2026-06-10" → "10/6"
 function dm(s: string) {
@@ -28,9 +39,9 @@ function SummaryCard({ label, value, accent }: { label: string; value: string; a
   );
 }
 
-function PerfContent() {
+function PerfContent({ groupId }: { groupId: string | null }) {
   const t = useT();
-  const { data } = useSuspenseQuery(workloadQuery());
+  const { data } = useSuspenseQuery(workloadQuery(groupId));
 
   if (data.totals.open + data.totals.done === 0) {
     return (
@@ -108,13 +119,55 @@ function PerfContent() {
   );
 }
 
+function GroupFilter({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const t = useT();
+  const { data: groups } = useSuspenseQuery(groupsListQuery());
+  return (
+    <Select
+      value={value ?? ALL_GROUPS}
+      onValueChange={(v) => onChange(v === ALL_GROUPS ? null : v)}
+    >
+      <SelectTrigger className="h-8 w-[200px] text-xs">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL_GROUPS}>{t('perf.filter.allGroups')}</SelectItem>
+        {groups.map((g) => (
+          <SelectItem key={g.chat_id} value={g.chat_id}>
+            {g.name}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
 export default function PerformancePage() {
   const t = useT();
+  const [groupId, setGroupId] = useState<string | null>(null);
   return (
     <PageWrap>
-      <PageHeader title={t('perf.title')} subtitle={t('perf.subtitle')} />
+      <PageHeader
+        title={t('perf.title')}
+        subtitle={t('perf.subtitle')}
+        actions={<GroupFilter value={groupId} onChange={setGroupId} />}
+      />
       <PageSection>
-        <PerfContent />
+        <Suspense
+          fallback={
+            <div className="flex items-center justify-center py-16">
+              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+            </div>
+          }
+        >
+          <PerfContent groupId={groupId} />
+        </Suspense>
       </PageSection>
     </PageWrap>
   );

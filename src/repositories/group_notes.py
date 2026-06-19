@@ -86,6 +86,52 @@ class GroupNotesRepo(BossScopedRepo):
             )
             return [_row_to_group_note(r) for r in rows]
 
+    async def list_members(self, chat_id: str | None = None) -> dict:
+        """Roster thành viên provider-agnostic (cho tool list_members / 'ai đang rảnh').
+
+        Gộp 2 nguồn: ``group_members`` (kênh thật — display_name + role inline, khoá theo
+        group_notes.id) và ``web_group_members`` (kênh test — join web_users lấy tên, khoá
+        theo chat_id). Scope theo boss; truyền chat_id để lọc 1 nhóm, None = mọi nhóm của
+        sếp. Dedupe theo TÊN, gom danh sách nhóm mỗi người tham gia. role='boss' nếu là tài
+        khoản sếp (web: boss_user_id != NULL). workload_summary chỉ thấy người CÓ việc; tool
+        này cho roster ĐỦ để suy 'ai rảnh' = có trong roster mà không có việc đang mở."""
+        async with self.pool.acquire() as c:
+            rows = await c.fetch(
+                """
+                SELECT gm.display_name AS name, COALESCE(gm.role, 'member') AS role,
+                       gn.group_name AS group_name, gn.chat_id AS chat_id
+                FROM group_members gm
+                JOIN group_notes gn ON gn.id = gm.group_id
+                WHERE gn.boss_id = $1 AND gn.provider <> 'web'
+                  AND ($2::text IS NULL OR gn.chat_id = $2)
+                UNION ALL
+                SELECT wu.name AS name,
+                       CASE WHEN wu.boss_user_id IS NOT NULL THEN 'boss' ELSE 'member' END AS role,
+                       COALESCE(gn.group_name, wg.name) AS group_name, gn.chat_id AS chat_id
+                FROM web_group_members wgm
+                JOIN web_users wu ON wu.id = wgm.web_user_id
+                JOIN group_notes gn ON gn.chat_id = wgm.group_id AND gn.provider = 'web'
+                LEFT JOIN web_groups wg ON wg.id = wgm.group_id
+                WHERE gn.boss_id = $1
+                  AND ($2::text IS NULL OR gn.chat_id = $2)
+                """,
+                self.ctx.boss_id, chat_id,
+            )
+        agg: dict[str, dict] = {}
+        for r in rows:
+            name = (r["name"] or "").strip()
+            if not name:
+                continue
+            m = agg.setdefault(name, {"name": name, "role": "member", "groups": []})
+            if r["role"] == "boss":
+                m["role"] = "boss"
+            gname = r["group_name"] or r["chat_id"]
+            if gname and gname not in m["groups"]:
+                m["groups"].append(gname)
+        # Nhân viên (member) trước, sếp (boss) sau; trong nhóm sắp theo tên.
+        members = sorted(agg.values(), key=lambda x: (x["role"] == "boss", x["name"]))
+        return {"scope": chat_id or "all_groups", "members": members, "count": len(members)}
+
     async def get_or_create(
         self,
         provider: str,

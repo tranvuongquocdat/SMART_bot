@@ -454,6 +454,42 @@ async def workload():
         leak = [t for t in exc if t in ans]
         chk(f"Q: {q}", not miss and not leak and bool(ans.strip()),
             f"missing={miss} :: {ans[:100]}")
+
+    # --- GỘP THEO ĐẦU VIỆC (P2): EXTRACT thật trên hội thoại có phân-công + deadline +
+    # ước lượng của CÙNG một người → phải ra ĐÚNG 1 đầu việc (due gắn vào đó), không tách
+    # thành nhiều mục (kẻo workload đếm dư). today inject → suy năm cho '20/7'. ---
+    boss2 = _post("/api/users", {"name": "Sếp Zeta", "role": "boss"})["id"]
+    an2 = _post("/api/users", {"name": "An", "role": "employee"})["id"]
+    gid2 = _post("/api/groups", {"name": "Dự án Zeta", "member_ids": [boss2, an2]})["id"]
+    conn = await asyncpg.connect(DSN)
+    bid2 = await _boss_id(conn, boss2)
+    await conn.close()
+    zeta = [
+        ("boss", "Team mở dự án Zeta — app nội bộ chấm công. Phân việc nhé."),
+        ("an", "Em An nhận phần backend Zeta, dùng FastAPI."),
+        ("boss", "Deadline backend của An chốt 20/7 nhé."),
+        ("an", "Em ước lượng khoảng 2 tuần là xong khung API."),
+    ]
+    who2 = {"boss": boss2, "an": an2}
+    for r, t in zeta:
+        _post("/api/send", {"as": who2[r], "chat_id": gid2, "text": t})
+    _wait_ingested(gid2, len(zeta))
+    _post("/api/extract", {"chat_id": gid2, "reset": True})
+    conn = await asyncpg.connect(DSN)
+    an_rows = await conn.fetch(
+        "SELECT due_at FROM knowledge_items WHERE boss_id=$1 AND assignee_name='An' "
+        "AND status='active'", bid2)
+    await conn.close()
+    exp = _dt.date(_dt.date.today().year, 7, 20)
+    if exp < _dt.date.today():
+        exp = _dt.date(exp.year + 1, 7, 20)
+    n_an = len(an_rows)
+    due_ok = any(r["due_at"] and r["due_at"].date() == exp for r in an_rows)
+    chk("GỘP đầu việc: An đúng 1 việc (không tách phân-công+deadline+ước lượng)",
+        n_an == 1, f"An có {n_an} item active (kỳ vọng 1)")
+    chk(f"GỘP đầu việc: due {exp:%d/%m} gắn TRÊN chính việc backend của An",
+        n_an == 1 and due_ok, f"due_ok={due_ok} n_an={n_an}")
+
     print(f"\n=== workload: {len(checks)-len(fails)}/{len(checks)} PASS (gid={gid}) ===")
     sys.exit(1 if fails else 0)
 

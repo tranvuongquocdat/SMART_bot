@@ -19,8 +19,13 @@ export type WorkloadData = {
   overdue_items: OverdueItem[];
 };
 
-export const workloadQuery = () =>
+// groupId = chat_id của nhóm (string) hoặc null = tổng hợp mọi nhóm.
+export const workloadQuery = (groupId: string | null = null) =>
   queryOptions({
-    queryKey: ['admin', 'workload'],
-    queryFn: () => api<WorkloadData>('/api/v1/admin/workload'),
+    queryKey: ['admin', 'workload', groupId ?? 'all'],
+    queryFn: () =>
+      api<WorkloadData>(
+        '/api/v1/admin/workload' +
+          (groupId ? `?group_id=${encodeURIComponent(groupId)}` : ''),
+      ),
   });

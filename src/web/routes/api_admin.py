@@ -823,12 +823,14 @@ async def groups_list(
             rows = await c.fetch(
                 """
                 SELECT gn.id,
-                       COALESCE(gn.group_name, gn.chat_id) AS name,
+                       gn.chat_id,
+                       COALESCE(gn.group_name, wg.name, gn.chat_id) AS name,
                        gn.provider                          AS channel,
                        gn.is_active,
                        gn.updated_at,
                        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
                 FROM group_notes gn
+                LEFT JOIN web_groups wg ON wg.id = gn.chat_id
                 ORDER BY gn.updated_at DESC NULLS LAST
                 """
             )
@@ -836,12 +838,14 @@ async def groups_list(
             rows = await c.fetch(
                 """
                 SELECT gn.id,
-                       COALESCE(gn.group_name, gn.chat_id) AS name,
+                       gn.chat_id,
+                       COALESCE(gn.group_name, wg.name, gn.chat_id) AS name,
                        gn.provider                          AS channel,
                        gn.is_active,
                        gn.updated_at,
                        (SELECT COUNT(*) FROM group_members gm WHERE gm.group_id = gn.id) AS members_count
                 FROM group_notes gn
+                LEFT JOIN web_groups wg ON wg.id = gn.chat_id
                 WHERE gn.boss_id = $1
                 ORDER BY gn.updated_at DESC NULLS LAST
                 """,
@@ -850,6 +854,7 @@ async def groups_list(
     return [
         {
             "id": int(r["id"]),
+            "chat_id": r["chat_id"],
             "name": r["name"],
             "channel": r["channel"],
             "is_active": bool(r["is_active"]),

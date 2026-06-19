@@ -6,7 +6,7 @@ export type Group = {
   members_count: number; messages_30d: number; last_active_at: string | null;
 };
 export type GroupListItem = {
-  id: number; name: string; channel: string; is_active: boolean;
+  id: number; chat_id: string; name: string; channel: string; is_active: boolean;
   members_count: number; updated_at: string | null;
 };
 export type Summary = { body: string | null; updated_at: string | null };

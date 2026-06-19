@@ -199,6 +199,7 @@ export const en: Record<string, string> = {
   'perf.col.what': 'Task',
   'perf.col.assignee': 'Assignee',
   'perf.col.due': 'Due',
+  'perf.filter.allGroups': 'All groups',
   'usage.title': 'Usage',
   'usage.subtitle': 'Daily token and AI cost analytics.',
   'usage.chart.dailyCost': 'Cost by day (USD)',

@@ -650,6 +650,63 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
   Còn (polish, sau): extraction đôi khi tách phân-công + deadline cùng người thành 2 item (đếm hơi dư);
   list_members (ai rảnh/đủ roster); AI-sinh chart-spec inline; bộ lọc theo nhóm/dự án trên trang Hiệu suất.
 
+**2026-06-15 — PHA B POLISH P1+P2 (workload/Hiệu suất) ✅.**
+- **P1 — chụp UI `/app/admin/performance` (xác nhận render):** build FE lại (build cũ cũ hơn source perf),
+  mint cookie boss qua `make_session`, render bằng Playwright/chromium (dark). HTTP 200, 0 console error.
+  4 card + RankBars theo người + bảng quá hạn render đúng, KHỚP 1-1 JSON endpoint. Không vỡ layout, KHÔNG
+  viền trắng (border bảng = token `--border` rgb(21,21,25), tối). (Ghost text mờ chỉ xuất hiện khi chụp
+  RIÊNG phần tử bảng có parent `overflow-x-auto` = artifact element-screenshot của Playwright; DOM thật 3 cột
+  sạch, full-page sạch.)
+- **P2 — gộp item theo đầu việc/người (workload khỏi đếm dư):** soi dữ liệu thật thấy phồng KHÔNG chỉ do
+  deadline mà do follow-up note cùng việc: An = phân-công + "ước lượng 2 tuần" (2 item), Bình = phân-công +
+  "wireframe xong" (2 item); và deadline backend 10/7 nằm ở item RIÊNG (vô chủ) thay vì gắn vào việc của An.
+  → **EXTRACT v8** (`config/seeds/prompts/knowledge_extract.yaml` + constant `_EXTRACT_PROMPT`): "GỘP THEO
+  ĐẦU VIỆC" — phân-công + deadline + ước lượng + tiến độ của CÙNG một việc → 1 mục/người, `due` gắn vào mục
+  đó VÀ nêu hạn trong content kiểu VN để TRA CỨU được; NGOẠI LỆ deadline CHUNG dự án/demo (vô chủ) vẫn riêng;
+  hai đầu việc KHÁC nhau của cùng người vẫn 2 mục. Reseed + re-extract Apollo → An 3→2, Bình 3→2 (tổng mở 9→7),
+  Châu giữ 3 (3 việc thật). UI admin xác nhận de-inflation.
+- **Bẫy đã gỡ:** lần đầu chỉ để due ở field (không nêu hạn trong content) → `cross-nearest-deadline-dm` FAIL
+  (10/7 chìm trong item role-fact, retrieval DM-cross-group không nổi) → thêm "nêu hạn trong content". Fix xong.
+- **Verify:** thêm 2 check vào `harness.py workload` (kịch bản Zeta: phân-công + deadline 20/7 + ước lượng →
+  An ĐÚNG 1 việc, due gắn trên việc đó). **gold 11/11 · multipass 6/6 (×3, 1 lần flaky do reconcile P2
+  non-deterministic — đã xác nhận P1-extract sạch, không phải lỗi prompt mới) · workload 6/6.**
+
+**2026-06-15 — PHA B POLISH P3 (tool `list_members` — roster / 'ai đang rảnh') ✅.**
+- **Repo:** `GroupNotesRepo.list_members(chat_id?)` provider-agnostic — UNION `group_members` (kênh thật:
+  display_name+role inline, khoá group_notes.id) + `web_group_members` (kênh test: join web_users lấy tên,
+  group_name COALESCE từ web_groups). Scope theo boss; dedupe theo TÊN, gom các nhóm mỗi người, role='boss'
+  nếu là tài khoản sếp. Tool `list_members` (`src/tools/core/meta.py`, available_to dm+in_group), đăng ký vào
+  `tools={...}` của `dm_responder` + `in_group_responder`. (KHÔNG có agent 'nudge' trong codebase — handoff nhắc
+  nhưng chưa tồn tại; bỏ qua.)
+- **Verify (bot thật, server restart vì code mới):** "Nhóm này có những thành viên nào?" → liệt kê đủ An/Bình/
+  Châu/Sếp Minh. DM "team gồm ai + ai rảnh nhất?" → bot GỘP `list_members`+`workload_summary`: "rảnh nhất =
+  Bình & An (2 việc mở, 0 quá hạn); Châu bận nhất (3 mở + 1 quá hạn)" — đúng & phản ánh de-inflation P2.
+- **Phụ: prompt responder v6 (dm_general + in_group)** — (1) thêm hướng dẫn `list_members` (roster/'ai rảnh');
+  (2) chốt 'deadline SẮP TỚI / GẦN NHẤT' = mốc TƯƠNG LAI gần nhất, việc QUÁ HẠN = trễ (KHÔNG phải 'sắp tới').
+  (2) sửa flaky `cross-nearest-deadline-dm`: sau P2 hạn 10/7 nằm trong item role-fact của An → DM cross-group
+  bot lúc trả 10/6-quá-hạn lúc trả 10/7 (~40% fail). Sau v6: **cross-nearest 5/5 PASS.**
+- **Verify:** **gold 11/11 (×4/5 full-green, cross-nearest 5/5; 1 lần 10/11 do 1 case khác flaky benign LLM
+  variance, không tái lập) · multipass 6/6 · workload 6/6.**
+
+**2026-06-15 — PHA B POLISH P4 (bộ lọc nhóm trên trang Hiệu suất) ✅.**
+- **BE:** `GET /api/v1/admin/workload?group_id=` lọc theo CHAT_ID. Nhưng `GET /api/v1/admin/groups` chỉ trả
+  `id` (group_notes.id BIGINT) — mismatch. Sửa: thêm `chat_id` vào response (cả nhánh boss + superadmin) +
+  `name` COALESCE thêm `web_groups.name` (LEFT JOIN — group_notes.group_name NULL cho nhóm web test → trước
+  hiện 'g-xxx'; giờ ra 'Dự án Apollo/Beta'; vô hại prod vì web_groups rỗng). Cải thiện cả trang Nhóm sẵn có.
+- **FE:** `performance/page.tsx` thêm `<Select>` (PageHeader actions) "Tất cả nhóm" + từng nhóm (value=chat_id,
+  reuse `groupsListQuery`); `workloadQuery(groupId)` key + query-param theo chat_id; bọc `PerfContent` trong
+  `<Suspense>` cục bộ (spinner) để đổi nhóm không chớp cả header. `GroupListItem.chat_id` + i18n `perf.filter.allGroups` (vi/en).
+- **Verify:** `npm run build` sạch. Chụp UI (Playwright): mặc định "Tất cả nhóm" → mở 7/quá hạn 1 (Châu 3/An 2/
+  Bình 2); chọn "Dự án Beta" → scope đúng 3 người mỗi người 1 việc, 0 quá hạn (bảng quá hạn ẩn). 0 console/page
+  error, dark-mode sạch. gold 11/11 (P4 chỉ đụng admin-endpoint + FE, KHÔNG đụng đường bot → multipass/workload
+  bất biến, đã xanh ở P3 trên cùng code đường-bot).
+
+**2026-06-15 — PHA B: chốt BỎ P5 (AI-sinh chart-spec inline) — Pha B HOÀN TẤT.**
+- **User chốt:** chart CHỈ cần ở **web admin** (đã có qua P1/P4). KHÔNG làm bot tự sinh chart-spec để vẽ inline
+  trong chat. Kênh chat (Zalo…) phần lớn không render được biểu đồ → khi cần sẽ làm theo hướng **render chart
+  server-side → xuất PNG → gửi như ẢNH** (hạng mục TƯƠNG LAI riêng, không thuộc polish workload). ⇒ Pha B
+  (workload theo người: chữ qua bot + biểu đồ trên admin + lọc nhóm + roster) coi như HOÀN TẤT.
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).
@@ -679,3 +736,4 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
 - 2026-06-13: Embedding CHỐT = gemini-embedding-001 (1536d khớp Qdrant, 0 GPU ops, ~4% lift); reranker bge-reranker là đòn bẩy chính nên B-vs-C nhẹ; bge-m3-VN = upgrade path. Bỏ eval-driven cho quyết định này.
 - 2026-06-14: Memory → BUILD (học mem0 làm tham khảo, không test; Letta loại). Channel order = Zalo v1 → Mess v2 → Telegram v3/v4 (thị trường VN; override spike Telegram-first). PDPL park tới pilot thật; build-stage chỉ chừa retention+cascade-delete + provider zero-retention.
 - 2026-06-14: Self-review đối kháng 5 nhánh. CRITICAL mới: Zalo group viability (validate Telegram-first), thiếu voice/ảnh, thiếu lớp output chủ động (daily brief), PDPL pháp lý, tenant isolation sâu, latency region+stream, kỳ vọng accuracy. Thách thức 7 quyết định đã chốt (analytics-v1, foundation-first, build-memory, marketplace, reranker self-host, adaptive scope, embedding-no-eval). CHƯA chỉnh quyết định — chờ user.
+- 2026-06-15: Biểu đồ workload/hiệu suất CHỈ ở web admin (KHÔNG làm AI-sinh chart-spec inline trong chat). Kênh chat cần biểu đồ về sau → render server-side → xuất PNG → gửi ảnh (hạng mục tương lai). ⇒ Pha B (workload theo người) HOÀN TẤT sau polish P1–P4.

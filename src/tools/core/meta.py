@@ -34,6 +34,34 @@ async def list_groups(ctx) -> ToolResult:
 
 
 @tool(
+    name="list_members",
+    description=(
+        "Roster: liệt kê TẤT CẢ thành viên trong nhóm/team (tên + vai trò + các nhóm họ tham gia). "
+        "Dùng khi cần biết team gồm ĐỦ những ai, hoặc KẾT HỢP với workload_summary để suy 'ai đang "
+        "rảnh' = người có trong roster nhưng KHÔNG có việc đang mở. group_id=null = mọi nhóm của sếp; "
+        "truyền group_id để xem 1 nhóm/team cụ thể."
+    ),
+    parameters={
+        "type": "object",
+        "properties": {
+            "group_id": {
+                "type": "string",
+                "description": "Lọc 1 nhóm/team; null = roster gộp mọi nhóm của sếp",
+            },
+        },
+    },
+    available_to={"dm_responder", "in_group_responder"},
+    parallel_safe=True,
+)
+async def list_members(ctx, group_id: str | None = None) -> ToolResult:
+    from src.tools.core.search import _scope_group
+
+    group_id = _scope_group(ctx, group_id)
+    repo = GroupNotesRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
+    return ToolResult(content=await repo.list_members(chat_id=group_id))
+
+
+@tool(
     name="current_time",
     description="Thời gian hiện tại theo TZ của sếp",
     parameters={"type": "object", "properties": {}},

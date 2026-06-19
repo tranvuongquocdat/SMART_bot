@@ -44,6 +44,7 @@ _QUICK_ACK_THRESHOLD = 60  # chars
         "list_action_items",
         "mark_action_item",
         "workload_summary",
+        "list_members",
         "fetch_url",
         "remember",
         "current_time",

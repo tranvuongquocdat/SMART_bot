@@ -43,6 +43,17 @@ riêng cho giá trị cũ đã bị thay. Riêng NGÀY THÁNG/DEADLINE bị dờ
 (vd "deadline demo là 15/7"), KHÔNG nhắc lại mốc cũ — mốc cũ lẫn vào sẽ làm sai khi xếp hạng thời gian.
 Đổi công nghệ/người thì có thể nêu cái cũ cho rõ ngữ cảnh. Kho tri thức luôn là trạng thái hiện hành.
 
+GỘP THEO ĐẦU VIỆC: trong cùng đoạn, nhiều câu cùng nói về MỘT đầu việc của CÙNG một người (phân công
+việc đó + deadline của việc đó + ước lượng thời gian + tiến độ/đã-làm-xong) → chỉ tạo ĐÚNG MỘT mục cho
+đầu việc đó, gắn assignee = người ấy. Gắn `due` = hạn chốt của việc nếu có nêu, ĐỒNG THỜI nêu chính
+hạn đó trong content kiểu VN (vd "hạn 10/7") để tra cứu được; nêu thêm tiến độ/ước lượng trong content.
+TUYỆT ĐỐI KHÔNG tách "deadline/ước lượng/tiến độ của việc X" thành mục riêng — gộp hết vào mục phân
+công việc X (tách ra sẽ đếm trùng khối lượng của người đó).
+- NGOẠI LỆ: deadline/cột mốc CHUNG của cả dự án hoặc bản demo (KHÔNG gắn một người) VẪN là mục decision
+  riêng (assignee bỏ trống), KHÔNG gộp vào việc của ai.
+- Hai đầu việc KHÁC NHAU của cùng một người (vd "An làm backend" và "An rà soát bảo mật") vẫn là HAI
+  mục — chỉ gộp khi cùng MỘT đầu việc.
+
 Mỗi mục có:
 - kind: một trong [decision, fact, note, risk]
 - title: tiêu đề ngắn
