@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# pre-push guard: refuse to push while a migration file is UNTRACKED.
+#
+# Why this exists: committing 0015 (down_revision="0014") while 0014 is left
+# untracked produces a chain that works on your machine (the file is physically
+# there) but is BROKEN on every fresh clone / CI — `alembic upgrade head` dies
+# with `Can't locate revision '0014'`. No test can catch this locally, because
+# locally the file exists; the only place to catch it is here, at the push edge.
+#
+# Install once per clone:  git config core.hooksPath scripts/git-hooks
+# Bypass in a real emergency:  git push --no-verify
+set -euo pipefail
+
+repo_root="$(git rev-parse --show-toplevel)"
+untracked="$(git -C "$repo_root" ls-files --others --exclude-standard -- migrations/versions/ \
+  | grep -E '\.py$' || true)"
+
+if [ -n "$untracked" ]; then
+  {
+    echo "✋ pre-push blocked: untracked migration file(s) under migrations/versions/:"
+    echo "$untracked" | sed 's/^/     - /'
+    echo
+    echo "  Later migrations reference these via down_revision. Pushing without them"
+    echo "  breaks 'alembic upgrade head' on every fresh clone."
+    echo "  Fix:  git add <file> && commit   (or delete it if unwanted)"
+    echo "  Bypass (risky): git push --no-verify"
+  } >&2
+  exit 1
+fi
+exit 0

@@ -110,9 +110,12 @@ frontend/src/
 # 1. Khởi động infrastructure
 docker compose -f docker/docker-compose.yml up -d
 
-# 2. Sync deps + chạy migrations
-uv sync
+# 2. Sync deps (kèm --extra dev cho test/lint) + chạy migrations
+uv sync --extra dev
 uv run alembic upgrade head
+
+# 2b. Bật git hooks (1 lần mỗi clone): pre-push chặn push migration chưa commit
+git config core.hooksPath scripts/git-hooks
 
 # 3. Chạy backend
 uv run uvicorn src.main:app --reload --port 8000
@@ -123,6 +126,17 @@ bash scripts/build_frontend.sh
 # 5. Tests
 uv run pytest tests/ -v
 ```
+
+### Migrations
+
+```bash
+# Tạo migration mới — tự đánh số kế tiếp, từ chối nếu đang multiple-head
+scripts/new_migration.sh "mô tả ngắn"   # → migrations/versions/NNNN_*.py
+```
+
+Bảo vệ chuỗi migration: `tests/unit/test_migrations.py` đảm bảo **đúng 1 head** +
+chuỗi không gãy; pre-push hook chặn push khi còn file migration **chưa commit**
+(đây là cách `0014` từng làm gãy `main` trên clone sạch).
 
 ### Biến môi trường quan trọng (`.env`)
 
