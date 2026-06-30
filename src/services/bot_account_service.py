@@ -23,7 +23,6 @@ import logging
 from typing import Any
 
 from src.domain.bot_account import (
-    AssignmentStatus,
     BotAccountOwnership,
     BotAccountStatus,
 )

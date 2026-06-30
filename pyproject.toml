@@ -53,6 +53,11 @@ testpaths = ["tests"]
 line-length = 100
 target-version = "py312"
 
+[tool.ruff.lint.per-file-ignores]
+# main.py imports each API router right next to its include_router() call to keep
+# the app wiring readable and to avoid import cycles — E402 is intentional here.
+"src/main.py" = ["E402"]
+
 [tool.mypy]
 strict = true
 python_version = "3.12"

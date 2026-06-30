@@ -4,12 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path as _Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 import bcrypt as _bcrypt
 
-from src.config import settings
 from src.security.middleware import rate_check
 from src.web.deps import get_optional_boss
 from src.web.security import (

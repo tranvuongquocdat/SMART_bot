@@ -98,7 +98,6 @@ async def test_note_updater_on_demand_rebuild(db_pool, boss_user):
 @pytest.mark.asyncio
 async def test_note_updater_threshold_fires_via_trigger_engine(db_pool, boss_user):
     bus = InMemoryEventBus()
-    state = _State(db_pool, bus, _FakeLLM(), _FakeMem())
 
     fires: list[dict] = []
 

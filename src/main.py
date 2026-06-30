@@ -6,7 +6,6 @@ from fastapi.responses import RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 
-import src.agents  # force import all op modules at startup
 from src.agents.dispatcher import OperationDispatcher
 from src.agents.triggers import TriggerEngine
 from src.channels.registry import (

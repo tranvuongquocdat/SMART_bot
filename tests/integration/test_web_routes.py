@@ -32,15 +32,15 @@ def test_create_group_with_members(client, clean_db):
     )
     assert r.status_code == 200
     gid = r.json()["id"]
-    members = client.get(f"/test/api/groups").json()
+    members = client.get("/test/api/groups").json()
     assert any(g["id"] == gid for g in members)
 
 
 def test_delete_user_cascade(client, clean_db):
     u1 = client.post("/test/api/users", json={"name": "A", "role": "employee"}).json()["id"]
-    gid = client.post(
+    client.post(
         "/test/api/groups", json={"name": "g", "member_ids": [u1]}
-    ).json()["id"]
+    )
     r = client.delete(f"/test/api/users/{u1}")
     assert r.status_code == 204
     # Group still exists but membership cleared

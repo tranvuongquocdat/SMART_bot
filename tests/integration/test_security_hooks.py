@@ -124,7 +124,7 @@ async def test_check_cost_cap_over_limit(db_pool, boss_user):
 @pytest.mark.asyncio
 async def test_llm_gateway_force_fast_on_cost_cap(db_pool, boss_user):
     """Verify NativeGateway.complete flips force_tier when cap is exhausted."""
-    from src.llm.base import ChatMessage, LLMRequest, LLMResponse, LLMUsage
+    from src.llm.base import ChatMessage, LLMRequest
     from src.llm.native import NativeGateway
 
     # Cap=0.01, recorded cost=0.50 → over cap

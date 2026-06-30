@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import io
 
 from src.web.security import CSRF_COOKIE
 

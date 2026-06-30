@@ -1,5 +1,4 @@
 import os
-from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -20,7 +19,6 @@ pytestmark = pytest.mark.skipif(
 
 @pytest_asyncio.fixture
 async def seed_openai(boss_user, db_pool):
-    admin = BossContext(boss_id=0, user_role="superadmin")
     async with db_pool.acquire() as c:
         mid = await c.fetchval(
             """
@@ -47,9 +45,9 @@ async def seed_openai(boss_user, db_pool):
 
 @pytest.mark.asyncio
 async def test_complete_gpt4o_mini(db_pool, boss_user, seed_openai):
+    admin = BossContext(boss_id=0, user_role="superadmin")
     bus = InMemoryEventBus()
     registry = ModelRegistry(db_pool, bus)
-    admin = BossContext(boss_id=0, user_role="superadmin")
     gw = NativeGateway(
         pool=db_pool,
         registry=registry,
