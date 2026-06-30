@@ -95,7 +95,7 @@ def _yt_transcript(video_id: str) -> str:
     """Transcript thật (vi→en, cả auto-sub) qua youtube-transcript-api 1.x
     (instance .fetch → .to_raw_data). Rỗng nếu không có / bị chặn IP."""
     try:
-        from youtube_transcript_api import YouTubeTranscriptApi  # type: ignore
+        from youtube_transcript_api import YouTubeTranscriptApi
 
         fetched = YouTubeTranscriptApi().fetch(video_id, languages=["vi", "en"])
         return " ".join(s["text"] for s in fetched.to_raw_data() if s.get("text")).strip()

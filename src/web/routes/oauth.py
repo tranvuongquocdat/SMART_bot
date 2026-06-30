@@ -33,23 +33,23 @@ def _redirect_uri(request: Request) -> str:
 
 @router.get("/google/login")
 async def google_login(request: Request):
-    if "google" not in oauth._clients:  # type: ignore[attr-defined]
+    if "google" not in oauth._clients:
         raise HTTPException(503, "Google OAuth not configured")
     redirect_uri = _redirect_uri(request)
     if redirect_uri not in settings.redirect_whitelist:
         raise HTTPException(400, f"redirect not allowed: {redirect_uri}")
-    return await oauth.google.authorize_redirect(request, redirect_uri)  # type: ignore[attr-defined]
+    return await oauth.google.authorize_redirect(request, redirect_uri)
 
 
 @router.get("/google/callback", name="google_callback")
 async def google_callback(request: Request):
-    if "google" not in oauth._clients:  # type: ignore[attr-defined]
+    if "google" not in oauth._clients:
         raise HTTPException(503, "Google OAuth not configured")
     # H1: 30 callbacks / minute per source IP — protects against OAuth replay.
     ip = request.client.host if request.client else "unknown"
     await rate_check(request, f"oauth_cb:{ip}", limit=30, window_sec=60)
     try:
-        token = await oauth.google.authorize_access_token(request)  # type: ignore[attr-defined]
+        token = await oauth.google.authorize_access_token(request)
     except OAuthError as e:
         logger.warning("oauth callback failed: %s", e)
         raise HTTPException(400, "oauth callback failed") from e

@@ -42,7 +42,7 @@ class ImageExtractor:
         content_type: str | None = None,
     ) -> MediaExtractResult:
         # Lazy import — pillow_heif registers HEIC support globally on import.
-        from PIL import Image  # type: ignore
+        from PIL import Image
 
         try:
             from pillow_heif import register_heif_opener  # type: ignore

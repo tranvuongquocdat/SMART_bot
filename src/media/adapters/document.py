@@ -63,7 +63,7 @@ def _detect_kind(content_type: str | None, url: str | None) -> str | None:
 
 
 def _extract_pdf(content: bytes) -> MediaExtractResult:
-    import pypdf  # type: ignore
+    import pypdf
 
     reader = pypdf.PdfReader(io.BytesIO(content))
     parts: list[str] = []
@@ -78,7 +78,7 @@ def _extract_pdf(content: bytes) -> MediaExtractResult:
     try:
         meta: Any = reader.metadata
         if meta is not None:
-            title = getattr(meta, "title", None) or meta.get("/Title")  # type: ignore[union-attr]
+            title = getattr(meta, "title", None) or meta.get("/Title")
     except Exception:
         pass
     return MediaExtractResult(
@@ -89,7 +89,7 @@ def _extract_pdf(content: bytes) -> MediaExtractResult:
 
 
 def _extract_docx(content: bytes) -> MediaExtractResult:
-    import docx  # type: ignore
+    import docx
 
     doc = docx.Document(io.BytesIO(content))
     parts = [p.text for p in doc.paragraphs if p.text]
