@@ -1,20 +1,23 @@
 #!/usr/bin/env bash
-# pre-push guard: refuse to push while a migration file is UNTRACKED.
-#
-# Why this exists: committing 0015 (down_revision="0014") while 0014 is left
-# untracked produces a chain that works on your machine (the file is physically
-# there) but is BROKEN on every fresh clone / CI — `alembic upgrade head` dies
-# with `Can't locate revision '0014'`. No test can catch this locally, because
-# locally the file exists; the only place to catch it is here, at the push edge.
+# pre-push gate. Two checks:
+#   1. Refuse to push while a migration file is UNTRACKED — committing 0015
+#      (down_revision="0014") while 0014 is left untracked produces a chain that
+#      works locally but dies on every fresh clone / CI. No test can catch this
+#      locally (the file exists), so we catch it here.
+#   2. Run the test suite — but only when the test DB is reachable. If Docker /
+#      Postgres / Qdrant aren't up we skip with a warning rather than blocking a
+#      push on infrastructure that simply isn't running.
 #
 # Install once per clone:  git config core.hooksPath scripts/git-hooks
 # Bypass in a real emergency:  git push --no-verify
 set -euo pipefail
 
 repo_root="$(git rev-parse --show-toplevel)"
-untracked="$(git -C "$repo_root" ls-files --others --exclude-standard -- migrations/versions/ \
-  | grep -E '\.py$' || true)"
+cd "$repo_root"
 
+# --- 1. untracked-migration guard -------------------------------------------
+untracked="$(git ls-files --others --exclude-standard -- migrations/versions/ \
+  | grep -E '\.py$' || true)"
 if [ -n "$untracked" ]; then
   {
     echo "✋ pre-push blocked: untracked migration file(s) under migrations/versions/:"
@@ -26,5 +29,23 @@ if [ -n "$untracked" ]; then
     echo "  Bypass (risky): git push --no-verify"
   } >&2
   exit 1
+fi
+
+# --- 2. test gate (only when infra is up) -----------------------------------
+if nc -z localhost 5433 2>/dev/null && curl -sf http://localhost:6333/readyz >/dev/null 2>&1; then
+  echo "pre-push: running tests (uv run pytest tests/unit tests/integration)…"
+  if ! uv run pytest tests/unit tests/integration -q; then
+    {
+      echo
+      echo "✋ pre-push blocked: tests failed (see above)."
+      echo "  Fix them, or bypass (risky): git push --no-verify"
+    } >&2
+    exit 1
+  fi
+else
+  {
+    echo "⚠ pre-push: test DB not reachable (Postgres:5433 / Qdrant:6333) — skipping test gate."
+    echo "   Start infra to enable it:  docker compose -f docker/docker-compose.yml up -d"
+  } >&2
 fi
 exit 0

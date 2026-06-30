@@ -114,7 +114,7 @@ docker compose -f docker/docker-compose.yml up -d
 uv sync --extra dev
 uv run alembic upgrade head
 
-# 2b. Bật git hooks (1 lần mỗi clone): pre-push chặn push migration chưa commit
+# 2b. Bật git hooks (1 lần mỗi clone) — xem mục "Quality gates" bên dưới
 git config core.hooksPath scripts/git-hooks
 
 # 3. Chạy backend
@@ -137,6 +137,16 @@ scripts/new_migration.sh "mô tả ngắn"   # → migrations/versions/NNNN_*.py
 Bảo vệ chuỗi migration: `tests/unit/test_migrations.py` đảm bảo **đúng 1 head** +
 chuỗi không gãy; pre-push hook chặn push khi còn file migration **chưa commit**
 (đây là cách `0014` từng làm gãy `main` trên clone sạch).
+
+### Quality gates (git hooks)
+
+Version-controlled trong `scripts/git-hooks/`, bật bằng `git config core.hooksPath
+scripts/git-hooks` (xem bước 2b). Bypass khẩn cấp: `--no-verify`.
+
+| Hook | Khi nào | Chặn nếu |
+|------|---------|----------|
+| `pre-commit` | mỗi `git commit` | `ruff` báo lỗi trên **file Python đang staged** (nhanh, chỉ file bạn đụng) |
+| `pre-push` | mỗi `git push` | có migration **chưa commit**; hoặc **test đỏ** (chỉ chạy khi Postgres:5433 + Qdrant:6333 sẵn sàng, không thì cảnh báo & bỏ qua) |
 
 ### Biến môi trường quan trọng (`.env`)
 
