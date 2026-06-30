@@ -29,7 +29,7 @@ class FeatureBudgetsRepo(BossScopedRepo):
             )
             return _row_to_budget(row) if row else None
 
-    async def list(self) -> list[FeatureBudget]:
+    async def list_all(self) -> list[FeatureBudget]:
         async with self.pool.acquire() as c:
             rows = await c.fetch("SELECT * FROM feature_budgets ORDER BY feature")
             return [_row_to_budget(r) for r in rows]

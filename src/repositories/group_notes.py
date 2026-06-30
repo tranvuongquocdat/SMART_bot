@@ -255,7 +255,7 @@ class GroupNotesRepo(BossScopedRepo):
                 )
                 return version_id
 
-    async def list(self, status: str = "active") -> list[GroupNote]:
+    async def list_by_status(self, status: str = "active") -> list[GroupNote]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(
                 """

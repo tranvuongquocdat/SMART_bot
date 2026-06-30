@@ -36,7 +36,7 @@ class RetrievalPipelinesRepo(BossScopedRepo):
             )
             return _row_to_pipeline(row) if row else None
 
-    async def list(self) -> list[RetrievalPipeline]:
+    async def list_all(self) -> list[RetrievalPipeline]:
         async with self.pool.acquire() as c:
             rows = await c.fetch("SELECT * FROM retrieval_pipelines ORDER BY feature")
             return [_row_to_pipeline(r) for r in rows]

@@ -41,7 +41,7 @@ class LLMRoutesRepo(BossScopedRepo):
             )
             return [_row_to_route(r) for r in rows]
 
-    async def list(self) -> list[LLMRoute]:
+    async def list_all(self) -> list[LLMRoute]:
         async with self.pool.acquire() as c:
             rows = await c.fetch("SELECT * FROM llm_routes ORDER BY feature, weight DESC")
             return [_row_to_route(r) for r in rows]

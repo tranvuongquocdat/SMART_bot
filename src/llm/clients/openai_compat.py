@@ -1,5 +1,6 @@
 import json
 import time
+from typing import Any
 
 from openai import AsyncOpenAI, OpenAIError
 
@@ -8,7 +9,7 @@ from src.llm.base import ChatMessage, LLMRequest, LLMResponse, LLMUsage, ToolCal
 
 class OpenAICompatibleClient:
     def __init__(self, base_url: str | None, api_key: str):
-        kwargs: dict = {"api_key": api_key}
+        kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = base_url
         self.client = AsyncOpenAI(**kwargs)
@@ -33,9 +34,9 @@ class OpenAICompatibleClient:
                 messages=msgs,
                 tools=tools,
                 temperature=req.temperature,
-                # max_completion_tokens (không phải max_tokens cũ): models OpenAI đời
-                # mới (gpt-5.x, o-series) TỪ CHỐI max_tokens. Param mới được cả gpt-4o
-                # lẫn Groq chấp nhận → dùng chung an toàn.
+                # max_completion_tokens (not the legacy max_tokens): newer OpenAI
+                # models (gpt-5.x, o-series) REJECT max_tokens. The new param is
+                # accepted by gpt-4o and Groq alike, so it's safe to use for all.
                 max_completion_tokens=req.max_output_tokens,
             )
         except OpenAIError as e:
@@ -48,24 +49,36 @@ class OpenAICompatibleClient:
             )
         choice = resp.choices[0].message
         finish_reason = resp.choices[0].finish_reason
+
+        # usage can be None (streaming, or some OpenAI-compatible providers omit
+        # it); the cached-token detail is also optional. Default to 0 rather than
+        # dereferencing None on the hot path.
         usage = resp.usage
+        tokens_in = usage.prompt_tokens if usage else 0
+        tokens_out = usage.completion_tokens if usage else 0
         cached = 0
         details = getattr(usage, "prompt_tokens_details", None)
         if details is not None:
             cached = getattr(details, "cached_tokens", 0) or 0
+
+        # We only ever send type="function" tools, so the model should only return
+        # function tool calls — but the SDK union also allows custom tool calls
+        # (no .function). Skip anything without a function payload defensively.
+        tool_calls = []
+        for tc in choice.tool_calls or []:
+            fn = getattr(tc, "function", None)
+            if fn is None:
+                continue
+            tool_calls.append(
+                ToolCall(id=tc.id, name=fn.name, arguments=json.loads(fn.arguments))
+            )
+
         return LLMResponse(
             content=choice.content,
-            tool_calls=[
-                ToolCall(
-                    id=tc.id,
-                    name=tc.function.name,
-                    arguments=json.loads(tc.function.arguments),
-                )
-                for tc in (choice.tool_calls or [])
-            ],
+            tool_calls=tool_calls,
             usage=LLMUsage(
-                tokens_in=usage.prompt_tokens,
-                tokens_out=usage.completion_tokens,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
                 tokens_cached=cached,
                 latency_ms=int((time.time() - t0) * 1000),
                 model=model,
@@ -76,8 +89,8 @@ class OpenAICompatibleClient:
         )
 
     @staticmethod
-    def _to_openai_msg(m: ChatMessage) -> dict:
-        d: dict = {"role": m.role, "content": m.content}
+    def _to_openai_msg(m: ChatMessage) -> dict[str, Any]:
+        d: dict[str, Any] = {"role": m.role, "content": m.content}
         if m.role == "tool":
             d["tool_call_id"] = m.tool_call_id
         if m.role == "assistant" and m.tool_calls:

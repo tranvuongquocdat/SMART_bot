@@ -46,7 +46,7 @@ class BossIntegrationsRepo(BossScopedRepo):
             )
             return _row_to_integration(row) if row else None
 
-    async def list(self) -> list[BossIntegration]:
+    async def list_all(self) -> list[BossIntegration]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(
                 "SELECT * FROM boss_integrations WHERE boss_id=$1 ORDER BY plugin_id",

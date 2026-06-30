@@ -104,7 +104,7 @@ class MemoryEntriesRepo(BossScopedRepo):
                 qdrant_point_id,
             )
 
-    async def list(self, scope: MemoryScope, limit: int = 100) -> list[Memory]:
+    async def list_all(self, scope: MemoryScope, limit: int = 100) -> list[Memory]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(
                 """

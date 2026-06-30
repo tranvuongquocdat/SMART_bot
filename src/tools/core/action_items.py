@@ -27,7 +27,7 @@ async def list_action_items(
     ctx, group_id: str | None = None, status: str = "open"
 ) -> ToolResult:
     repo = ActionItemsRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
-    items = await repo.list(group_id=group_id, status=status)
+    items = await repo.list_all(group_id=group_id, status=status)
     return ToolResult(
         content=[
             {

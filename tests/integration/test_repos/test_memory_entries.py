@@ -44,5 +44,5 @@ async def test_insert_episodic_no_key(db_pool, boss_user):
         scope=MemoryScope.EPISODIC, content="Sếp hủy meeting 10h"
     )
     assert mid_a != mid_b
-    rows = await repo.list(MemoryScope.EPISODIC)
+    rows = await repo.list_all(MemoryScope.EPISODIC)
     assert len(rows) == 2

@@ -92,7 +92,7 @@ class ActionItemsRepo(BossScopedRepo):
                 self.ctx.boss_id,
             )
 
-    async def list(
+    async def list_all(
         self,
         group_id: str | None = None,
         status: str = "open",

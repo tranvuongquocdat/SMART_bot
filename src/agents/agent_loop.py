@@ -214,7 +214,7 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     if "prospective" in (cfg.memory_scopes or []):
         try:
             reminders = (
-                await RemindersRepo(ctx.db, boss_ctx).list(status="pending")
+                await RemindersRepo(ctx.db, boss_ctx).list_all(status="pending")
             )[:10]
         except Exception:
             log.exception("prospective reminders recall failed")

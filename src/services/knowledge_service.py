@@ -181,7 +181,7 @@ class KnowledgeService:
             return {"delta": len(delta), "candidates": 0, "added": 0,
                     "updated": 0, "deleted": 0, "last_message_id": delta[-1].id}
 
-        existing = await repo.list(provider=provider, chat_id=chat_id, limit=50)
+        existing = await repo.list_all(provider=provider, chat_id=chat_id, limit=50)
         decisions = await self._reconcile(boss_id, candidates, existing)
         counts = await self._apply(
             repo, decisions, candidates, provider, chat_id,

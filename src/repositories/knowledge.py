@@ -67,7 +67,7 @@ class KnowledgeRepo(BossScopedRepo):
             )
         return _row_to_item(row) if row else None
 
-    async def list(
+    async def list_all(
         self, *, provider: str | None = None, chat_id: str | None = None,
         kind: str | None = None, status: str | None = KnowledgeStatus.ACTIVE.value,
         project_id: int | None = None, limit: int = 50,

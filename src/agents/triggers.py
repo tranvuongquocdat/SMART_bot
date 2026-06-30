@@ -55,8 +55,11 @@ def trigger(
     on_demand_tools=(),
 ):
     def deco(cls_or_fn):
-        # Build key_fn from debounce/threshold key spec
-        keys = (debounce.key if debounce else threshold.key).split(",")
+        # Build key_fn from the debounce/threshold key spec. A trigger needs at
+        # least one of the two; default to a single bucket ("") if neither is set
+        # rather than dereferencing None.
+        key_spec = debounce.key if debounce else threshold.key if threshold else ""
+        keys = key_spec.split(",")
 
         def kfn(e: dict) -> str:
             return ":".join(f"{k}={e.get(k.strip(), '')}" for k in keys)

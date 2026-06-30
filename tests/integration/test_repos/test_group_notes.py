@@ -43,4 +43,4 @@ async def test_boss_scope_isolation(db_pool, boss_user):
         )
     other_repo = GroupNotesRepo(db_pool, BossContext(boss_id=other_id, user_role="boss"))
     assert await other_repo.get_by_chat("zalo", "g1") is None
-    assert await other_repo.list() == []
+    assert await other_repo.list_all() == []

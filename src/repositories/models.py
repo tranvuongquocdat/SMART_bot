@@ -36,7 +36,7 @@ class ModelsRepo(BossScopedRepo):
             row = await c.fetchrow("SELECT * FROM models WHERE id=$1", model_id)
             return _row_to_model(row) if row else None
 
-    async def list(self, active_only: bool = True) -> list[Model]:
+    async def list_all(self, active_only: bool = True) -> list[Model]:
         async with self.pool.acquire() as c:
             q = "SELECT * FROM models"
             if active_only:

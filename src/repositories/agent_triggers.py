@@ -46,7 +46,7 @@ class AgentTriggersRepo(BossScopedRepo):
             )
             return [_row_to_trigger(r) for r in rows]
 
-    async def list(self) -> list[AgentTrigger]:
+    async def list_all(self) -> list[AgentTrigger]:
         async with self.pool.acquire() as c:
             rows = await c.fetch(
                 "SELECT * FROM agent_triggers ORDER BY op_name, event_name"

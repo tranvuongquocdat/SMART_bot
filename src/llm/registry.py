@@ -23,7 +23,7 @@ class ModelRegistry:
         if time.time() - self._loaded_at < 60 and self._cache:
             return
         repo = ModelsRepo(self._pool, BossContext(boss_id=0, user_role="superadmin"))
-        all_models = await repo.list(active_only=True)
+        all_models = await repo.list_all(active_only=True)
         self._cache = {m.id: m for m in all_models}
         self._loaded_at = time.time()
 

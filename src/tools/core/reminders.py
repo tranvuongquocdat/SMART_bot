@@ -87,7 +87,7 @@ async def list_reminders(
     ctx, status: str = "pending", group_id: str | None = None
 ) -> ToolResult:
     repo = RemindersRepo(ctx.pool, BossContext(ctx.boss_id, ctx.boss_role))
-    items = await repo.list(status=status, chat_id=group_id)
+    items = await repo.list_all(status=status, chat_id=group_id)
     return ToolResult(
         content=[
             {

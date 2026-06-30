@@ -108,7 +108,7 @@ class RemindersRepo(BossScopedRepo):
                 now,
             )
 
-    async def list(
+    async def list_all(
         self,
         status: str = "pending",
         chat_id: str | None = None,
