@@ -1,3 +1,5 @@
+from collections.abc import Collection
+
 from src.tools.base import ToolDef
 
 _REGISTRY: dict[str, ToolDef] = {}
@@ -10,7 +12,7 @@ def tool(
     parameters: dict,
     feature: str | None = None,
     cost_class: str = "low",
-    available_to: set[str] = frozenset(),
+    available_to: Collection[str] = frozenset(),
     rate_limit: str | None = None,
     timeout_s: int = 30,
     parallel_safe: bool = True,
@@ -22,7 +24,7 @@ def tool(
             parameters=parameters,
             feature=feature,
             cost_class=cost_class,
-            available_to=available_to,
+            available_to=set(available_to),
             rate_limit=rate_limit,
             timeout_s=timeout_s,
             parallel_safe=parallel_safe,

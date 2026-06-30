@@ -14,13 +14,19 @@ from datetime import datetime, timezone
 from typing import Any
 
 from src.channels.web.sse import SSEHub
-from src.channels.web.state_repo import WebGroupsRepo
+from src.channels.web.state_repo import WebGroupsRepo, WebUsersRepo
 
 log = logging.getLogger(__name__)
 
 
 class WebAdapter:
     provider = "web"
+
+    # Wired by channels.web.setup() after construction (HTTP routes reach these
+    # via app.state); declared here so they're part of the adapter's typed surface.
+    users_repo: WebUsersRepo
+    outbound_service: Any
+    pool: Any
 
     def __init__(
         self,

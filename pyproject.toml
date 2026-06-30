@@ -78,6 +78,12 @@ warn_return_any = false              # ~43: returning Any
 module = ["asyncpg.*", "apscheduler.*", "authlib.*", "google.generativeai.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# EOL google.generativeai SDK exposes poor type info (no explicit exports);
+# being migrated to google.genai. Exempt this one client until then.
+module = ["src.llm.clients.gemini"]
+disable_error_code = ["attr-defined", "arg-type"]
+
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"

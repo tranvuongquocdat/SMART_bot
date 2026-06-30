@@ -1,3 +1,5 @@
+from typing import Any
+
 from src.domain.boss import Boss
 from src.domain.model import LLMRoute, Model
 from src.llm.base import LLMRequest
@@ -12,7 +14,7 @@ def _eval_condition(condition_cel: str | None, boss: Boss) -> bool:
     """
     if not condition_cel:
         return True
-    safe_globals = {"__builtins__": {}}
+    safe_globals: dict[str, Any] = {"__builtins__": {}}
     try:
         return bool(eval(condition_cel, safe_globals, {"boss": boss}))
     except Exception:

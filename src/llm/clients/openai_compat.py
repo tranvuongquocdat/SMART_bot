@@ -31,8 +31,10 @@ class OpenAICompatibleClient:
         try:
             resp = await self.client.chat.completions.create(
                 model=model,
-                messages=msgs,
-                tools=tools,
+                # The SDK is typed for its own ChatCompletion*Param objects; we
+                # build equivalent plain dicts by hand, which it accepts at runtime.
+                messages=msgs,  # type: ignore[arg-type]
+                tools=tools,  # type: ignore[arg-type]
                 temperature=req.temperature,
                 # max_completion_tokens (not the legacy max_tokens): newer OpenAI
                 # models (gpt-5.x, o-series) REJECT max_tokens. The new param is

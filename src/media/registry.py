@@ -8,17 +8,20 @@ when not supplied.
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import Any
 from urllib.parse import urlparse
 
-_ADAPTERS: list[type] = []
+# Decorated adapter classes get .supports/.priority/.requires_caps attached at
+# import time by @media_adapter, so they're typed as Any (no shared base class).
+_ADAPTERS: list[Any] = []
 
 
 def media_adapter(
     *,
     supports: set[str],
     priority: int = 10,
-    requires_caps: set[str] = frozenset(),
+    requires_caps: Collection[str] = frozenset(),
 ):
     def deco(cls):
         cls.supports = set(supports)

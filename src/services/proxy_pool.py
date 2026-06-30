@@ -122,7 +122,8 @@ async def create_proxy(
 
 
 async def update_proxy(pool: Any, proxy_id: int, fields: dict) -> None:
-    sets, vals = [], [proxy_id]
+    sets: list[str] = []
+    vals: list[Any] = [proxy_id]  # heterogeneous SQL params (int/str/encrypted bytes)
     i = 2
     for key in ("label", "region", "status", "max_bosses", "notes"):
         if key in fields and fields[key] is not None:

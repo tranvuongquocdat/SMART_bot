@@ -225,7 +225,7 @@ class KnowledgeRepo(BossScopedRepo):
                 await self._log(
                     c, item.id, RevisionOp.ADD.value, _v(actor),
                     None, _snapshot(item), reason,
-                    source_message_id=(source_message_ids or [None])[0],
+                    source_message_id=source_message_ids[0] if source_message_ids else None,
                 )
         return item
 

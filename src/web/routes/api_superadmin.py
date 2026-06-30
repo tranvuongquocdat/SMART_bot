@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -1940,8 +1940,8 @@ async def update_plan_sa(
                 raise HTTPException(
                     400, f"Cannot deactivate plan: {count} users are on it"
                 )
-        sets = []
-        vals = [plan_id]
+        sets: list[str] = []
+        vals: list[Any] = [plan_id]  # heterogeneous SQL params (int + json strings)
         for i, (k, v) in enumerate(updates.items(), start=2):
             if k in ("limits_json", "prices_json"):
                 sets.append(f"{k}=${i}::jsonb")
