@@ -9,6 +9,10 @@ Commands:
   wipe-knowledge   hard-delete knowledge rows for the boss (clean extraction test).
   dump             print knowledge_items for the boss.
   ask "<q>"        boss asks (mention_bot) in group; prints bot reply.
+  gold [path] [label]  chạy gold-set + lưu metrics run (pass/judge/latency/cost)
+                   vào scripts/eval_runs/<label>.json.
+  compare a.json b.json  so 2 run gold (đổi prompt / swap model qua llm_routes
+                   rồi chạy gold với label khác → compare).
   zalo             e2e kênh Zalo trên fake bridge: tự spawn server (cổng 24815),
                    seed acc+boss, bơm hội thoại, extract, Q&A, reminder người
                    chưa onboard — không cần acc Zalo thật.
@@ -286,27 +290,123 @@ async def ask(q):
         print("BOT: (no reply)")
 
 
-async def gold(path="scripts/gold_cases.json"):
+_JUDGE_SYS = (
+    "You are an evaluation judge for a Vietnamese executive-secretary chatbot. "
+    "Given a question, the expected key facts, and the bot's answer, score the "
+    "answer 0-10: 10 = correct, complete, concise, professional secretary tone; "
+    "5 = correct core but verbose/awkward or minor omissions; 0 = wrong, empty, "
+    "or refuses. Judge FACTUAL correctness against the expected facts first, "
+    "style second. IMPORTANT: some cases expect the bot to honestly say the "
+    "information is NOT available (anti-hallucination) — there, a polite "
+    "'no information' answer is CORRECT and scores high; inventing facts scores 0. "
+    "The case note (if given) tells you the intent. "
+    "Reply ONLY JSON: {\"score\": <int 0-10>, \"reason\": \"<=15 words\"}"
+)
+
+
+def _openai_key():
+    """Platform OpenAI key: env trước, fallback đọc .env (harness chạy ngoài
+    process server nên không tự có env của app)."""
+    import os
+    key = os.environ.get("PLATFORM_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if key:
+        return key
+    try:
+        for line in open(".env"):
+            line = line.strip()
+            if line.startswith(("OPENAI_API_KEY=", "PLATFORM_OPENAI_API_KEY=")):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return None
+
+
+def _judge_answer(q, expected, answer, note=None):
+    """LLM-judge một câu trả lời (advisory — không gate pass/fail).
+
+    Dùng platform OpenAI key; thiếu key / lỗi → None (run vẫn chạy)."""
+    import os
+    import urllib.error
+    import urllib.request
+    key = _openai_key()
+    if not key:
+        return None
+    body = json.dumps({
+        "model": os.environ.get("EVAL_JUDGE_MODEL", "gpt-5.4-mini"),
+        "response_format": {"type": "json_object"},
+        "messages": [
+            {"role": "system", "content": _JUDGE_SYS},
+            {"role": "user", "content":
+             f"Question: {q}\nExpected key facts: {expected}\n"
+             f"Case note: {note or '-'}\nBot answer: {answer}"},
+        ],
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/chat/completions", data=body,
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {key}"},
+        method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            content = json.loads(r.read())["choices"][0]["message"]["content"]
+        return json.loads(content)
+    except (urllib.error.URLError, KeyError, ValueError, TimeoutError):
+        return None
+
+
+async def _token_cost_since(bid, t0_iso):
+    import datetime as _dt
+    conn = await asyncpg.connect(DSN)
+    row = await conn.fetchrow(
+        "SELECT coalesce(sum(cost_usd),0) AS cost, coalesce(sum(tokens_in+tokens_out),0) AS tokens "
+        "FROM token_usage WHERE boss_id=$1 AND called_at >= $2",
+        bid, _dt.datetime.fromisoformat(t0_iso))
+    await conn.close()
+    return float(row["cost"]), int(row["tokens"])
+
+
+async def gold(path="scripts/gold_cases.json", label=None):
     """Chạy gold-set: mỗi case post câu hỏi + assert must_include / must_exclude.
 
     must_include: khớp không phân biệt hoa/thường (mọi token PHẢI có).
     must_exclude: khớp PHÂN BIỆT hoa/thường (không token nào được xuất hiện).
+
+    Mỗi run lưu metrics JSON vào scripts/eval_runs/ (pass/fail + latency +
+    judge score + token cost) — nền cho so sánh prompt/model (lệnh `compare`).
+    `label` đặt tên run (vd model đang thử); mặc định = timestamp.
     """
+    import datetime as _dt
+    import os
+    import time as _t
     s = _load()
     with open(path) as f:
         spec = json.load(f)
     cases = spec["cases"]
+    conn = await asyncpg.connect(DSN)
+    bid = await _boss_id(conn, s["boss"])
+    await conn.close()
+    t0_iso = _dt.datetime.now(_dt.timezone.utc).isoformat()
     passed = failed = 0
-    fails = []
+    fails, records = [], []
     for c in cases:
         gid = _gid_for(s, c.get("ask_in"))
+        t0 = _t.monotonic()
         answer = "\n".join(_ask_capture(s, gid, c["q"]))
+        latency = round(_t.monotonic() - t0, 2)
         inc = [_expand_token(t) for t in c.get("must_include", [])]
         miss = [t for t in inc if _token_missing(t, answer)]
         leak = [t for t in c.get("must_exclude", []) if t in answer]
         ok = not miss and not leak and bool(answer.strip())
+        judge = _judge_answer(c["q"], ", ".join(inc), answer, note=c.get("note"))
+        js = judge.get("score") if isinstance(judge, dict) else None
         mark = "PASS" if ok else "FAIL"
-        print(f"[{mark}] {c['id']:28} ({c.get('ask_in','apollo')})  {c['q']}")
+        print(f"[{mark}] {c['id']:28} ({c.get('ask_in','apollo')}) "
+              f"{latency:5.1f}s judge={js if js is not None else '-'}  {c['q']}")
+        records.append({
+            "id": c["id"], "ask_in": c.get("ask_in", "apollo"), "pass": ok,
+            "latency_s": latency, "judge_score": js,
+            "judge_reason": judge.get("reason") if isinstance(judge, dict) else None,
+            "missing": miss, "leaked": leak, "answer": answer,
+        })
         if ok:
             passed += 1
         else:
@@ -319,11 +419,51 @@ async def gold(path="scripts/gold_cases.json"):
             if leak:
                 detail.append(f"leaked={leak}")
             fails.append((c["id"], "; ".join(detail), answer))
+
+    cost, tokens = await _token_cost_since(bid, t0_iso)
+    lats = sorted(r["latency_s"] for r in records)
+    scores = [r["judge_score"] for r in records if r["judge_score"] is not None]
+    summary = {
+        "label": label or _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+        "at": t0_iso, "cases": len(cases), "passed": passed, "failed": failed,
+        "judge_avg": round(sum(scores) / len(scores), 2) if scores else None,
+        "latency_p50_s": lats[len(lats) // 2] if lats else None,
+        "latency_max_s": lats[-1] if lats else None,
+        "cost_usd": round(cost, 4), "tokens": tokens,
+    }
+    os.makedirs("scripts/eval_runs", exist_ok=True)
+    run_path = f"scripts/eval_runs/{summary['label']}.json"
+    with open(run_path, "w") as f:
+        json.dump({"summary": summary, "cases": records}, f, ensure_ascii=False, indent=1)
+
     print(f"\n=== gold: {passed} passed, {failed} failed / {len(cases)} ===")
+    print(f"    judge_avg={summary['judge_avg']} p50={summary['latency_p50_s']}s "
+          f"max={summary['latency_max_s']}s cost=${summary['cost_usd']} "
+          f"tokens={summary['tokens']}\n    run saved: {run_path}")
     for cid, detail, answer in fails:
         print(f"\n--- FAIL {cid}: {detail}\n    note: "
               f"{next(c.get('note','') for c in cases if c['id']==cid)}\n    BOT: {answer}")
     sys.exit(1 if failed else 0)
+
+
+def compare(path_a, path_b):
+    """So sánh 2 run gold (vd trước/sau đổi prompt, gpt-5.4-mini vs groq):
+    bảng pass-rate / judge / latency / cost + case đổi trạng thái."""
+    a, b = (json.load(open(p)) for p in (path_a, path_b))
+    sa, sb = a["summary"], b["summary"]
+    print(f"{'':22} {sa['label']:>18} {sb['label']:>18}")
+    for k in ("passed", "failed", "judge_avg", "latency_p50_s", "latency_max_s",
+              "cost_usd", "tokens"):
+        print(f"{k:22} {str(sa.get(k)):>18} {str(sb.get(k)):>18}")
+    ca = {c["id"]: c for c in a["cases"]}
+    cb = {c["id"]: c for c in b["cases"]}
+    for cid in sorted(set(ca) & set(cb)):
+        pa, pb = ca[cid]["pass"], cb[cid]["pass"]
+        if pa != pb:
+            print(f"  {'REGRESS' if pa and not pb else 'FIXED':8} {cid}")
+        ja, jb = ca[cid].get("judge_score"), cb[cid].get("judge_score")
+        if ja is not None and jb is not None and abs(ja - jb) >= 3:
+            print(f"  JUDGE Δ{jb - ja:+d}   {cid} ({ja}→{jb})")
 
 
 async def multipass():
@@ -802,7 +942,11 @@ async def main():
     elif cmd == "ask":
         await ask(sys.argv[2])
     elif cmd == "gold":
-        await gold(sys.argv[2] if len(sys.argv) > 2 else "scripts/gold_cases.json")
+        # gold [path] [label] — label đặt tên run (vd 'groq-llama70b')
+        await gold(sys.argv[2] if len(sys.argv) > 2 else "scripts/gold_cases.json",
+                   label=sys.argv[3] if len(sys.argv) > 3 else None)
+    elif cmd == "compare":
+        compare(sys.argv[2], sys.argv[3])
     elif cmd == "multipass":
         await multipass()
     elif cmd == "workload":
