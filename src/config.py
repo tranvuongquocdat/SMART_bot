@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     # zca-js / acc Zalo thật.
     ZALO_BRIDGE_SCRIPT: str = ""
 
+    # PDPL retention: tin nhắn THÔ (messages/outbound_messages) giữ tối đa N
+    # ngày; spine knowledge không đụng. 0 = tắt (không xoá gì).
+    RAW_MESSAGE_RETENTION_DAYS: int = 180
+
     @field_validator(
         "PLATFORM_OPENAI_API_KEY",
         "PLATFORM_GROQ_API_KEY",

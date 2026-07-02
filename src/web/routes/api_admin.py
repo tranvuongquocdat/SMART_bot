@@ -923,13 +923,18 @@ async def create_group(
 @router.delete("/groups/{group_id}", dependencies=[Depends(verify_json_csrf)], status_code=204)
 async def delete_group(
     group_id: int,
+    request: Request,
     db: asyncpg.Pool = Depends(get_db),
     ctx: BossContext = Depends(require_boss),
 ) -> None:
-    """Delete a group_notes row (must be owned by current boss)."""
-    await _require_group_owner(group_id, ctx, db)
-    async with db.acquire() as c:
-        await c.execute("DELETE FROM group_notes WHERE id=$1", group_id)
+    """Xoá nhóm = xoá THẬT dữ liệu nhóm (PDPL): messages/knowledge/qdrant/
+    reminders/group_notes — không chỉ row group_notes như trước."""
+    row = await _require_group_owner(group_id, ctx, db)
+    from src.services.data_erasure import DataErasure
+
+    await DataErasure(db, getattr(request.app.state, "qdrant", None)).erase_group(
+        ctx.boss_id, row["channel"], row["chat_id"]
+    )
 
 
 # ---------------------------------------------------------------------------

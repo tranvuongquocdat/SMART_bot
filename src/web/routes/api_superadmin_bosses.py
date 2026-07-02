@@ -625,3 +625,25 @@ async def boss_conversation_messages(
     ]
     next_before = messages[0]["ts"] if len(rows) == limit and messages else None
     return {"messages": messages, "next_before": next_before}
+
+
+@router.post("/{boss_id}/erase", dependencies=[Depends(verify_json_csrf)])
+async def erase_boss_data(
+    boss_id: int,
+    request: Request,
+    db: asyncpg.Pool = Depends(get_db),
+    actor: BossContext = Depends(require_superadmin),
+) -> dict:
+    """PDPL right-to-erasure: xoá TOÀN BỘ dữ liệu một boss (Postgres + Qdrant),
+    users row anonymize. Không undo. Trả counts từng bảng để đối chiếu."""
+    row = await _require_boss_user(db, boss_id)
+    if row["role"] == "superadmin":
+        raise HTTPException(400, "cannot erase a superadmin account")
+
+    from src.services.data_erasure import DataErasure
+
+    counts = await DataErasure(
+        db, getattr(request.app.state, "qdrant", None)
+    ).erase_boss(boss_id)
+    await _audit(db, actor, "boss.data_erased", boss_id, payload={"counts": counts})
+    return {"erased": True, "counts": counts}
