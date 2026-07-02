@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
 
 import httpx
 from cryptography.fernet import Fernet
@@ -22,6 +23,10 @@ from cryptography.fernet import Fernet
 from src.config import settings
 
 log = logging.getLogger(__name__)
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 PROVIDERS = ("openai", "groq", "gemini")
 
@@ -142,7 +147,7 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
         boss = await c.fetchrow(
             """
             SELECT smart_model_id, fast_model_id, vision_model_id,
-                   cost_cap_usd_daily, api_keys_enc, ai_provider_urls
+                   cost_cap_usd_daily, api_keys_enc, ai_provider_urls, ai_key_status
             FROM users WHERE id = $1
             """,
             boss_id,
@@ -173,11 +178,16 @@ async def get_ai_settings(pool, boss_id: int) -> dict:
                 return []
         return list(raw)
 
+    keys = mask_keys(boss["api_keys_enc"])
+    for prov, st in _parse_urls(boss["ai_key_status"]).items():
+        if prov in keys:
+            keys[prov]["status"] = st
+
     return {
         "slots": [
             {"slot": slot, "model_id": boss[col]} for slot, col in SLOT_COLUMNS.items()
         ],
-        "keys": mask_keys(boss["api_keys_enc"]),
+        "keys": keys,
         "provider_urls": _parse_urls(boss["ai_provider_urls"]),
         "models": [
             {
@@ -298,25 +308,38 @@ async def set_api_key(
     api_key = api_key.strip()
     if not api_key:
         raise AiConfigError(422, "api_key required")
+    new_status = None
     if validate:
         ok, message = await test_provider_key(provider, api_key, base_url=base_url)
         if not ok:
             raise AiConfigError(422, message)
+        new_status = {"ok": True, "message": message, "checked_at": _now_iso()}
 
     async with pool.acquire() as c:
         row = await c.fetchrow(
-            "SELECT api_keys_enc, ai_provider_urls FROM users WHERE id=$1", boss_id
+            "SELECT api_keys_enc, ai_provider_urls, ai_key_status FROM users WHERE id=$1",
+            boss_id,
         )
         keys = _decrypt_keys(row["api_keys_enc"])
         keys[provider] = api_key
         urls = _parse_urls(row["ai_provider_urls"])
         if is_custom:
             urls[provider] = base_url
+        statuses = _parse_urls(row["ai_key_status"])
+        if new_status is not None:
+            statuses[provider] = new_status
+        else:
+            statuses.pop(provider, None)  # khoá mới chưa kiểm tra → bỏ trạng thái cũ
         await c.execute(
-            "UPDATE users SET api_keys_enc=$2, ai_provider_urls=$3::jsonb WHERE id=$1",
+            """
+            UPDATE users
+            SET api_keys_enc=$2, ai_provider_urls=$3::jsonb, ai_key_status=$4::jsonb
+            WHERE id=$1
+            """,
             boss_id,
             _fernet().encrypt(json.dumps(keys).encode()),
             json.dumps(urls),
+            json.dumps(statuses),
         )
 
 
@@ -326,18 +349,63 @@ async def clear_api_key(pool, boss_id: int, provider: str) -> None:
         raise AiConfigError(422, "unknown provider")
     async with pool.acquire() as c:
         row = await c.fetchrow(
-            "SELECT api_keys_enc, ai_provider_urls FROM users WHERE id=$1", boss_id
+            "SELECT api_keys_enc, ai_provider_urls, ai_key_status FROM users WHERE id=$1",
+            boss_id,
         )
         keys = _decrypt_keys(row["api_keys_enc"])
         keys.pop(provider, None)
         urls = _parse_urls(row["ai_provider_urls"])
         urls.pop(provider, None)
+        statuses = _parse_urls(row["ai_key_status"])
+        statuses.pop(provider, None)
         await c.execute(
-            "UPDATE users SET api_keys_enc=$2, ai_provider_urls=$3::jsonb WHERE id=$1",
+            """
+            UPDATE users
+            SET api_keys_enc=$2, ai_provider_urls=$3::jsonb, ai_key_status=$4::jsonb
+            WHERE id=$1
+            """,
             boss_id,
             _fernet().encrypt(json.dumps(keys).encode()),
             json.dumps(urls),
+            json.dumps(statuses),
         )
+
+
+async def check_key(pool, boss_id: int, provider: str) -> dict:
+    """Kiểm tra khoá ĐÃ LƯU của boss (sống/chết), ghi lại trạng thái, trả về.
+
+    Khoá theo provider — mọi model cùng provider dùng chung. Không fallback key
+    nền tảng (đang kiểm tra khoá riêng của boss). Trả {provider, present, ok,
+    message, checked_at}.
+    """
+    provider = _norm_provider(provider)
+    if not provider:
+        raise AiConfigError(422, "unknown provider")
+    async with pool.acquire() as c:
+        row = await c.fetchrow(
+            "SELECT api_keys_enc, ai_provider_urls FROM users WHERE id=$1", boss_id
+        )
+        if not row:
+            raise AiConfigError(404, "boss not found")
+    key = _decrypt_keys(row["api_keys_enc"]).get(provider)
+    if not key:
+        return {"provider": provider, "present": False, "ok": None, "message": "no key"}
+
+    base_url = None
+    if not _is_builtin(provider):
+        base_url = _parse_urls(row["ai_provider_urls"]).get(provider)
+    ok, message = await test_provider_key(provider, key, base_url=base_url)
+    status = {"ok": ok, "message": message, "checked_at": _now_iso()}
+    async with pool.acquire() as c:
+        raw = await c.fetchval("SELECT ai_key_status FROM users WHERE id=$1", boss_id)
+        statuses = _parse_urls(raw)
+        statuses[provider] = status
+        await c.execute(
+            "UPDATE users SET ai_key_status=$2::jsonb WHERE id=$1",
+            boss_id,
+            json.dumps(statuses),
+        )
+    return {"provider": provider, "present": True, **status}
 
 
 async def boss_has_key(pool, boss_id: int, provider: str) -> bool:
@@ -547,3 +615,97 @@ async def list_provider_models(pool, boss_id: int, provider: str) -> dict:
         return {"ok": False, "models": [], "message": "Could not read provider response"}
 
     return {"ok": True, "models": [{"id": i} for i in sorted(ids)]}
+
+
+# ---------------------------------------------------------------------------
+# Tự suy ra metadata model (khả năng + giá + ngữ cảnh) bằng LLM
+# ---------------------------------------------------------------------------
+
+_META_SYS = (
+    "You are a precise LLM-model metadata service. Given a provider and a model id, "
+    "return ONLY a JSON object with these keys:\n"
+    '- capabilities: array, subset of ["text","vision","thinking","tools","audio"]. '
+    "text = handles text (almost always true); vision = accepts images; "
+    "thinking = has reasoning / extended-thinking mode; tools = supports function/tool calling; "
+    "audio = accepts or produces audio.\n"
+    "- cost_per_1m_input_usd: number, public list price in USD per 1M input tokens, or null if unsure.\n"
+    "- cost_per_1m_output_usd: number, USD per 1M output tokens, or null if unsure.\n"
+    "- ctx_max: integer, max context window in tokens, or null if unsure.\n"
+    "Use your knowledge of well-known models. Prefer null over guessing an exact number. "
+    "Output JSON only, no prose."
+)
+
+
+def _meta_engine() -> tuple[str, str, str] | None:
+    """(base_url, api_key, infer_model) để hỏi metadata — ưu tiên key nền tảng.
+
+    Dùng model frontier (không phải mini) cho recall giá chính xác hơn — model nhỏ
+    nhớ giá sai. Model cấu hình qua AI_METADATA_MODEL_OPENAI / _GROQ.
+    """
+    if settings.PLATFORM_OPENAI_API_KEY:
+        return "https://api.openai.com/v1", settings.PLATFORM_OPENAI_API_KEY, settings.AI_METADATA_MODEL_OPENAI
+    if settings.PLATFORM_GROQ_API_KEY:
+        return "https://api.groq.com/openai/v1", settings.PLATFORM_GROQ_API_KEY, settings.AI_METADATA_MODEL_GROQ
+    return None
+
+
+async def infer_model_metadata(pool, boss_id: int, provider: str, model_id: str) -> dict:
+    """Tự điền khả năng + giá + ngữ cảnh cho model qua LLM (key nền tảng, fallback key boss).
+
+    Trả {ok, capabilities, cost_per_1m_input_usd, cost_per_1m_output_usd, ctx_max, message?}.
+    Giá là ƯỚC TÍNH theo hiểu biết của LLM — FE để boss xem lại, không tự tin tuyệt đối.
+    """
+    provider = _norm_provider(provider)
+    model_id = (model_id or "").strip()
+    if not model_id:
+        return {"ok": False, "message": "model required"}
+
+    engine = _meta_engine()
+    if engine is None:  # không có key nền tảng → mượn key boss (openai/groq)
+        for p, base, infer in (
+            ("openai", "https://api.openai.com/v1", settings.AI_METADATA_MODEL_OPENAI),
+            ("groq", "https://api.groq.com/openai/v1", settings.AI_METADATA_MODEL_GROQ),
+        ):
+            k = await resolve_key(pool, boss_id, p)
+            if k:
+                engine = (base, k, infer)
+                break
+    if engine is None:
+        return {"ok": False, "message": "no inference engine"}
+
+    base_url, key, infer_model = engine
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            r = await client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {key}"},
+                json={
+                    "model": infer_model,
+                    "temperature": 0,
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": _META_SYS},
+                        {"role": "user", "content": f"Provider: {provider}\nModel id: {model_id}"},
+                    ],
+                },
+            )
+    except httpx.RequestError as e:
+        log.warning("infer_model_metadata network err: %s", e)
+        return {"ok": False, "message": "Could not reach inference engine"}
+    if r.status_code != 200:
+        return {"ok": False, "message": f"engine returned {r.status_code}"}
+
+    try:
+        content = r.json()["choices"][0]["message"]["content"]
+        data = json.loads(content)
+    except Exception:
+        return {"ok": False, "message": "could not parse metadata"}
+
+    ctx_raw = data.get("ctx_max")
+    return {
+        "ok": True,
+        "capabilities": _norm_caps(data.get("capabilities")),
+        "cost_per_1m_input_usd": _parse_cost(data.get("cost_per_1m_input_usd")),
+        "cost_per_1m_output_usd": _parse_cost(data.get("cost_per_1m_output_usd")),
+        "ctx_max": int(ctx_raw) if isinstance(ctx_raw, (int, float)) and ctx_raw else None,
+    }

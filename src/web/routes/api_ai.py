@@ -96,3 +96,22 @@ async def provider_models(
 
     await rate_check(request, f"provider_models:{ctx.boss_id}", limit=30, window_sec=60)
     return await boss_ai_config.list_provider_models(pool, ctx.boss_id, provider)
+
+
+@router.get("/model-metadata")
+async def model_metadata(
+    request: Request,
+    provider: str = Query(...),
+    model: str = Query(...),
+    ctx=Depends(get_current_boss),
+    pool=Depends(get_db),
+):
+    """Tự suy ra khả năng + giá + ngữ cảnh của model bằng LLM, để FE điền sẵn.
+
+    Returns {ok, capabilities, cost_per_1m_input_usd, cost_per_1m_output_usd, ctx_max, message?}.
+    Giá là ước tính — FE để boss xem lại.
+    """
+    from src.services import boss_ai_config
+
+    await rate_check(request, f"model_meta:{ctx.boss_id}", limit=30, window_sec=60)
+    return await boss_ai_config.infer_model_metadata(pool, ctx.boss_id, provider, model)

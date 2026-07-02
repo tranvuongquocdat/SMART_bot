@@ -32,6 +32,11 @@ class Settings(BaseSettings):
     LOG_RAW_CONTENT: bool = False
     ENABLE_WEB_TEST_CHANNEL: bool = True
 
+    # Model dùng để tự suy ra metadata (giá/khả năng/ngữ cảnh) khi boss thêm model.
+    # Model nhỏ (gpt-4o-mini) nhớ giá sai → mặc định dùng model frontier; đổi qua env.
+    AI_METADATA_MODEL_OPENAI: str = "gpt-5.4"
+    AI_METADATA_MODEL_GROQ: str = "llama-3.3-70b-versatile"
+
     @field_validator(
         "PLATFORM_OPENAI_API_KEY",
         "PLATFORM_GROQ_API_KEY",

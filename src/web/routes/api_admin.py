@@ -29,7 +29,6 @@ async def get_dashboard(
 ) -> dict:
     """Return dashboard summary: recent groups, today's items, 30-day stats, recent activity."""
     now = datetime.now(timezone.utc)
-    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     thirty_days_ago = now - timedelta(days=30)
     sixty_days_ago = now - timedelta(days=60)
 
@@ -503,7 +502,7 @@ async def group_items(
     tasks from action_items; decisions table doesn't exist (skipped).
     reminders not group-linked in schema — returns action items only.
     """
-    row = await _require_group_owner(group_id, ctx, db)
+    await _require_group_owner(group_id, ctx, db)
 
     async with db.acquire() as c:
         rows = await c.fetch(
@@ -715,16 +714,37 @@ async def patch_settings_ai_keys(
         if payload.get("clear"):
             await boss_ai_config.clear_api_key(db, ctx.boss_id, provider)
         else:
+            # validate=True: test khoá với provider trước khi lưu + ghi trạng thái
+            # sống/chết. Lưu khoá chết là vô nghĩa ("Kiểm tra & lưu").
             await boss_ai_config.set_api_key(
                 db,
                 ctx.boss_id,
                 provider,
                 payload.get("api_key") or "",
+                validate=True,
                 base_url=payload.get("base_url"),
             )
     except AiConfigError as e:
         raise _ai_err(e)
     return {"updated": 1}
+
+
+@router.post("/settings/ai/keys/check", dependencies=[Depends(verify_json_csrf)])
+async def check_settings_ai_key(
+    payload: dict,
+    ctx: BossContext = Depends(require_boss),
+    db: asyncpg.Pool = Depends(get_db),
+) -> dict:
+    """Kiểm tra khoá đã lưu của 1 provider còn sống không, ghi lại trạng thái.
+
+    Payload: {provider}. Trả {provider, present, ok, message, checked_at}.
+    """
+    from src.services import boss_ai_config
+
+    try:
+        return await boss_ai_config.check_key(db, ctx.boss_id, payload.get("provider", ""))
+    except AiConfigError as e:
+        raise _ai_err(e)
 
 
 # ---------------------------------------------------------------------------
@@ -1407,7 +1427,7 @@ async def patch_action_item(
     if not set_parts:
         raise HTTPException(400, "nothing to update")
 
-    set_parts.append(f"updated_at=NOW()")
+    set_parts.append("updated_at=NOW()")
     vals.append(item_id)
 
     async with db.acquire() as c:
@@ -2068,16 +2088,15 @@ async def list_tools(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> list[dict]:
-    async with db.acquire() as c:
-        rows = await c.fetch(
-            "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
-        )
-    active_names = {r["tool_name"] for r in rows}
+    """Công cụ LÕI (built-in): luôn bật cho mọi boss, không tắt được, không cap.
+    Hiển thị read-only. Integration (MCP/plugin) là endpoint /integrations riêng."""
     return [
         {
             "name": name,
             "description": t.description,
-            "active": name in active_names,
+            "core": True,
+            "active": True,
+            "can_disable": False,
         }
         for name, t in _tool_registry._REGISTRY.items()
     ]
@@ -2091,41 +2110,16 @@ async def toggle_tool(
 ) -> dict:
     if name not in _tool_registry._REGISTRY:
         raise HTTPException(404, "Tool not found")
-
-    async with db.acquire() as c:
-        exists = await c.fetchval(
-            "SELECT 1 FROM boss_active_tools WHERE boss_id=$1 AND tool_name=$2",
-            ctx.boss_id,
-            name,
-        )
-        if exists:
-            await c.execute(
-                "DELETE FROM boss_active_tools WHERE boss_id=$1 AND tool_name=$2",
-                ctx.boss_id,
-                name,
-            )
-            return {"name": name, "active": False}
-
-        lim = await get_effective_limits(db, ctx.boss_id)
-        if lim.max_active_tools is not None:
-            count = await c.fetchval(
-                "SELECT COUNT(*) FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
-            )
-            if count >= lim.max_active_tools:
-                raise HTTPException(
-                    400,
-                    tr(
-                        ctx,
-                        vi=f"Đã đạt giới hạn {lim.max_active_tools} tool của gói hiện tại",
-                        en=f"Limit reached: max {lim.max_active_tools} active tools on your plan",
-                    ),
-                )
-        await c.execute(
-            "INSERT INTO boss_active_tools (boss_id, tool_name) VALUES ($1, $2)",
-            ctx.boss_id,
-            name,
-        )
-        return {"name": name, "active": True}
+    # Mọi tool trong _REGISTRY là tool lõi — luôn bật, không tắt được. Cap/bật-tắt
+    # chỉ áp cho integration (xem /integrations).
+    raise HTTPException(
+        400,
+        tr(
+            ctx,
+            vi="Công cụ lõi luôn bật, không thể tắt. Chỉ integration mới bật/tắt được.",
+            en="Core tools are always on and cannot be disabled. Only integrations are toggleable.",
+        ),
+    )
 
 
 # ===========================================================================
@@ -2338,34 +2332,20 @@ async def enable_all_tools(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Bật toàn bộ tools trong một lần bấm, cắt theo max_active_tools của gói."""
+    """Core tools luôn bật toàn bộ (không cap). Endpoint giữ idempotent: đảm bảo
+    mọi tool lõi có row hiển thị, không cắt theo limit."""
     from src.tools import registry as _reg
 
-    lim = await get_effective_limits(db, ctx.boss_id)
     names = list(_reg._REGISTRY.keys())
     async with db.acquire() as c:
-        rows = await c.fetch(
-            "SELECT tool_name FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
+        await c.executemany(
+            """
+            INSERT INTO boss_active_tools (boss_id, tool_name)
+            VALUES ($1, $2) ON CONFLICT DO NOTHING
+            """,
+            [(ctx.boss_id, n) for n in names],
         )
-        active = {r["tool_name"] for r in rows}
-        to_add = [n for n in names if n not in active]
-        if lim.max_active_tools is not None:
-            slots = max(0, lim.max_active_tools - len(active))
-            to_add = to_add[:slots]
-        if to_add:
-            await c.executemany(
-                """
-                INSERT INTO boss_active_tools (boss_id, tool_name)
-                VALUES ($1, $2) ON CONFLICT DO NOTHING
-                """,
-                [(ctx.boss_id, n) for n in to_add],
-            )
-    return {
-        "enabled": len(to_add),
-        "active": len(active) + len(to_add),
-        "total": len(names),
-        "limit": lim.max_active_tools,
-    }
+    return {"enabled": len(names), "active": len(names), "total": len(names), "limit": None}
 
 
 @router.patch("/groups/{group_id}/toggle-active", dependencies=[Depends(verify_json_csrf)])
@@ -2416,13 +2396,15 @@ async def disable_all_tools(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Tắt toàn bộ tools trong một lần bấm."""
-    async with db.acquire() as c:
-        result = await c.execute(
-            "DELETE FROM boss_active_tools WHERE boss_id=$1", ctx.boss_id
-        )
-    disabled = int(result.split()[-1]) if result else 0
-    return {"disabled": disabled, "active": 0}
+    """Công cụ lõi không tắt được → disable-all bị từ chối."""
+    raise HTTPException(
+        400,
+        tr(
+            ctx,
+            vi="Công cụ lõi luôn bật, không thể tắt.",
+            en="Core tools are always on and cannot be disabled.",
+        ),
+    )
 
 
 @router.post("/groups/enable-all", dependencies=[Depends(verify_json_csrf)])

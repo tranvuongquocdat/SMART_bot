@@ -456,6 +456,9 @@ async def test_fetch_url(tool_ctx, monkeypatch):
         text = "<html><head><title>Hi</title></head><body>World</body></html>"
         headers = {"content-type": "text/html"}
 
+        def raise_for_status(self):
+            return None
+
     class _AC:
         def __init__(self, *a, **kw):
             pass
@@ -467,6 +470,9 @@ async def test_fetch_url(tool_ctx, monkeypatch):
             return False
 
         async def get(self, url):
+            return _Resp()
+
+        async def head(self, url):
             return _Resp()
 
     import httpx as _httpx

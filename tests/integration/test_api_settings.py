@@ -13,6 +13,15 @@ def _csrf_headers():
     return {"X-CSRF-Token": CSRF_TOK}
 
 
+@pytest.fixture(autouse=True)
+def _stub_key_validation(monkeypatch):
+    """Lưu BYO key giờ validate với provider thật — stub để test không cần mạng."""
+    async def _ok(provider, api_key, base_url=None):
+        return True, "Key is valid"
+
+    monkeypatch.setattr("src.services.boss_ai_config.test_provider_key", _ok)
+
+
 # ---------------------------------------------------------------------------
 # /settings/account
 # ---------------------------------------------------------------------------
@@ -163,6 +172,41 @@ def test_ai_keys_patch_saves_and_masks(client: TestClient, logged_in_boss):
     assert keys["openai"]["last_4"] == "ABCD"
     # Full key must not be present
     assert "sk-testABCD" not in str(keys)
+
+
+def test_ai_key_check_records_status(client: TestClient, logged_in_boss):
+    """Lưu key (validate) rồi bấm Kiểm tra → trạng thái sống lộ ra ở settings."""
+    client.cookies.set(CSRF_COOKIE, CSRF_TOK)
+    r = client.patch(
+        "/api/v1/admin/settings/ai/keys",
+        json={"provider": "openai", "api_key": "sk-checkWXYZ"},
+        headers=_csrf_headers(),
+    )
+    assert r.status_code == 200
+    # Trạng thái ghi lại ngay khi lưu (validate=True)
+    keys = client.get("/api/v1/admin/settings/ai").json()["keys"]
+    assert keys["openai"]["status"]["ok"] is True
+
+    # Nút "Kiểm tra" test lại khoá đã lưu
+    rc = client.post(
+        "/api/v1/admin/settings/ai/keys/check",
+        json={"provider": "openai"},
+        headers=_csrf_headers(),
+    )
+    assert rc.status_code == 200
+    body = rc.json()
+    assert body["present"] is True and body["ok"] is True
+
+
+def test_ai_key_check_no_key(client: TestClient, logged_in_boss):
+    client.cookies.set(CSRF_COOKIE, CSRF_TOK)
+    rc = client.post(
+        "/api/v1/admin/settings/ai/keys/check",
+        json={"provider": "gemini"},
+        headers=_csrf_headers(),
+    )
+    assert rc.status_code == 200
+    assert rc.json()["present"] is False
 
 
 def test_ai_keys_clear_removes_key(client: TestClient, logged_in_boss):

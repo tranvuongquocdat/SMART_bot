@@ -12,7 +12,8 @@ export type Account = {
   cost_cap_usd_daily: number;
 };
 
-export type KeyInfo = { present: boolean; last_4?: string };
+export type KeyStatus = { ok: boolean | null; message: string; checked_at: string };
+export type KeyInfo = { present: boolean; last_4?: string; status?: KeyStatus };
 
 export type ModelOption = {
   id: number;
@@ -75,6 +76,21 @@ export const patchAiCap = (body: { cost_cap_usd_daily: number }) =>
 export const patchAiKey = (body: { provider: string; api_key?: string; clear?: boolean; base_url?: string }) =>
   api('/api/v1/admin/settings/ai/keys', { method: 'PATCH', body: JSON.stringify(body) });
 
+export type KeyCheckResult = {
+  provider: string;
+  present: boolean;
+  ok: boolean | null;
+  message?: string;
+  checked_at?: string;
+};
+
+// Kiểm tra khoá ĐÃ LƯU của provider còn sống không (theo provider, dùng chung mọi model).
+export const checkAiKey = (provider: string) =>
+  api<KeyCheckResult>('/api/v1/admin/settings/ai/keys/check', {
+    method: 'POST',
+    body: JSON.stringify({ provider }),
+  });
+
 export type TestKeyResult = { ok: boolean; status: string; message: string };
 
 export const testAiKey = (body: { provider: string; api_key: string; base_url?: string }) =>
@@ -93,14 +109,28 @@ export type ProviderModelsResult = { ok: boolean; models: { id: string }[]; mess
 export const listProviderModels = (provider: string) =>
   api<ProviderModelsResult>(`/api/ai/provider-models?provider=${encodeURIComponent(provider)}`);
 
-export const addOwnModel = (body: {
-  provider: string;
-  name: string;
-  tier: string;
-  vision?: boolean;
+export type ModelMetadata = {
+  ok: boolean;
   capabilities?: string[];
   cost_per_1m_input_usd?: number | null;
   cost_per_1m_output_usd?: number | null;
+  ctx_max?: number | null;
+  message?: string;
+};
+
+// Tự suy ra khả năng + giá + ngữ cảnh của model (LLM). Giá là ước tính, boss xem lại.
+export const getModelMetadata = (provider: string, model: string) =>
+  api<ModelMetadata>(
+    `/api/ai/model-metadata?provider=${encodeURIComponent(provider)}&model=${encodeURIComponent(model)}`,
+  );
+
+export const addOwnModel = (body: {
+  provider: string;
+  name: string;
+  capabilities?: string[];
+  cost_per_1m_input_usd?: number | null;
+  cost_per_1m_output_usd?: number | null;
+  ctx_max?: number | null;
 }) =>
   api<{ id: number }>('/api/v1/admin/settings/ai/models', {
     method: 'POST',
@@ -110,7 +140,6 @@ export const addOwnModel = (body: {
 export const patchOwnModel = (
   id: number,
   body: {
-    tier?: string;
     capabilities?: string[];
     cost_per_1m_input_usd?: number | null;
     cost_per_1m_output_usd?: number | null;
