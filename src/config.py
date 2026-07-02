@@ -37,6 +37,11 @@ class Settings(BaseSettings):
     AI_METADATA_MODEL_OPENAI: str = "gpt-5.4"
     AI_METADATA_MODEL_GROQ: str = "llama-3.3-70b-versatile"
 
+    # Đường dẫn script bridge Zalo. Rỗng = bridge.js thật cạnh adapter.
+    # Test/harness trỏ sang tests/fixtures/zalo/fake_bridge.js để chạy không cần
+    # zca-js / acc Zalo thật.
+    ZALO_BRIDGE_SCRIPT: str = ""
+
     @field_validator(
         "PLATFORM_OPENAI_API_KEY",
         "PLATFORM_GROQ_API_KEY",
