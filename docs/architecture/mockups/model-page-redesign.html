@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mockup — Trang Model AI (duyệt)</title>
+<style>
+  :root{
+    --background:240 8% 5%;
+    --foreground:0 0% 99%;
+    --muted:240 5% 12%;
+    --muted-foreground:240 6% 71%;
+    --border:240 8% 9%;
+    --border-strong:240 7% 19%;
+    --divider:240 9% 7%;
+    --card:240 7% 9.5%;
+    --card-grad-top:240 7% 11.5%;
+    --card-grad-bot:240 8% 8.5%;
+    --accent:240 8% 19%;
+    --primary:172 70% 45%;
+    --primary-strong:188 80% 50%;
+    --primary-soft:172 50% 14%;
+    --primary-foreground:170 80% 6%;
+    --smart:265 70% 78%;
+    --smart-soft:265 60% 60%;
+    --danger:0 72% 62%;
+    --amber:38 92% 60%;
+    --radius:8px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:hsl(var(--background));
+    color:hsl(var(--foreground));
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,sans-serif;
+    font-size:14px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    padding:32px 20px 80px;
+  }
+  .wrap{max-width:1060px;margin:0 auto;display:flex;flex-direction:column;gap:34px}
+
+  .caption{display:flex;align-items:center;gap:8px;margin:0 0 12px;flex-wrap:wrap}
+  .caption .n{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:6px;background:hsl(var(--primary-soft));color:hsl(var(--primary));font-weight:700;font-size:12px}
+  .caption h2{margin:0;font-size:13.5px;font-weight:600;letter-spacing:-.01em}
+  .caption .sub{color:hsl(var(--muted-foreground));font-size:12px}
+
+  .section{
+    border-radius:14px;border:1px solid hsl(var(--border-strong));
+    background:linear-gradient(180deg,hsl(var(--card-grad-top)),hsl(var(--card-grad-bot)));
+    padding:20px;
+  }
+  .page-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:18px;gap:16px}
+  .page-head h1{margin:0;font-size:18px;font-weight:650;letter-spacing:-.02em}
+  .page-head p{margin:3px 0 0;color:hsl(var(--muted-foreground));font-size:12.5px;max-width:600px}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 12px;border-radius:8px;font-size:12.5px;font-weight:600;border:1px solid transparent;cursor:pointer;white-space:nowrap;font-family:inherit}
+  .btn-primary{background:hsl(var(--primary));color:hsl(var(--primary-foreground))}
+  .btn-ghost{background:transparent;color:hsl(var(--muted-foreground));border-color:hsl(var(--border-strong))}
+  .btn-sm{height:28px;padding:0 10px;font-size:12px}
+
+  /* ---- TABLE ---- */
+  .tbl{width:100%;border-collapse:separate;border-spacing:0}
+  .tbl thead th{text-align:left;font-size:10.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:hsl(var(--muted-foreground));padding:0 12px 10px;border-bottom:1px solid hsl(var(--divider));white-space:nowrap}
+  .tbl tbody td{padding:13px 12px;border-bottom:1px solid hsl(var(--divider));vertical-align:middle}
+  .tbl tbody tr:last-child td{border-bottom:none}
+  .tbl tbody tr:hover{background:hsl(var(--accent)/.35)}
+  .tbl tbody tr.idle{opacity:.78}
+  .tbl tbody tr.live{background:hsl(var(--primary-soft)/.18)}
+
+  .model-cell{display:flex;flex-direction:column;gap:3px;min-width:200px}
+  .model-name{font-weight:600;font-size:13px}
+  .model-prov{font-size:11px;color:hsl(var(--muted-foreground))}
+
+  .badge{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border-radius:5px;font-size:10px;font-weight:600;line-height:1}
+  .b-granted{background:hsl(var(--muted));color:hsl(var(--muted-foreground))}
+  .b-own{background:hsl(38 70% 50%/.14);color:hsl(var(--amber))}
+
+  /* key health line */
+  .keyline{display:flex;align-items:center;gap:6px;margin-top:3px;font-size:10.5px}
+  .kdot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+  .kdot.ok{background:hsl(var(--primary))}
+  .kdot.err{background:hsl(var(--danger))}
+  .ktext{color:hsl(var(--muted-foreground))}
+  .ktext.err{color:hsl(var(--danger));font-weight:600}
+  .kcheck{display:inline-flex;align-items:center;gap:3px;border:none;background:transparent;color:hsl(var(--primary));font-size:10.5px;font-weight:600;cursor:pointer;padding:0;font-family:inherit}
+  .kcheck.muted{color:hsl(var(--muted-foreground))}
+
+  .caps{display:flex;flex-wrap:wrap;gap:4px;max-width:200px}
+  .cap{padding:1px 7px;border-radius:999px;font-size:10px;background:hsl(var(--muted));color:hsl(var(--muted-foreground))}
+  .cap.vis{background:hsl(var(--primary-soft));color:hsl(var(--primary))}
+
+  .cost{font-variant-numeric:tabular-nums;font-size:12.5px;white-space:nowrap}
+  .cost .sub{color:hsl(var(--muted-foreground));font-size:10.5px}
+  .ctx{font-variant-numeric:tabular-nums;font-size:12.5px;color:hsl(var(--muted-foreground))}
+
+  /* job toggles */
+  .jobs{display:flex;gap:6px}
+  .jobpill{display:inline-flex;align-items:center;gap:5px;height:26px;padding:0 11px;border-radius:999px;font-size:11.5px;font-weight:600;border:1px solid hsl(var(--border-strong));background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;font-family:inherit}
+  .jobpill .tick{width:13px;height:13px;opacity:0;transition:.1s}
+  .jobpill.on .tick{opacity:1}
+  .jobpill.on.smart{background:hsl(var(--smart-soft)/.18);border-color:hsl(var(--smart-soft)/.5);color:hsl(var(--smart))}
+  .jobpill.on.fast{background:hsl(var(--primary)/.15);border-color:hsl(var(--primary)/.45);color:hsl(var(--primary))}
+
+  .row-actions{display:flex;gap:2px;justify-content:flex-end}
+  .icon-btn{width:28px;height:28px;border-radius:7px;border:none;background:transparent;color:hsl(var(--muted-foreground));cursor:pointer;display:inline-flex;align-items:center;justify-content:center}
+  .icon-btn:hover{background:hsl(var(--accent));color:hsl(var(--foreground))}
+  .icon-btn.danger:hover{color:hsl(var(--danger))}
+  svg{display:block}
+
+  .hint{margin-top:14px;font-size:11.5px;color:hsl(var(--muted-foreground));display:flex;gap:7px;align-items:flex-start}
+  .hint + .hint{margin-top:7px}
+  .hint b{color:hsl(var(--foreground));font-weight:600}
+
+  /* chooser */
+  .chooser{display:grid;grid-template-columns:1fr 1fr;gap:14px;max-width:640px}
+  .choice{border:1px solid hsl(var(--border-strong));border-radius:12px;padding:16px;background:hsl(var(--card));cursor:pointer;transition:.15s}
+  .choice:hover{border-color:hsl(var(--primary)/.6);background:hsl(var(--accent)/.4)}
+  .choice .ico{width:34px;height:34px;border-radius:9px;background:hsl(var(--primary-soft));color:hsl(var(--primary));display:flex;align-items:center;justify-content:center;margin-bottom:10px}
+  .choice h3{margin:0 0 4px;font-size:13.5px;font-weight:650}
+  .choice p{margin:0;font-size:11.5px;color:hsl(var(--muted-foreground));line-height:1.5}
+
+  /* drawer/form */
+  .drawer{max-width:440px;border:1px solid hsl(var(--border-strong));border-radius:14px;overflow:hidden;background:hsl(var(--card))}
+  .drawer-head{padding:14px 18px;border-bottom:1px solid hsl(var(--divider));display:flex;align-items:center;justify-content:space-between}
+  .drawer-head .t{font-weight:650;font-size:14px}
+  .drawer-head .s{font-size:11.5px;color:hsl(var(--muted-foreground));margin-top:2px}
+  .drawer-body{padding:18px;display:flex;flex-direction:column;gap:15px}
+  .drawer-foot{padding:13px 18px;border-top:1px solid hsl(var(--divider));display:flex;align-items:center;gap:8px}
+  .field{display:flex;flex-direction:column;gap:6px}
+  .field label{font-size:11px;font-weight:600;color:hsl(var(--muted-foreground));text-transform:uppercase;letter-spacing:.03em}
+  .ctrl{height:34px;border-radius:8px;border:1px solid hsl(var(--border-strong));background:hsl(var(--background));color:hsl(var(--foreground));padding:0 10px;font-size:13px;width:100%;font-family:inherit}
+  .ctrl::placeholder{color:hsl(var(--muted-foreground)/.7)}
+  .with-btn{display:flex;gap:8px}
+  .pill-row{display:flex;flex-wrap:wrap;gap:6px}
+  .pill{padding:5px 11px;border-radius:999px;font-size:12px;font-weight:500;border:1px solid hsl(var(--border-strong));background:transparent;color:hsl(var(--muted-foreground));cursor:pointer}
+  .pill.on{background:hsl(var(--primary)/.15);border-color:hsl(var(--primary)/.4);color:hsl(var(--primary))}
+  .two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+  .note{font-size:11px;color:hsl(var(--muted-foreground))}
+  .keystatus{display:flex;align-items:center;gap:8px;height:34px;border-radius:8px;border:1px solid hsl(var(--border-strong));background:hsl(var(--background));padding:0 10px;font-size:12.5px;font-variant-numeric:tabular-nums;flex:1}
+  .keystatus.err{border-color:hsl(var(--danger)/.5);background:hsl(var(--danger)/.08)}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;font-size:11.5px;color:hsl(var(--muted-foreground));margin-top:4px}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div>
+    <h1 style="margin:0;font-size:15px;font-weight:600;color:hsl(var(--muted-foreground))">Mockup duyệt — Trang Model AI (boss · /app/admin/ai)</h1>
+    <div class="legend">
+      <span><span class="badge b-granted">Được cấp</span> superadmin lo key + chi phí</span>
+      <span><span class="badge b-own">Của bạn</span> bạn tự thêm, key riêng</span>
+      <span><span class="jobpill on smart" style="height:18px;padding:0 8px;font-size:10px"><svg class="tick" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Smart</span> việc khó (đắt/chậm)</span>
+      <span><span class="jobpill on fast" style="height:18px;padding:0 8px;font-size:10px"><svg class="tick" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Fast</span> việc thường (rẻ/nhanh)</span>
+    </div>
+  </div>
+
+  <!-- ===== VIEW 1 — MAIN TABLE ===== -->
+  <div>
+    <div class="caption"><span class="n">1</span><h2>Trang chính — bảng so sánh, có check khoá &amp; gán việc ngay trên dòng</h2></div>
+    <div class="section">
+      <div class="page-head">
+        <div>
+          <h1>Model AI</h1>
+          <p>So sánh chi phí · khả năng để cân đối. Mỗi việc (Smart / Fast) chạy 1 model đang bật — 1 model có thể nhận cả hai.</p>
+        </div>
+        <button class="btn btn-primary">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Thêm model
+        </button>
+      </div>
+
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Dùng cho</th>
+            <th>Khả năng</th>
+            <th>Chi phí / 1M token</th>
+            <th>Ngữ cảnh</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <!-- LIVE: one own model serving BOTH smart + fast (câu hỏi của bạn) -->
+          <tr class="live">
+            <td>
+              <div class="model-cell">
+                <span class="model-name">gpt-4o-mini</span>
+                <span class="model-prov">openai · <span class="badge b-own">Của bạn</span></span>
+                <div class="keyline"><span class="kdot ok"></span><span class="ktext">Khoá OK · kiểm tra 2 phút trước</span>
+                  <button class="kcheck"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg>Kiểm tra</button>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="jobs">
+                <button class="jobpill on smart"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Smart</button>
+                <button class="jobpill on fast"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Fast</button>
+              </div>
+            </td>
+            <td><div class="caps"><span class="cap">text</span><span class="cap vis">vision</span><span class="cap">tools</span></div></td>
+            <td><div class="cost">$0.15 <span class="sub">vào</span> · $0.60 <span class="sub">ra</span></div></td>
+            <td><span class="ctx">128k</span></td>
+            <td><div class="row-actions">
+              <button class="icon-btn" title="Sửa"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+              <button class="icon-btn danger" title="Xoá"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+            </div></td>
+          </tr>
+          <!-- idle granted: stronger smart option to switch to -->
+          <tr class="idle">
+            <td>
+              <div class="model-cell">
+                <span class="model-name">gpt-4o</span>
+                <span class="model-prov">openai · <span class="badge b-granted">Được cấp</span></span>
+              </div>
+            </td>
+            <td>
+              <div class="jobs">
+                <button class="jobpill smart"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Smart</button>
+                <button class="jobpill fast"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Fast</button>
+              </div>
+            </td>
+            <td><div class="caps"><span class="cap">text</span><span class="cap vis">vision</span><span class="cap">thinking</span><span class="cap">tools</span></div></td>
+            <td><div class="cost">$2.50 <span class="sub">vào</span> · $10.00 <span class="sub">ra</span></div></td>
+            <td><span class="ctx">128k</span></td>
+            <td><div class="row-actions">
+              <button class="icon-btn" title="Sửa"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+            </div></td>
+          </tr>
+          <!-- idle own (groq) key ok -->
+          <tr class="idle">
+            <td>
+              <div class="model-cell">
+                <span class="model-name">llama-3.3-70b-versatile</span>
+                <span class="model-prov">groq · <span class="badge b-own">Của bạn</span></span>
+                <div class="keyline"><span class="kdot ok"></span><span class="ktext">Khoá OK</span>
+                  <button class="kcheck"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg>Kiểm tra</button>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="jobs">
+                <button class="jobpill smart"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Smart</button>
+                <button class="jobpill fast"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Fast</button>
+              </div>
+            </td>
+            <td><div class="caps"><span class="cap">text</span><span class="cap">tools</span></div></td>
+            <td><div class="cost">$0.59 <span class="sub">vào</span> · $0.79 <span class="sub">ra</span></div></td>
+            <td><span class="ctx">128k</span></td>
+            <td><div class="row-actions">
+              <button class="icon-btn" title="Sửa"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+              <button class="icon-btn danger" title="Xoá"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+            </div></td>
+          </tr>
+          <!-- DEAD KEY: own custom self-host -->
+          <tr class="idle">
+            <td>
+              <div class="model-cell">
+                <span class="model-name">qwen2.5-72b-instruct</span>
+                <span class="model-prov">custom · tự host · <span class="badge b-own">Của bạn</span></span>
+                <div class="keyline"><span class="kdot err"></span><span class="ktext err">Khoá lỗi: 401 Unauthorized</span>
+                  <button class="kcheck"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg>Kiểm tra lại</button>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="jobs">
+                <button class="jobpill smart"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Smart</button>
+                <button class="jobpill fast"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Fast</button>
+              </div>
+            </td>
+            <td><div class="caps"><span class="cap">text</span><span class="cap">tools</span></div></td>
+            <td><div class="cost">$0.00 <span class="sub">vào</span> · $0.00 <span class="sub">ra</span></div></td>
+            <td><span class="ctx">32k</span></td>
+            <td><div class="row-actions">
+              <button class="icon-btn" title="Sửa"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+              <button class="icon-btn danger" title="Xoá"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg></button>
+            </div></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="hint">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="hsl(var(--primary))" stroke-width="2" style="margin-top:1px;flex-shrink:0"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg>
+        <span><b>Dùng cho:</b> bật [Smart] và/hoặc [Fast] ngay trên dòng. Dòng đầu = 1 model làm cả 2 việc. Mỗi việc chỉ 1 model — bật Smart ở dòng khác sẽ tự tắt Smart dòng này. <b>Ảnh</b> → model đang bật có khả năng <span class="cap vis" style="display:inline">vision</span> (ưu tiên Smart).</span>
+      </div>
+      <div class="hint">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="hsl(var(--danger))" stroke-width="2" style="margin-top:1px;flex-shrink:0"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <span><b>Khoá:</b> chấm xanh = sống, đỏ = chết. Nút <b>Kiểm tra</b> test lại ngay (theo provider — vd mọi model groq chung 1 khoá). Hệ thống cũng tự re-check định kỳ &amp; gắn cờ khi khoá hỏng.</span>
+      </div>
+      <div class="hint">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="hsl(var(--muted-foreground))" stroke-width="2" style="margin-top:1px;flex-shrink:0"><circle cx="12" cy="12" r="9"/><path d="M8 15h8M9 9h.01M15 9h.01"/></svg>
+        <span><b>Chưa dùng:</b> dòng mờ = đã cấu hình (khả năng · chi phí · khoá) nhưng cả Smart &amp; Fast đều tắt. Vẫn nằm trong bảng để so sánh, bật lúc nào cũng được. gpt-4o · llama · qwen ở trên đang vậy.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== VIEW 2 — ADD CHOOSER ===== -->
+  <div>
+    <div class="caption"><span class="n">2</span><h2>"Thêm model" → đúng 2 lựa chọn</h2><span class="sub">nơi DUY NHẤT phân biệt "được cấp" vs "tự thêm"</span></div>
+    <div class="section">
+      <div class="chooser">
+        <div class="choice">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7 9 18l-5-5"/></svg></div>
+          <h3>Chọn từ model được cấp</h3>
+          <p>Superadmin đã lo khoá &amp; chi phí. Chỉ cần bật — không nhập gì.</p>
+        </div>
+        <div class="choice">
+          <div class="ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg></div>
+          <h3>Tự thêm model</h3>
+          <p>Dùng khoá API riêng. OpenAI · Groq · Gemini · hoặc endpoint tự host.</p>
+        </div>
+      </div>
+      <div class="hint" style="margin-top:16px">
+        <span>→ Form "Tự thêm" (view 3) là nơi nhập <b>khoá API &amp; custom provider</b> — bỏ hẳn section "API key (BYO)" ngoài trang.</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== VIEW 3 — ADD OWN ===== -->
+  <div>
+    <div class="caption"><span class="n">3</span><h2>"Tự thêm model" — khoá API + custom provider + Kiểm tra gói gọn ở đây</h2></div>
+    <div class="drawer">
+      <div class="drawer-head">
+        <div><div class="t">Tự thêm model</div><div class="s">Dùng khoá API riêng của bạn</div></div>
+        <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="drawer-body">
+        <div class="field"><label>Nhà cung cấp</label>
+          <select class="ctrl"><option>OpenAI</option><option>Groq</option><option>Gemini</option><option selected>Custom / Tự host</option></select>
+        </div>
+        <div class="field"><label>Base URL <span style="text-transform:none;font-weight:400">(chỉ khi tự host)</span></label>
+          <input class="ctrl" value="https://llm.cong-ty.com/v1" />
+        </div>
+        <div class="field"><label>Khoá API</label>
+          <div class="with-btn">
+            <input class="ctrl" type="password" value="sk-xxxxxxxxxxxx" style="flex:1" />
+            <button class="btn btn-ghost btn-sm" style="height:34px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="margin-right:3px"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg>Kiểm tra</button>
+          </div>
+          <span class="note">Kiểm tra để xác thực khoá trước khi lưu. Khoá được mã hoá, không hiển thị lại.</span>
+        </div>
+        <div class="field"><label>Model</label>
+          <input class="ctrl" value="qwen2.5-72b-instruct" />
+          <span class="note">Khoá hợp lệ → tự gợi ý danh sách model của provider.</span>
+        </div>
+        <div class="field"><label>Dùng cho</label>
+          <div class="jobs">
+            <button class="jobpill on smart"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Smart</button>
+            <button class="jobpill on fast"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Fast</button>
+          </div>
+          <span class="note">Bật cả hai = 1 model làm cả việc khó &amp; việc thường. Có thể để trống, gán sau ở bảng.</span>
+        </div>
+        <div class="field"><label>Khả năng</label>
+          <div class="pill-row"><span class="pill on">text</span><span class="pill">vision</span><span class="pill">thinking</span><span class="pill on">tools</span><span class="pill">audio</span></div>
+          <span class="note">Bật <b>vision</b> nếu model đọc được ảnh — ảnh sẽ tự định tuyến tới đây.</span>
+        </div>
+        <div class="two">
+          <div class="field"><label>Chi phí vào ($/1M)</label><input class="ctrl" placeholder="—" /></div>
+          <div class="field"><label>Chi phí ra ($/1M)</label><input class="ctrl" placeholder="—" /></div>
+        </div>
+        <span class="note">Để tính chi phí ở trang "Sử dụng". Tự host có thể để 0.</span>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn btn-ghost" style="margin-left:auto">Huỷ</button>
+        <button class="btn btn-primary">Lưu &amp; thêm</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== VIEW 4 — DETAIL / EDIT ===== -->
+  <div>
+    <div class="caption"><span class="n">4</span><h2>Icon ✎ → chi tiết / sửa (có trạng thái khoá + Kiểm tra)</h2></div>
+    <div class="drawer">
+      <div class="drawer-head">
+        <div><div class="t">groq / llama-3.3-70b-versatile</div><div class="s">Model của bạn</div></div>
+        <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="drawer-body">
+        <div style="border:1px solid hsl(var(--border-strong));border-radius:10px;padding:12px;background:hsl(var(--background)/.4)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+            <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:hsl(var(--muted-foreground))">Nhà cung cấp · Groq</span>
+            <span class="note">Khoá dùng chung 2 model Groq của bạn</span>
+          </div>
+          <div class="with-btn">
+            <div class="keystatus"><span class="kdot ok"></span> Khoá OK · ••••4f2a · kiểm tra 2 phút trước</div>
+            <button class="btn btn-ghost btn-sm" style="height:34px"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="margin-right:3px"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg>Kiểm tra</button>
+            <button class="btn btn-ghost btn-sm" style="height:34px">Đổi khoá</button>
+          </div>
+        </div>
+        <div class="field"><label>Dùng cho</label>
+          <div class="jobs">
+            <button class="jobpill smart"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Smart</button>
+            <button class="jobpill fast"><svg class="tick" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M20 7 9 18l-5-5"/></svg>Fast</button>
+          </div>
+        </div>
+        <div class="field"><label>Khả năng</label>
+          <div class="pill-row"><span class="pill on">text</span><span class="pill">vision</span><span class="pill">thinking</span><span class="pill on">tools</span><span class="pill">audio</span></div>
+        </div>
+        <div class="two">
+          <div class="field"><label>Chi phí vào ($/1M)</label><input class="ctrl" value="0.59" /></div>
+          <div class="field"><label>Chi phí ra ($/1M)</label><input class="ctrl" value="0.79" /></div>
+        </div>
+      </div>
+      <div class="drawer-foot">
+        <button class="btn btn-ghost" style="color:hsl(var(--danger))"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/></svg> Xoá model</button>
+        <button class="btn btn-primary" style="margin-left:auto">Lưu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== VIEW 5 — CHANGE / ROTATE PROVIDER KEY ===== -->
+  <div>
+    <div class="caption"><span class="n">5</span><h2>Đổi / xoay khoá 1 provider — bấm "Đổi khoá" ở khối Nhà cung cấp</h2><span class="sub">sửa 1 lần, áp cho mọi model cùng provider</span></div>
+    <div class="drawer">
+      <div class="drawer-head">
+        <div><div class="t">custom / qwen2.5-72b-instruct</div><div class="s">Khoá đang lỗi — cần thay</div></div>
+        <button class="icon-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+      </div>
+      <div class="drawer-body">
+        <div style="border:1px solid hsl(var(--danger)/.5);border-radius:10px;padding:12px;background:hsl(var(--danger)/.06)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:hsl(var(--muted-foreground))">Nhà cung cấp · Custom (tự host)</span>
+            <span class="ktext err" style="font-size:11px;font-weight:600">● Khoá lỗi: 401</span>
+          </div>
+          <div class="field"><label>Base URL</label><input class="ctrl" value="https://llm.cong-ty.com/v1" /></div>
+          <div class="field" style="margin-top:10px"><label>Khoá mới</label>
+            <div class="with-btn">
+              <input class="ctrl" type="password" placeholder="dán khoá mới…" style="flex:1" />
+              <button class="btn btn-primary btn-sm" style="height:34px;white-space:nowrap"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" style="margin-right:3px"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg>Kiểm tra &amp; lưu</button>
+            </div>
+          </div>
+          <span class="note" style="margin-top:9px;display:block">Lưu xong áp cho <b style="color:hsl(var(--foreground))">tất cả model Custom</b> của bạn → mọi dòng chuyển xanh.</span>
+        </div>
+        <div class="hint" style="margin-top:14px">
+          <span><b>Lần đầu</b> dùng 1 provider → nhập khoá ngay trong form "Tự thêm model" (view 3). <b>Xoá model cuối</b> của 1 provider → xoá luôn khoá provider đó (không để khoá mồ côi).</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

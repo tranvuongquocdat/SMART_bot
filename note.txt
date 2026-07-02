@@ -108,3 +108,52 @@ Note:
   - nhớ check cả phần superadmin xem tối ưu chưa
   - thiết kế limit của các gói và price tham khảo luôn, có thanh toán theo 1 tháng, 3 tháng, 1 năm các kiểu, phần config này tôi có thể chỉnh ở trang Superadmin
   - tối ưu lại trang superadmin luôn cho trực quan và dễ sử dụng
+
+
+  Note:
+  - Cân nhắc kỹ các yếu tố sau khi build phần core cho hệ thống này:
+    - 1 là các tin nhắn ở dạng lưu trữ, ko phải tin nhắn nào cũng có ý nghĩa như nhau, và số lượng rất nhiều, nếu tin nhắn nào cũng được inject xử lý thì sẽ 
+    rất tốn token và cũng như làm nhiễu, chủ yếu là tốn token, tốn tiền
+    - cái thứ 2 là khi hỏi thì sợ bị miss
+    - cái thứ 3 là tốc độ, cái trải nghiệm mà câu hỏi dù đơn giản hay phức tạp đều trả lời dài thì rất dở hơi
+    - tiếp nữa là phần core code cần code lean, siêu lean để tương lai mở rộng giải pháp, vd có các version thì chỉ cần mở rộng các module là được, ko code lại
+    - tiếp nữa là tối ưu phần tool và inject các integration ntn cho hợp lý
+    - có hệ thống nào cơ chế tương tự ntn đang được dùng ngon chưa, kiểu là lắng nghe mọi thứ nma vẫn tối ưu khi trả lời ấy
+    - có một số prompt có nên được để cho boss set up ko
+    - nói chung là cần nghiên cứu kỹ và đưa ra phương pháp tiếp cận tối ưu
+    - và ước lượng được: chi phí token tốn cho mỗi lần request, thời gian phản hồi, và khả năng tới đâu, vd follow task, reminder, calendar từ chat ổn ko, hoặc đánh giá hiệu suất công việc của team?
+    - có nên build bộ lưu trữ và các tool để AI có khả năng kiểm soát memory ko
+    - có nên có cơ chế kiểu skill, claude.md hay các cơ chế khác để phù hợp ko
+    - tôi còn mơ hồ về hệ thống này quá, tìm hiểu và làm rõ từng phần từ top to bottom, tức là chốt từ rộng đến bé, chứ đừng có một lúc đi hẳn vào sâu quá, làm tôi sẽ bị rối và khó quyết đinh
+
+
+    note:
+    - khi boss chọn provider thì tự load list model luôn, có thể thêm custom provider như đã bàn lúc trước
+    - có hỗ trợ self hosted models
+    - thông báo vd quá số tool được dùng lại hiện tiếng anh dù đang set là tiếng việt
+
+    note:
+    - cách làm việc với AI:
+      - cần thêm thao khảo của các nguồn khác, thêm pros and cons
+      - và self review lại đề xuất của bản thân, cần tự phản biện lại quyết định của bản thân
+
+    note:
+    - Thêm phần usage thành kiểu biểu đồ để dễ follow, vẫn hiện theo list nma thêm biểu đồ
+    - phần usage ko chỉ rõ là model nào tốn bao nhiêu tiền, hiển thị chung chung quá
+    - có thể sẽ cần là: 
+    - giao diện phần config model bị xấu quá
+      - với model chi phí rõ ràng thì config sẵn
+      - với model không thể tìm được thông tin thì thêm để boss config bằng tay, sau đó sẽ tính dựa trên đó
+
+    Note về trang quản lý model:
+    - có phần hiện mở ra chi tiết để quản lý như phần nhóm, trong đó quản lý chi tiết thông số từng model
+    - mỗi model là 1 thẻ, chọn active hoặc không active, có hiện khả năng từng model: text, vision, thinking,...
+    - có thể add nhiều model cùng 1 provider thành nhiều thẻ vd gpt 4.1 vs gpt 5.4 mini là thành 2 thẻ, hiện cột chi phí luôn cho dễ cân đối
+    - như vậy sẽ gọn hơn vì thông tin chi tiết từng model sẽ ở tab chi tiết để chỉnh sửa, nút icon edit
+    - có nút thêm model, ở đó mới có các option chọn provider sẵn, hay custom các thứ
+
+    - phần dashboard bị kiểu cứng và không được functional lắm, và việc nó hiển thị hiện tại cũng đang hơi rối, cân nhắc cho thêm vài biểu đồ cho linh hoạt, và click được, vd nhóm click được, hoặc cân nhắc đổi qua các thông tin khác hữu ích hơn
+    VD như là các step để set up trong first set up chẳng hạn, kiểu set up tour ấy
+
+
+    

@@ -170,6 +170,28 @@ không cần đập đi. Vấn đề nằm ở ~8 mắt xích cụ thể, liệt
 11. **Eval trước khi tinh chỉnh tiếp**: bộ ~50 câu hỏi thật từ nhóm thật + LLM-as-judge; mọi thay đổi
     P1/P2 phải đo trên bộ này. (Bài học Anthropic multi-agent: outcome-based eval là hạ tầng bắt buộc.)
 
+### P2.5 — Sổ tay tự quản theo từng sếp (agent-managed notebook)
+
+Cho agent quyền CRUD lên một "sổ tay" riêng per-boss để tự học cách ghi chép fit với từng sếp
+(mối quan tâm lặp lại, bản đồ nhân sự, ngữ cảnh dự án, meta-note "sếp hay hỏi lại X").
+Pattern đã chứng minh: Anthropic memory tool (+39% agentic search), Letta MemFS (74% LoCoMo),
+Claude Code auto-memory (production, default-on).
+
+- Hai tầng tách bạch: task/reminder/action_items giữ schema cứng (system-of-record, chạy scheduler/UI);
+  notebook là tầng tri thức mềm bên trên. Agent KHÔNG được sửa tầng cứng qua notebook.
+- Triển khai: bảng `agent_notebook` (boss_id, section, content) + `agent_notebook_revisions`;
+  tools `notebook_read/write/search`; index sổ ≤200 dòng nằm trong vùng prompt cache cố định;
+  dreaming job tỉa sổ định kỳ.
+- Bắt buộc: revision log mọi lần agent sửa (bài học Dreaming — no silent rewrite); UI cho sếp
+  xem/sửa sổ (trust + product feature); skeleton có khuôn thay vì tự do hoàn toàn; provenance +
+  coi note là DATA không phải INSTRUCTION (chống injection từ thành viên nhóm).
+
+Ghi chú liên quan: với lớp câu hỏi tổng hợp ("mọi vấn đề dự án X 3 tháng qua"), ước tính 40–60%
+ở mục trên là cho multi-hop trên dữ liệu thô (điều kiện HERB). Khi có lớp note chưng cất + gắn
+`topic/project` cho note (thêm trường này ở P1), giai đoạn bot đã chạy ổn định kỳ vọng nâng lên
+~65–80%; hỏi ngược về thời kỳ trước khi add bot vẫn là bài khó. Trần chất lượng tổng hợp =
+recall lúc ghi — cái không được note thì không tổng hợp được.
+
 ### KHÔNG làm (bây giờ)
 
 - Temporal knowledge graph (Zep/Graphiti): overkill ở quy mô hiện tại, thêm độ trễ ingest; số liệu
@@ -179,6 +201,53 @@ không cần đập đi. Vấn đề nằm ở ~8 mắt xích cụ thể, liệt
 - Thay Qdrant bằng pgvector hay ngược lại: không phải bottleneck; giữ nguyên.
 
 ---
+
+## 4.5. Kỹ thuật retrieval chi tiết cho dữ liệu chat (research vòng 2 — xong 1/3 nhánh)
+
+### Đã có bằng chứng (nhánh "chat retrieval techniques") — ưu tiên theo ROI
+
+1. **Query-understanding call — gộp 3 việc vào 1 lệnh LLM (structured output)** — DO NOW, gain/giờ công cao nhất.
+   (a) rewrite câu hỏi nối tiếp về standalone (giải "còn cái kia thì sao?" — anaphora/coreference);
+   (b) parse thời gian tương đối ("tuần trước", "hồi tháng 3") → `{date_from, date_to}` + temporal_mode;
+   (c) resolve tên người → canonical id. Phải inject ngày hiện tại + timezone + tuần VN (T2–CN).
+   Bằng chứng: LLM4CS +18% rel. (CAsT); CHIQ +5.5% MRR; LongMemEval time-aware expansion +11.4% recall
+   temporal. → đây là P0/P1 mới, đứng TRƯỚC cả việc đổi embedding.
+
+2. **Contextual Retrieval (Anthropic) áp cho chat** — DO NOW.
+   (a) prepend metadata `[nhóm][người gửi][ngày][reply-to]` vào text TRƯỚC khi embed + index BM25 (~free);
+   (b) LLM sinh 1–2 câu "situating context"/chunk qua prompt cache (~$1/1M token, Haiku-class).
+   Bằng chứng gốc: contextual embeddings −35% failure; + contextual BM25 −49%; + reranker −67%.
+   Slack RAG thực tế +5–6% nhờ thread-chunking + metadata.
+
+3. **Chunk nhỏ + mở rộng cửa sổ/thread lúc đọc (small-to-big)** — DO NOW, ~free.
+   Index theo message/turn; lúc trả lời expand ±N message hoặc cả thread. LongMemEval: round-level +6% QA.
+
+4. **Gắn thread/topic-id cho tin nhắn lúc ingest bằng LLM (conversation disentanglement)** — DO NOW.
+   **FIX TRỰC TIẾP "context nhảy lộn xộn".** 1 lệnh LLM rẻ/tin nhắn (hoặc micro-batch): "gán vào thread
+   đang mở T1/T2… hay NEW", cho ~30 msg gần nhất + summary thread mở; lưu thread_id/topic_label vào
+   Postgres + Qdrant payload; đóng thread sau timeout. Chất lượng tagging: LLM zero-shot 0.90 Shen F-score
+   (arXiv 2510.22844); Def-DTS gán nhãn topic-shift ngang người (ACL 2025). Vận hành: xử lý incremental
+   tốt hơn nhồi cả transcript. (Lợi ích downstream QA: chỉ dấu mạnh, chưa benchmark end-to-end.)
+
+5. **Recency decay scoring** — DO khi payload đã có timestamp. Qdrant 1.14 Formula Query
+   (exp_decay/gauss/lin trên datetime). Hard filter cho khoảng tường minh; exp-decay boost cho
+   "tới đâu rồi/mới nhất". Cộng tính, semantic vẫn trội (giống Mem0).
+
+**Entity canonicalization (light)** — DO NOW: bảng `entities(person_id, canonical_name)` + `aliases`;
+ingest resolve mention bằng LLM (chọn trong alias list, seed từ roster nhóm); lưu `mentioned_person_ids[]`
+payload; query-time filter person_id + expand alias cho sparse. Không có thì filter `person=Đạt` rớt sạch
+"anh Đạt"/"Mr. Dat" (mất recall nhị phân).
+
+**SKIP (có bằng chứng phản đối):** semantic chunking (arXiv 2410.13070: fixed-size thường tốt hơn);
+late chunking (không bằng chứng chat, khóa model); HyDE (hallucination, nguy hiểm cho fact-bound personal
+data); full temporal KG/Graphiti (chi phí — xét lại nếu "deadline HIỆN TẠI của X" thành pain).
+
+### Còn thiếu (2 nhánh chết vì quota — reset 22:30, sẽ chạy lại)
+- **Embedding/reranker tốt nhất cho tiếng Việt**: có nên rời text-embedding-3-small? (bge-m3/voyage/
+  gemini-embedding; VN-MTEB; reranker đa ngữ + latency/giá; FTS Postgres cho tiếng Việt không tách từ).
+- **Tối ưu Qdrant native + vận hành**: datetime payload index (fix tận gốc lỗi lọc thời gian hậu kỳ);
+  hybrid Query API server-side; sparse BM42/SPLADE; batch API −50% cho job đêm; structured-output
+  reliability; model routing economics; eval tooling; chống prompt-injection.
 
 ## 5. Anti-patterns cần tránh (rút từ chính bài Dreaming + nghiên cứu)
 
