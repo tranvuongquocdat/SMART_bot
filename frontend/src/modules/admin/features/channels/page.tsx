@@ -28,7 +28,7 @@ import { ZaloQrDialog } from './zalo-qr-dialog';
 
 const PROVIDERS = ['zalo', 'telegram', 'lark'] as const;
 
-function ChannelCard({ channel }: { channel: Channel }) {
+function ChannelCard({ channel, onRelogin }: { channel: Channel; onRelogin?: () => void }) {
   const t = useT();
   const qc = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -74,6 +74,12 @@ function ChannelCard({ channel }: { channel: Channel }) {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
+              {onRelogin && (
+                <DropdownMenuItem onClick={onRelogin}>
+                  <Plug className="mr-2 h-4 w-4" />
+                  {t('channels.zaloRelogin')}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 className="text-destructive"
                 onClick={() => setConfirmOpen(true)}
@@ -166,7 +172,11 @@ export default function ChannelsPage() {
         ) : (
           <div className="flex flex-col gap-3">
             {channels.map(ch => (
-              <ChannelCard key={ch.provider} channel={ch} />
+              <ChannelCard
+                key={ch.provider}
+                channel={ch}
+                onRelogin={ch.provider === 'zalo' ? () => setZaloQrOpen(true) : undefined}
+              />
             ))}
           </div>
         )}

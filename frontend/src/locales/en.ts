@@ -130,6 +130,7 @@ export const en: Record<string, string> = {
   'channels.empty.title': 'No channels connected',
   'channels.empty.desc': 'Press a button above to connect Zalo, Telegram or Lark.',
   'channels.disconnect': 'Disconnect',
+  'channels.zaloRelogin': 'Scan QR to log in again',
   'channels.disconnectConfirm.title': 'Disconnect channel?',
   'channels.disconnectConfirm.desc': 'The bot will no longer work on {provider}.',
   'channels.disconnected': 'Channel disconnected.',
