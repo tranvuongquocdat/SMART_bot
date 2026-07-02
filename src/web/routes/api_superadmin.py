@@ -1685,8 +1685,6 @@ import json as _json  # noqa: E402
 
 from fastapi.responses import FileResponse  # noqa: E402
 
-from src.services.subscription import apply_plan_to_user  # noqa: E402
-
 
 @router.get("/subscription-requests")
 async def list_subscription_requests_sa(
@@ -1782,40 +1780,19 @@ async def approve_subscription_request(
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> dict:
-    async with db.acquire() as c:
-        req = await c.fetchrow(
-            "SELECT boss_id, plan_id, status, billing_months FROM subscription_requests WHERE id=$1",
-            req_id,
+    """Duyệt tay = một kênh xác nhận thanh toán. Webhook auto (SePay/PayOS...)
+    sau này gọi CÙNG confirm_and_activate — side-effect ở một chỗ duy nhất."""
+    from src.services.subscription_payment import (
+        RequestNotPending,
+        confirm_and_activate,
+    )
+
+    try:
+        await confirm_and_activate(
+            db, req_id, overrides=payload.get("overrides") or {}
         )
-    if not req:
-        raise HTTPException(404, "Request not found")
-    if req["status"] != "pending":
+    except RequestNotPending:
         raise HTTPException(400, "Request is not pending")
-
-    overrides = payload.get("overrides") or {}
-    await apply_plan_to_user(
-        db, req["boss_id"], req["plan_id"], overrides,
-        billing_months=req["billing_months"],
-    )
-
-    async with db.acquire() as c:
-        await c.execute(
-            "UPDATE subscription_requests SET status='approved', reviewed_at=NOW() WHERE id=$1",
-            req_id,
-        )
-        plan_label = await c.fetchval(
-            "SELECT label FROM plans WHERE id=$1", req["plan_id"]
-        )
-    from src.services import notifications
-
-    await notifications.notify_boss(
-        db,
-        req["boss_id"],
-        kind="subscription",
-        title="Plan subscription approved",
-        body=f"Your plan {plan_label or ''} has been activated.".strip(),
-        link="/app/admin/subscription",
-    )
     return {"status": "approved", "request_id": req_id}
 
 
@@ -1829,32 +1806,14 @@ async def reject_subscription_request(
     db: asyncpg.Pool = Depends(get_db),
     _: BossContext = Depends(require_superadmin),
 ) -> dict:
-    async with db.acquire() as c:
-        req = await c.fetchrow(
-            "SELECT boss_id, status FROM subscription_requests WHERE id=$1", req_id
-        )
-        if not req or req["status"] != "pending":
-            raise HTTPException(400, "Request not pending or not found")
-        await c.execute(
-            """
-            UPDATE subscription_requests
-            SET status='rejected', reviewed_at=NOW(), reviewer_note=$2
-            WHERE id=$1
-            """,
-            req_id,
-            payload.get("reviewer_note", ""),
-        )
-    from src.services import notifications
+    from src.services.subscription_payment import RequestNotPending, reject_request
 
-    note = (payload.get("reviewer_note") or "").strip()
-    await notifications.notify_boss(
-        db,
-        req["boss_id"],
-        kind="subscription",
-        title="Subscription request rejected",
-        body=note or "Please double-check your payment details and submit again.",
-        link="/app/admin/subscription",
-    )
+    try:
+        await reject_request(
+            db, req_id, reviewer_note=payload.get("reviewer_note", "")
+        )
+    except RequestNotPending:
+        raise HTTPException(400, "Request not pending or not found")
     return {"status": "rejected", "request_id": req_id}
 
 
