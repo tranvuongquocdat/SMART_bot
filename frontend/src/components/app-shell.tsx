@@ -16,17 +16,21 @@ import { useT } from '@/lib/i18n';
 
 export type NavItem = { label: string; href: string; icon: LucideIcon };
 export type NavSection = { label: string; items: NavItem[] };
+// badges: đếm việc chờ theo href (vd request gói pending) — hiện pill cạnh label.
+export type NavBadges = Record<string, number | undefined>;
 
 export function AppShell({
   nav,
   me,
   breadcrumb,
   children,
+  badges,
 }: {
   nav: NavSection[];
   me: Me;
   breadcrumb: ReactNode;
   children: ReactNode;
+  badges?: NavBadges;
 }) {
   const t = useT();
   const [collapsed, setCollapsed] = useState(false);
@@ -132,6 +136,11 @@ export function AppShell({
                       strokeWidth={1.8}
                     />
                     {!collapsed && <span className="truncate">{t(item.label)}</span>}
+                    {!collapsed && (badges?.[item.href] ?? 0) > 0 && (
+                      <span className="ml-auto shrink-0 rounded-full bg-[hsl(var(--primary))] px-1.5 py-px text-[10px] font-semibold leading-4 text-primary-foreground tabular-nums">
+                        {badges![item.href]}
+                      </span>
+                    )}
                   </Link>
                 );
               })}

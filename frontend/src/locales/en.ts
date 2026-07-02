@@ -341,6 +341,7 @@ export const en: Record<string, string> = {
   'sub.req.transferContent': 'Transfer note',
   'sub.req.copy': 'Copy',
   'sub.req.copied': 'Copied {label}',
+  'sub.req.scanQr': 'Scan with your banking app — amount and note are prefilled.',
   'sub.req.hint': 'Transfer with the exact note above for faster approval.',
   'sub.req.amount': 'Transferred amount (VND)',
   'sub.req.proof': 'Payment proof',

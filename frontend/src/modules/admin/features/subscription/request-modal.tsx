@@ -113,6 +113,18 @@ export function RequestModal({
               <span className="font-semibold tabular-nums">{fmtVnd(expectedPrice)}</span>
             </p>
           )}
+          {/* QR VietQR — quét là điền sẵn số tiền + nội dung, khỏi gõ tay */}
+          {payInfo?.bank_bin && payInfo?.bank_account_number && (
+            <div className="flex flex-col items-center gap-1.5 rounded-lg border bg-white p-3">
+              <img
+                src={`https://img.vietqr.io/image/${payInfo.bank_bin}-${payInfo.bank_account_number}-qr_only.png?amount=${expectedPrice ?? ''}&addInfo=${encodeURIComponent(payInfo.transfer_content ?? '')}&accountName=${encodeURIComponent(payInfo.bank_account_name ?? '')}`}
+                alt="VietQR"
+                className="h-44 w-44"
+                loading="lazy"
+              />
+              <p className="text-[11px] text-neutral-500">{t('sub.req.scanQr')}</p>
+            </div>
+          )}
           {/* Thông tin chuyển khoản — gen sẵn, khách chỉ copy */}
           <div className="rounded-lg border divide-y bg-card">
             {payInfo?.bank_account_number && (

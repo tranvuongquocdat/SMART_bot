@@ -1739,6 +1739,21 @@ async def list_subscription_requests_sa(
     return result
 
 
+# Khai báo TRƯỚC route {req_id} — không thì 'pending-count' bị nuốt vào int param.
+@router.get("/subscription-requests/pending-count")
+async def pending_subscription_count(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    """Badge trên nav: số request chờ duyệt (thanh toán manual = superadmin
+    phải thấy ngay có việc, không thì khách chờ vô hạn)."""
+    async with db.acquire() as c:
+        n = await c.fetchval(
+            "SELECT count(*) FROM subscription_requests WHERE status='pending'"
+        )
+    return {"count": int(n)}
+
+
 @router.get("/subscription-requests/{req_id}")
 async def get_subscription_request_sa(
     req_id: int,

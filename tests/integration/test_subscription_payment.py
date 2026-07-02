@@ -152,3 +152,13 @@ async def test_activation_failure_releases_claim(clean_db, monkeypatch):
     # và sau khi hết lỗi thì duyệt lại được bình thường
     monkeypatch.undo()
     await confirm_and_activate(clean_db, req)
+
+
+def test_pending_count_endpoint_not_swallowed_by_req_id_route(
+    client, logged_in_superadmin, clean_db
+):
+    """Route literal 'pending-count' phải khai báo TRƯỚC '/{req_id}' —
+    lock để refactor sau không đảo thứ tự làm 422."""
+    r = client.get("/api/v1/superadmin/subscription-requests/pending-count")
+    assert r.status_code == 200
+    assert isinstance(r.json()["count"], int)

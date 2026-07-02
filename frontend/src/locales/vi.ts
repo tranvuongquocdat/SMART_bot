@@ -341,6 +341,7 @@ export const vi: Record<string, string> = {
   'sub.req.transferContent': 'Nội dung chuyển khoản',
   'sub.req.copy': 'Sao chép',
   'sub.req.copied': 'Đã sao chép {label}',
+  'sub.req.scanQr': 'Quét mã bằng app ngân hàng — số tiền và nội dung đã điền sẵn.',
   'sub.req.hint': 'Chuyển khoản đúng nội dung trên để được duyệt nhanh.',
   'sub.req.amount': 'Số tiền chuyển khoản (VND)',
   'sub.req.proof': 'Minh chứng chuyển khoản',
