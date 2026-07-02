@@ -771,6 +771,25 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
 > 6. Nếu payload thật lệch fixture (bot im/lỗi parse) → xem log server `zalo.bridge[..]`, báo lại để đối chiếu
 >    `tests/fixtures/zalo/scenarios/` — sửa fixture, không sửa test.
 
+**2026-07-02 — COMPLIANCE (erasure + retention) + EVAL UPGRADE ✅ (cùng nhánh `feat/zalo-automation`).**
+- **Spec:** `docs/superpowers/specs/2026-07-02-compliance-erasure-retention-design.md`.
+- **DataErasure service:** `erase_group` (theo nhóm, boss-scoped) + `erase_boss` (right-to-erasure toàn bộ)
+  — Postgres + Qdrant cùng sạch, trả counts; users row ANONYMIZE thay vì xoá (giữ FK audit/billing).
+  `DELETE /admin/groups/{id}` giờ xoá THẬT dữ liệu nhóm (trước chỉ xoá row group_notes — messages/knowledge/
+  vector sống sót sau "xoá"). Superadmin: `POST /superadmin/bosses/{id}/erase` + audit log. 5 integration test.
+- **Retention TTL:** job `raw_message_retention` (cron 03:00) xoá `messages`+`outbound_messages` quá
+  `RAW_MESSAGE_RETENTION_DAYS` (mặc định 180, 0=tắt), batch 5000. Spine knowledge KHÔNG đụng; provenance
+  mất theo tin thô (FK cascade) = chấp nhận.
+- **Eval upgrade (làm TRƯỚC khi thử Groq — quyết định user):** `harness.py gold [path] [label]` lưu run
+  JSON vào `scripts/eval_runs/` (pass/fail + latency/case + judge score + token cost từ token_usage delta);
+  **LLM-judge** advisory (không gate pass/fail; rubric xử đúng case anti-hallucination "không có thông tin");
+  **`harness.py compare a.json b.json`** = bảng so run + REGRESS/FIXED + judge Δ — công cụ quyết định khi đổi
+  prompt/swap model (swap = đổi llm_routes rồi chạy gold label khác). **Baseline gpt-5.4-mini đã chụp:**
+  11/11 · judge_avg 9.45 · p50 3.8s · ~$0.06/run (~75k token).
+- **Trạng thái tổng nhánh `feat/zalo-automation` (7 commit):** spec zalo + 3 tầng test + connect-flow fixes
+  + consent PDPL + behavior locks + erasure/retention + eval. pytest **525 passed** · gold 11/11 · multipass
+  6/6 · workload 6/6 · zalo 12/12. Sẵn sàng review/merge; việc tay còn lại duy nhất = smoke checklist ở trên.
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).
