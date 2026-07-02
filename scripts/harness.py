@@ -9,6 +9,9 @@ Commands:
   wipe-knowledge   hard-delete knowledge rows for the boss (clean extraction test).
   dump             print knowledge_items for the boss.
   ask "<q>"        boss asks (mention_bot) in group; prints bot reply.
+  zalo             e2e kênh Zalo trên fake bridge: tự spawn server (cổng 24815),
+                   seed acc+boss, bơm hội thoại, extract, Q&A, reminder người
+                   chưa onboard — không cần acc Zalo thật.
   teardown         delete the test group + its messages/knowledge.
 """
 import asyncio
@@ -500,6 +503,245 @@ async def workload():
     sys.exit(1 if fails else 0)
 
 
+# ---------------------------------------------------------------------------
+# ZALO E2E (tầng 3 — spec zalo-automation): app THẬT + ZaloAdapter THẬT +
+# fake_bridge.js. Tự spawn uvicorn riêng (cổng 24815) với env fake-bridge,
+# tự seed boss/bot_account/assignment/account_links, bơm hội thoại qua control
+# socket, extract, hỏi bot, assert reply qua command-log của bridge.
+# Không cần acc Zalo thật. Chạy lặp lại được (mỗi lần seed boss mới).
+# ---------------------------------------------------------------------------
+
+ZALO_PORT = 24815
+ZALO_BASE = f"http://localhost:{ZALO_PORT}/test"
+ZALO_GID = None  # sinh mỗi lần chạy (id nhóm zalo giả, digits ≥19 ký tự)
+ZALO_BOSS_UID = "900"
+ZALO_QUICK_ACKS = {_QUICK_ACK, "Em xem rồi trả lời ngay ạ."}
+
+ZALO_CONVO = [
+    # boss nói trước → ensure_tracked (giống luồng thật: sếp chào nhóm)
+    ("boss", "Chào team, đây là nhóm dự án Zeta. Em bot sẽ hỗ trợ ghi nhận công việc nhé."),
+    ("an",   "Em An nhận phần backend Zeta, dùng FastAPI, deadline 20/7 nhé sếp."),
+    ("an",   "Phần deploy em sẽ dùng Docker trên VPS công ty."),
+    ("boss", "Ok. Tài liệu API nhớ viết song song nhé."),
+]
+
+
+def _zalo_msg(uid, name, text, *, gid, mid, mentioned=False):
+    """Event 'message' đúng shape bridge.js thật emit (payload đã normalize)."""
+    import time as _t
+    ts = int(_t.time() * 1000)
+    return {"event": "message", "own_uid": "999", "data": {
+        "type": 1, "threadId": gid, "thread_id": gid, "thread_type": "group",
+        "uidFrom": uid, "sender_uid": uid, "dName": name, "sender_name": name,
+        "msg_id": mid, "msgId": mid, "ts": ts, "ts_ms": ts,
+        "text": text, "content": text, "content_type": "text", "media_url": None,
+        "mentions": [{"uid": "999", "pos": 0, "len": 4}] if mentioned else [],
+        "is_mentioned": mentioned, "is_forwarded": False, "reply_to": None,
+    }}
+
+
+async def _zalo_inject(sock_path, obj):
+    r, w = await asyncio.open_unix_connection(sock_path)
+    w.write((json.dumps({"inject": obj}) + "\n").encode())
+    await w.drain()
+    w.close()
+
+
+def _bridge_sends(out_path, skip=0):
+    """Command 'send' bridge đã nhận (bỏ quick-ack), từ dòng thứ `skip`."""
+    import os
+    if not os.path.exists(out_path):
+        return []
+    lines = open(out_path).read().splitlines()
+    sends = []
+    for ln in lines[skip:]:
+        try:
+            c = json.loads(ln)
+        except ValueError:
+            continue
+        if c.get("method") == "send" and c["params"].get("text") not in ZALO_QUICK_ACKS:
+            sends.append(c["params"])
+    return sends
+
+
+def _bridge_lines(out_path):
+    import os
+    if not os.path.exists(out_path):
+        return 0
+    return len(open(out_path).read().splitlines())
+
+
+async def _zalo_wait_sends(out_path, skip, n=1, timeout=120):
+    import time as _t
+    deadline = _t.time() + timeout
+    while _t.time() < deadline:
+        sends = _bridge_sends(out_path, skip)
+        if len(sends) >= n:
+            return sends
+        await asyncio.sleep(0.5)
+    return _bridge_sends(out_path, skip)
+
+
+async def zalo():
+    import os
+    import signal as _sig
+    import subprocess
+    import tempfile
+    import time as _t
+    import urllib.error
+    import urllib.request
+    import uuid as _uuid
+
+    gid = "19007770001112223" + str(int(_t.time()))[-3:]
+    sock_dir = tempfile.mkdtemp(prefix="zh")
+    sock = os.path.join(sock_dir, "c.sock")
+    out_path = os.path.join(sock_dir, "cmds.jsonl")
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    fake_bridge = os.path.join(repo_root, "tests", "fixtures", "zalo", "fake_bridge.js")
+
+    # --- seed: boss + bot_account zalo + assignment + link acc chính của sếp ---
+    conn = await asyncpg.connect(DSN)
+    bid = await conn.fetchval(
+        "INSERT INTO users(email, name, role) VALUES($1, 'Sếp Zalo', 'boss') RETURNING id",
+        f"zalo-harness-{_uuid.uuid4().hex[:8]}@local.test")
+    acc_id = await conn.fetchval(
+        "INSERT INTO bot_accounts(provider, provider_user_id, account_kind, ownership, "
+        "owner_boss_id, status) VALUES('zalo', $1, 'personal', 'boss_owned', $2, 'active') "
+        "RETURNING id", f"999-{bid}", bid)
+    await conn.execute(
+        "INSERT INTO bot_account_assignments(boss_id, provider, bot_account_id, "
+        "assignment_kind, status) VALUES($1, 'zalo', $2, 'boss_owned', 'active')", bid, acc_id)
+    await conn.execute(
+        "INSERT INTO account_links(boss_id, provider, provider_user_id) VALUES($1, 'zalo', $2) "
+        "ON CONFLICT (provider, provider_user_id) DO UPDATE SET boss_id=EXCLUDED.boss_id",
+        bid, ZALO_BOSS_UID)
+    await conn.close()
+
+    # --- spawn server riêng với fake bridge ---
+    env = dict(os.environ,
+               ZALO_BRIDGE_SCRIPT=fake_bridge,
+               FAKE_BRIDGE_CTRL=sock, FAKE_BRIDGE_OUT=out_path,
+               FAKE_BRIDGE_OWN_ID="999",
+               ENABLE_WEB_TEST_CHANNEL="true")
+    log_f = open(os.path.join(sock_dir, "server.log"), "w")
+    srv = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "src.main:app",
+         "--port", str(ZALO_PORT), "--log-level", "warning"],
+        cwd=repo_root, env=env, stdout=log_f, stderr=log_f)
+    print(f"server pid={srv.pid} port={ZALO_PORT} boss_id={bid} gid={gid}\n"
+          f"bridge log: {out_path}")
+
+    checks, fails = [], []
+
+    def chk(name, ok, detail: object = ""):
+        checks.append(name)
+        print(f"[{'PASS' if ok else 'FAIL'}] {name}{'' if ok else '  ' + str(detail)}")
+        if not ok:
+            fails.append(name)
+
+    try:
+        # đợi server + fake bridge (boot_inbound_for_all spawn bridge cho acc active)
+        deadline = _t.time() + 60
+        up = False
+        while _t.time() < deadline:
+            try:
+                urllib.request.urlopen(f"{ZALO_BASE}/api/chats/__probe__/messages", timeout=2)
+                up = True
+                break
+            except (urllib.error.URLError, ConnectionError):
+                await asyncio.sleep(0.5)
+        chk("server lên", up)
+        deadline = _t.time() + 30
+        while _t.time() < deadline and not os.path.exists(sock):
+            await asyncio.sleep(0.3)
+        chk("fake bridge lên (inbound tự start cho acc active)", os.path.exists(sock))
+        if fails:
+            raise RuntimeError("hạ tầng không lên — dừng sớm")
+
+        # --- bơm hội thoại nhóm ---
+        who = {"boss": (ZALO_BOSS_UID, "Sếp Minh"), "an": ("111", "An")}
+        for i, (role, text) in enumerate(ZALO_CONVO):
+            uid, name = who[role]
+            await _zalo_inject(sock, _zalo_msg(uid, name, text, gid=gid, mid=f"zm{i}"))
+            await asyncio.sleep(0.1)
+
+        conn = await asyncpg.connect(DSN)
+        deadline = _t.time() + 20
+        n_msgs = 0
+        while _t.time() < deadline:
+            n_msgs = await conn.fetchval(
+                "SELECT count(*) FROM messages WHERE provider='zalo' AND chat_id=$1 "
+                "AND boss_id=$2", gid, bid)
+            if n_msgs >= len(ZALO_CONVO):
+                break
+            await asyncio.sleep(0.3)
+        await conn.close()
+        chk(f"inbound qua adapter thật: {len(ZALO_CONVO)} tin persist",
+            n_msgs >= len(ZALO_CONVO), f"got {n_msgs}")
+
+        # --- extract trên provider zalo ---
+        body = json.dumps({"chat_id": gid, "reset": True, "provider": "zalo"}).encode()
+        req = urllib.request.Request(f"{ZALO_BASE}/api/extract", data=body,
+                                     headers={"Content-Type": "application/json"},
+                                     method="POST")
+        with urllib.request.urlopen(req, timeout=300) as r:
+            fired = json.loads(r.read().decode())
+        chk("extract fired cho boss zalo", bid in fired.get("fired_for", []), fired)
+
+        conn = await asyncpg.connect(DSN)
+        k_rows = await conn.fetch(
+            "SELECT content, assignee_name FROM knowledge_items WHERE boss_id=$1", bid)
+        await conn.close()
+        an_items = [r for r in k_rows if r["assignee_name"] == "An"]
+        chk("spine: trích được việc của An từ hội thoại zalo",
+            bool(an_items), f"{len(k_rows)} items, assignees="
+            f"{[r['assignee_name'] for r in k_rows]}")
+
+        # --- Q&A: sếp mention bot hỏi ---
+        skip = _bridge_lines(out_path)
+        await _zalo_inject(sock, _zalo_msg(
+            ZALO_BOSS_UID, "Sếp Minh", "@bot ai lo phần backend Zeta, deadline khi nào?",
+            gid=gid, mid="zq1", mentioned=True))
+        sends = await _zalo_wait_sends(out_path, skip)
+        ans = "\n".join(s["text"] for s in sends)
+        miss = [t for t in ["An", "20/7"] if _token_missing(t, ans)]
+        chk("Q&A qua kênh zalo: trả lời có An + 20/7", bool(sends) and not miss,
+            f"missing={miss} :: {ans[:120]}")
+        chk("reply đi đúng nhóm (thread_kind=group, đúng gid)",
+            all(s["thread_kind"] == "group" and s["chat_id"] == gid for s in sends),
+            sends and sends[0])
+
+        # --- hành vi: nhắc người CHƯA onboard → ghi nhận + nhắc TẠI NHÓM ---
+        skip = _bridge_lines(out_path)
+        await _zalo_inject(sock, _zalo_msg(
+            ZALO_BOSS_UID, "Sếp Minh",
+            "@bot nhắc anh Tân chuẩn bị slide demo vào 15h thứ Ba tuần sau nhé",
+            gid=gid, mid="zq2", mentioned=True))
+        sends = await _zalo_wait_sends(out_path, skip)
+        ans = "\n".join(s["text"] for s in sends)
+        conn = await asyncpg.connect(DSN)
+        rem = await conn.fetchrow(
+            "SELECT scope, chat_id, provider, text FROM scheduled_reminders "
+            "WHERE boss_id=$1 ORDER BY id DESC LIMIT 1", bid)
+        await conn.close()
+        chk("reminder cho người chưa onboard: có row scope=group đúng nhóm",
+            rem is not None and rem["scope"] == "group" and rem["chat_id"] == gid,
+            dict(rem) if rem else "no reminder row")
+        chk("bot xác nhận trong nhóm, nhắc tên Tân, không đòi onboard",
+            bool(sends) and not _token_missing("Tân", ans), f":: {ans[:120]}")
+
+        n_ok = len(checks) - len(fails)
+        print(f"\n=== zalo: {n_ok}/{len(checks)} PASS (boss_id={bid} gid={gid}) ===")
+    finally:
+        srv.send_signal(_sig.SIGTERM)
+        try:
+            srv.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            srv.kill()
+        log_f.close()
+    sys.exit(1 if fails else 0)
+
+
 async def teardown():
     s = _load()
     conn = await asyncpg.connect(DSN)
@@ -534,6 +776,8 @@ async def main():
         await multipass()
     elif cmd == "workload":
         await workload()
+    elif cmd == "zalo":
+        await zalo()
     elif cmd == "teardown":
         await teardown()
     else:
