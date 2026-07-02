@@ -790,6 +790,19 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
   + consent PDPL + behavior locks + erasure/retention + eval. pytest **525 passed** · gold 11/11 · multipass
   6/6 · workload 6/6 · zalo 12/12. Sẵn sàng review/merge; việc tay còn lại duy nhất = smoke checklist ở trên.
 
+**2026-07-02 — BILLING: payment seam + polish (MERGED main — zalo-automation đã merge cùng ngày).**
+- **Khảo sát:** gói/thanh toán đã build ~90% từ spec 06-08 (plans+prices_json CRUD superadmin, boss chọn
+  gói/kỳ 1-3-12 tháng, upload minh chứng, duyệt/từ chối, expiry job). User chốt: **GIỮ MANUAL**, code mở
+  đường thanh toán tự động đa kênh sau.
+- **Payment seam (migration 0020):** `subscription_payment.confirm_and_activate/reject_request` = đường
+  side-effect DUY NHẤT (claim pending → áp gói theo billing_months → notify vi/en theo ui_language boss —
+  trước đó notification hardcode English). Webhook tương lai (SePay/Casso/PayOS) gọi CÙNG hàm với
+  `provider` + `provider_txn_id`; duyệt tay = provider='manual_bank'. Idempotent (UPDATE điều kiện — duyệt
+  đúp/webhook trùng chỉ kích hoạt 1 lần; unique index (provider,txn) chặn replay); fail sau claim → nhả về
+  pending. 5 integration test.
+- **UX:** modal thanh toán render **ảnh VietQR** (img.vietqr.io, điền sẵn số tiền + nội dung CK);
+  nav superadmin có **badge số request pending** (poll 60s) — luồng duyệt manual không còn mù việc mới.
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).
