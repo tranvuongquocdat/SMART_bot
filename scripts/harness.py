@@ -679,6 +679,12 @@ async def zalo():
         chk(f"inbound qua adapter thật: {len(ZALO_CONVO)} tin persist",
             n_msgs >= len(ZALO_CONVO), f"got {n_msgs}")
 
+        # --- consent notice (PDPL): đúng 1 tin vào nhóm khi bắt đầu ghi nhận ---
+        _consent = lambda: [s for s in _bridge_sends(out_path)  # noqa: E731
+                            if "Tin nhắn trong nhóm sẽ được ghi nhận" in s["text"]]
+        chk("consent notice: 1 tin vào đúng nhóm khi bắt đầu ghi nhận",
+            len(_consent()) == 1 and _consent()[0]["chat_id"] == gid, _consent())
+
         # --- extract trên provider zalo ---
         body = json.dumps({"chat_id": gid, "reset": True, "provider": "zalo"}).encode()
         req = urllib.request.Request(f"{ZALO_BASE}/api/extract", data=body,
@@ -729,6 +735,9 @@ async def zalo():
             dict(rem) if rem else "no reminder row")
         chk("bot xác nhận trong nhóm, nhắc tên Tân, không đòi onboard",
             bool(sends) and not _token_missing("Tân", ans), f":: {ans[:120]}")
+
+        chk("consent notice: cuối phiên vẫn chỉ 1 tin (không gửi lặp)",
+            len(_consent()) == 1, _consent())
 
         n_ok = len(checks) - len(fails)
         print(f"\n=== zalo: {n_ok}/{len(checks)} PASS (boss_id={bid} gid={gid}) ===")
