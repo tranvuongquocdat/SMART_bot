@@ -601,6 +601,12 @@ async def zalo():
 
     # --- seed: boss + bot_account zalo + assignment + link acc chính của sếp ---
     conn = await asyncpg.connect(DSN)
+    # Acc harness của các lần chạy trước còn 'active' → server mới sẽ spawn
+    # NHIỀU fake bridge cùng tranh 1 control socket (con bind cuối thắng, race).
+    # Pause hết acc harness cũ để chỉ acc của run này chạy.
+    await conn.execute(
+        "UPDATE bot_accounts SET status='paused' "
+        "WHERE provider='zalo' AND provider_user_id LIKE '999-%'")
     bid = await conn.fetchval(
         "INSERT INTO users(email, name, role) VALUES($1, 'Sếp Zalo', 'boss') RETURNING id",
         f"zalo-harness-{_uuid.uuid4().hex[:8]}@local.test")
@@ -738,6 +744,22 @@ async def zalo():
 
         chk("consent notice: cuối phiên vẫn chỉ 1 tin (không gửi lặp)",
             len(_consent()) == 1, _consent())
+
+        # --- bridge báo session chết → DB phải chuyển logged_out (UI thấy được) ---
+        await _zalo_inject(sock, {"event": "disconnected",
+                                  "data": {"reason": "session expired", "fatal": True}})
+        conn = await asyncpg.connect(DSN)
+        st = None
+        deadline = _t.time() + 10
+        while _t.time() < deadline:
+            st = await conn.fetchval(
+                "SELECT status FROM bot_accounts WHERE id=$1", acc_id)
+            if st == "logged_out":
+                break
+            await asyncio.sleep(0.3)
+        await conn.close()
+        chk("status sync: disconnect fatal → bot_accounts.status='logged_out'",
+            st == "logged_out", f"status={st}")
 
         n_ok = len(checks) - len(fails)
         print(f"\n=== zalo: {n_ok}/{len(checks)} PASS (boss_id={bid} gid={gid}) ===")

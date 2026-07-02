@@ -1671,8 +1671,29 @@ async def zalo_qr_login_start(
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
-    """Mở phiên QR login để boss quét bằng acc Zalo phụ (acc nghe ngóng)."""
-    await _check_channel_slot(db, ctx, "zalo")
+    """Mở phiên QR login để boss quét bằng acc Zalo phụ (acc nghe ngóng).
+
+    Re-login được phép khi boss ĐÃ có acc zalo boss_owned (session hết hạn /
+    logged_out là chuyện thường với acc cá nhân — chặn ở đây là boss kẹt luôn,
+    phải gỡ kênh mới kết nối lại được). Chỉ chặn khi kênh zalo hiện tại là acc
+    pool (phải gỡ trước) hoặc khi kết nối MỚI vượt limit gói.
+    """
+    async with db.acquire() as c:
+        existing_kind = await c.fetchval(
+            """
+            SELECT assignment_kind FROM bot_account_assignments
+            WHERE boss_id=$1 AND provider='zalo' AND status IN ('active', 'pending_accept')
+            """,
+            ctx.boss_id,
+        )
+    if existing_kind is None:
+        await _check_channel_slot(db, ctx, "zalo")
+    elif existing_kind != "boss_owned":
+        raise HTTPException(
+            409,
+            tr(ctx, vi="Kênh Zalo đang dùng tài khoản do nền tảng cấp — gỡ kết nối trước khi tự kết nối tài khoản riêng",
+               en="Zalo is currently using a platform-provided account — disconnect it before connecting your own account"),
+        )
     manager = getattr(request.app.state, "zalo_qr_login", None)
     if manager is None:
         raise HTTPException(503, tr(ctx, vi="Zalo QR login chưa sẵn sàng", en="Zalo QR login is not ready"))
