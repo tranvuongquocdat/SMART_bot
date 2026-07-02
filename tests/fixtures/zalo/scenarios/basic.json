@@ -1,0 +1,55 @@
+{
+  "own_id": "999",
+  "groups": {
+    "19001234567890123456": { "memVerList": ["111_3", "222_5", "999_1"] }
+  },
+  "messages": [
+    {
+      "type": 1,
+      "threadId": "19001234567890123456",
+      "data": {
+        "uidFrom": "111",
+        "dName": "An Nguyễn",
+        "content": "@bot nhắc anh Tân họp triển khai chiều thứ 3 nhé",
+        "msgId": "m1",
+        "ts": 1751400000000,
+        "mentions": [{ "uid": "999", "pos": 0, "len": 4 }]
+      }
+    },
+    {
+      "type": 0,
+      "threadId": "111",
+      "data": {
+        "uidFrom": "111",
+        "dName": "An Nguyễn",
+        "content": "/start abc123",
+        "msgId": "m2",
+        "ts": 1751400001000
+      }
+    },
+    {
+      "type": 1,
+      "threadId": "19001234567890123456",
+      "msgType": "chat.file",
+      "data": {
+        "uidFrom": "222",
+        "dName": "Bình",
+        "content": { "title": "bao-cao-q2.pdf", "href": "https://files.example/bao-cao-q2.pdf" },
+        "msgId": "m3",
+        "ts": 1751400002000,
+        "quote": { "globalMsgId": "m1", "ownerId": "111" }
+      }
+    },
+    {
+      "type": 1,
+      "threadId": "19001234567890123456",
+      "data": {
+        "uidFrom": "999",
+        "dName": "Bot",
+        "content": "tin của chính bot — bridge phải bỏ qua",
+        "msgId": "m4",
+        "ts": 1751400003000
+      }
+    }
+  ]
+}

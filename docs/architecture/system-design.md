@@ -732,6 +732,64 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
 - **CÒN LẠI:** đường B (enrich media đính kèm inbound — cần kênh thật/fixture để test; plan Task 15) ·
   test live web_search khi có Tavily key thật. (FE Integrations đã XONG.)
 
+**2026-07-02 — ZALO AUTOMATION (nhánh `feat/zalo-automation`): test 3 tầng + connect flow + consent PDPL ✅.**
+- **Spec:** `docs/superpowers/specs/2026-07-02-zalo-automation-design.md` (user chốt: skip plan, spec + build thẳng).
+  Mục tiêu: build/tune Zalo KHÔNG cần manual test — việc tay còn lại = 1 lần smoke ~10' (checklist dưới).
+- **Tầng 1 (contract):** `bridge.js` THẬT chạy trên `zca-js` GIẢ (`tests/fixtures/zalo/fake_zca` + require-hijack
+  preload — không cần npm install zca-js). 6 test: normalize (group/DM/mention/quote/file/self-skip), send
+  ThreadType, fetch_members parse memVerList, unknown method, stdin rác, listener error→disconnected, shutdown.
+- **Tầng 2 (adapter):** `fake_bridge.js` nói đúng JSONL protocol + **control socket** (inject event động) +
+  command-log. Setting mới `ZALO_BRIDGE_SCRIPT` (rỗng = bridge thật). 7 test qua đường spawn subprocess thật.
+  ⚠️ AF_UNIX ~104 ký tự — socket phải ở TMPDIR ngắn, không đặt dưới repo path (tên thư mục tiếng Việt).
+- **Tầng 3 (e2e):** `harness.py zalo` TỰ ĐỦ — spawn uvicorn riêng (cổng 24815, env fake-bridge), seed
+  boss/acc/assignment/account_links, bơm hội thoại qua socket, extract (provider=zalo — `/test/api/extract`
+  nhận provider), Q&A + assert reply qua bridge-log. **12/12 PASS ×3.** ⚠️ Bẫy đã gỡ: acc harness cũ còn
+  'active' → nhiều fake bridge tranh 1 socket (race, mất inbound) → pause acc `999-%` đầu run.
+- **BUG THẬT tìm ra nhờ harness (note.txt dòng 4):** `set_reminder` không gắn chat_id/provider → reminder
+  scope=group rơi về DM web (bong bóng admin), KHÔNG BAO GIỜ nổ trong nhóm. Fix: default theo hội thoại hiện
+  tại (group→ctx.chat_id; dm→acc chính của sếp qua account_links với kênh ngoài web).
+- **Connect flow (2 gap thật):** (1) `bot_account.status_changed` KHÔNG có subscriber → session Zalo chết mà
+  UI Channels vẫn 'active'. Thêm `BotAccountStatusSync` (persist status+reason, đăng ký ở lifespan).
+  (2) QR re-login bị 409 khi assignment còn active → boss kẹt khi session hết hạn. Giờ: boss_owned được
+  re-login; platform-assigned mới chặn; limit gói vẫn áp cho kết nối mới. FE: thêm menu 'Quét QR đăng nhập
+  lại' trên card zalo. 4 test khoá invariant provisioning (acc+assignment+inbound ngay, re-login không nhân
+  đôi, chặn acc khác/acc của boss khác).
+- **Consent notice PDPL (migration 0019):** tin thông báo ghi nhận khi bot bắt đầu capture nhóm — ĐÚNG 1
+  lần/(provider,chat_id) (claim bằng UPDATE điều kiện, boss thứ 2 chung nhóm không gửi lại); kênh web
+  (sandbox) bỏ qua. 3 integration test + 2 check harness.
+- **Hành vi đã khoá bằng harness:** giao việc/nhắc người CHƯA onboard → ghi nhận + set_reminder scope=group
+  + trả lời trong nhóm, không đòi đăng ký (prompt in_group v8 đã có, giờ có cổng regression). "Ép bot làm
+  admin nhóm" xác nhận KHÔNG tồn tại trong code hiện tại (note cũ từ bản Lark).
+- **Regression cuối đợt:** zalo 12/12 ×3 · gold 11/11 · multipass 6/6 · workload 6/6 · pytest 516 · FE build sạch.
+
+> **SMOKE CHECKLIST ZALO (~10', làm khi nào muốn — việc tay duy nhất còn lại):**
+> 1. Acc Zalo phụ (SIM riêng) + acc chính + 1 nhóm test ≥3 người. `npm install` trong `src/channels/zalo/bridge`.
+> 2. Web admin → Channels → Zalo → quét QR bằng acc PHỤ → card hiện active.
+> 3. Lấy link-token → DM `/start <token>` từ acc CHÍNH tới acc phụ → nhận tin chào.
+> 4. Add acc phụ vào nhóm test, sếp nhắn 1 câu → nhóm nhận tin consent (1 lần).
+> 5. Nhắn 4-5 tin giao việc; mention bot hỏi 2 câu (1 câu nhắc người chưa onboard) → bot trả lời trong nhóm.
+> 6. Nếu payload thật lệch fixture (bot im/lỗi parse) → xem log server `zalo.bridge[..]`, báo lại để đối chiếu
+>    `tests/fixtures/zalo/scenarios/` — sửa fixture, không sửa test.
+
+**2026-07-02 — COMPLIANCE (erasure + retention) + EVAL UPGRADE ✅ (cùng nhánh `feat/zalo-automation`).**
+- **Spec:** `docs/superpowers/specs/2026-07-02-compliance-erasure-retention-design.md`.
+- **DataErasure service:** `erase_group` (theo nhóm, boss-scoped) + `erase_boss` (right-to-erasure toàn bộ)
+  — Postgres + Qdrant cùng sạch, trả counts; users row ANONYMIZE thay vì xoá (giữ FK audit/billing).
+  `DELETE /admin/groups/{id}` giờ xoá THẬT dữ liệu nhóm (trước chỉ xoá row group_notes — messages/knowledge/
+  vector sống sót sau "xoá"). Superadmin: `POST /superadmin/bosses/{id}/erase` + audit log. 5 integration test.
+- **Retention TTL:** job `raw_message_retention` (cron 03:00) xoá `messages`+`outbound_messages` quá
+  `RAW_MESSAGE_RETENTION_DAYS` (mặc định 180, 0=tắt), batch 5000. Spine knowledge KHÔNG đụng; provenance
+  mất theo tin thô (FK cascade) = chấp nhận.
+- **Eval upgrade (làm TRƯỚC khi thử Groq — quyết định user):** `harness.py gold [path] [label]` lưu run
+  JSON vào `scripts/eval_runs/` (pass/fail + latency/case + judge score + token cost từ token_usage delta);
+  **LLM-judge** advisory (không gate pass/fail; rubric xử đúng case anti-hallucination "không có thông tin");
+  **`harness.py compare a.json b.json`** = bảng so run + REGRESS/FIXED + judge Δ — công cụ quyết định khi đổi
+  prompt/swap model (swap = đổi llm_routes rồi chạy gold label khác). **Baseline gpt-5.4-mini đã chụp:**
+  11/11 · judge_avg 9.45 · p50 3.8s · ~$0.06/run (~75k token).
+- **Trạng thái tổng nhánh `feat/zalo-automation` (7 commit):** spec zalo + 3 tầng test + connect-flow fixes
+  + consent PDPL + behavior locks + erasure/retention + eval. pytest **525 passed** · gold 11/11 · multipass
+  6/6 · workload 6/6 · zalo 12/12. Sẵn sàng review/merge; việc tay còn lại duy nhất = smoke checklist ở trên.
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).

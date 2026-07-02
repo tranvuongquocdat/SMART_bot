@@ -130,6 +130,7 @@ export const vi: Record<string, string> = {
   'channels.empty.title': 'Chưa kết nối kênh nào',
   'channels.empty.desc': 'Nhấn nút bên trên để kết nối Zalo, Telegram hoặc Lark.',
   'channels.disconnect': 'Ngắt kết nối',
+  'channels.zaloRelogin': 'Quét QR đăng nhập lại',
   'channels.disconnectConfirm.title': 'Ngắt kết nối kênh?',
   'channels.disconnectConfirm.desc': 'Bot sẽ không còn hoạt động trên {provider} nữa.',
   'channels.disconnected': 'Đã ngắt kết nối kênh.',

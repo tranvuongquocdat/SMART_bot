@@ -27,6 +27,15 @@ from src.repositories.messages import MessagesRepo
 
 log = logging.getLogger(__name__)
 
+# PDPL: thông báo ghi nhận khi bot bắt đầu capture một nhóm — gửi ĐÚNG 1 lần
+# mỗi (provider, chat_id). Giọng thư ký, không icon, tiếng Việt mặc định.
+CONSENT_NOTICE_VI = (
+    "Xin chào cả nhóm. Em là thư ký ảo của {boss_name}, được thêm vào nhóm để "
+    "ghi nhận và hỗ trợ công việc chung (việc được giao, deadline, nhắc lịch). "
+    "Tin nhắn trong nhóm sẽ được ghi nhận cho mục đích này. Nếu nhóm không "
+    "đồng ý, vui lòng mời em rời nhóm."
+)
+
 
 class InboundIngest:
     def __init__(self, pool, bus: EventBus, outbound_service=None):
@@ -118,9 +127,45 @@ class InboundIngest:
         tracked = [b for b in tracked if b in candidates]
         if not tracked:
             return
+        await self._maybe_send_consent(msg)
         for boss_id in tracked:
             await self._persist_and_publish(
                 msg, boss_id, sender_is_boss=(boss_id == sender_boss))
+
+    async def _maybe_send_consent(self, msg: InboundMessage) -> None:
+        """Tin thông báo ghi nhận (PDPL) — 1 lần/nhóm, mọi boss chung acc.
+
+        Kênh 'web' bỏ qua: đó là sandbox nội bộ của chính boss, không có bên
+        thứ ba cần được thông báo. Claim bằng UPDATE có điều kiện để không gửi
+        trùng khi nhiều tin về cùng lúc / boss thứ hai track sau."""
+        if msg.provider == "web" or self.outbound_service is None:
+            return
+        async with self.pool.acquire() as c:
+            claimed = await c.fetch(
+                """
+                UPDATE group_notes SET consent_notified_at = NOW()
+                WHERE provider=$1 AND chat_id=$2 AND consent_notified_at IS NULL
+                  AND NOT EXISTS (
+                    SELECT 1 FROM group_notes
+                    WHERE provider=$1 AND chat_id=$2
+                      AND consent_notified_at IS NOT NULL)
+                RETURNING boss_id
+                """,
+                msg.provider, msg.chat_id,
+            )
+            if not claimed:
+                return
+            boss_name = await c.fetchval(
+                "SELECT name FROM users WHERE id=$1", claimed[0]["boss_id"])
+        try:
+            await self.outbound_service.send(
+                boss_id=claimed[0]["boss_id"], provider=msg.provider,
+                chat_id=msg.chat_id,
+                content=CONSENT_NOTICE_VI.format(boss_name=boss_name or "sếp"),
+                trigger="system",
+            )
+        except Exception:
+            log.exception("consent notice send failed chat=%s", msg.chat_id)
 
     # ---- persist ----------------------------------------------------------
 

@@ -117,7 +117,7 @@ def test_zalo_qr_login_status_unknown_id(client, logged_in_boss):
     assert r.status_code == 404
 
 
-def test_zalo_qr_login_blocked_when_already_connected(client, logged_in_boss, clean_db):
+def _seed_zalo_assignment(clean_db, boss_id, *, ownership, kind):
     import asyncio
 
     async def _seed():
@@ -127,23 +127,48 @@ def test_zalo_qr_login_blocked_when_already_connected(client, logged_in_boss, cl
                 INSERT INTO bot_accounts
                   (provider, provider_user_id, display_name, account_kind,
                    ownership, owner_boss_id, status, max_assigned_bosses)
-                VALUES ('zalo', 'z-test-1', 'Acc phụ', 'personal',
-                        'boss_owned', $1, 'active', 1)
+                VALUES ('zalo', $1, 'Acc phụ', 'personal', $2, $3::int, 'active', 1)
                 RETURNING id
                 """,
-                logged_in_boss.boss_id,
+                f"z-test-{ownership}",
+                ownership,
+                boss_id if ownership == "boss_owned" else None,
             )
             await c.execute(
                 """
                 INSERT INTO bot_account_assignments
                   (boss_id, provider, bot_account_id, assignment_kind, status)
-                VALUES ($1, 'zalo', $2, 'boss_owned', 'active')
+                VALUES ($1, 'zalo', $2, $3, 'active')
                 """,
-                logged_in_boss.boss_id,
+                boss_id,
                 acc_id,
+                kind,
             )
 
     asyncio.get_event_loop().run_until_complete(_seed())
+
+
+def test_zalo_qr_login_allows_relogin_for_boss_owned(client, logged_in_boss, clean_db):
+    """Session Zalo chết là chuyện thường — boss_owned đang active vẫn phải
+    mở lại được phiên QR (re-login), không bị 409 kẹt luôn."""
+    _seed_zalo_assignment(
+        clean_db, logged_in_boss.boss_id, ownership="boss_owned", kind="boss_owned"
+    )
+    r = client.post(
+        "/api/v1/admin/channels/zalo/qr-login",
+        json={},
+        headers=_csrf(client),
+    )
+    # Gate cho qua → manager mở phiên (200). Trạng thái phiên (error vì thiếu
+    # node deps trong môi trường test) không thuộc phạm vi gate.
+    assert r.status_code == 200
+    assert "login_id" in r.json()
+
+
+def test_zalo_qr_login_blocked_when_platform_assigned(client, logged_in_boss, clean_db):
+    _seed_zalo_assignment(
+        clean_db, logged_in_boss.boss_id, ownership="platform", kind="platform_assigned"
+    )
     r = client.post(
         "/api/v1/admin/channels/zalo/qr-login",
         json={},

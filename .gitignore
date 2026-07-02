@@ -39,3 +39,4 @@ src/web/static/app/
 # git worktrees
 .worktrees/
 uploads/
+scripts/eval_runs/

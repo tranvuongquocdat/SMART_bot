@@ -53,13 +53,31 @@ async def set_reminder(
 ) -> ToolResult:
     from src.services.reminder_service import ReminderService
 
+    # Gắn đích nổ CHUẨN ngay lúc tạo — chat_id NULL sẽ bị firer fallback về DM
+    # web (bong bóng admin), tức "nhắc trong nhóm" không bao giờ tới nhóm.
+    chat_id = target_chat_id
+    provider = getattr(ctx, "provider", None)
+    if scope == "group":
+        chat_id = chat_id or getattr(ctx, "chat_id", None)
+    elif scope == "dm" and chat_id is None and provider and provider != "web":
+        # DM sếp qua kênh hiện tại: acc chính của sếp nằm ở account_links.
+        async with ctx.pool.acquire() as c:
+            chat_id = await c.fetchval(
+                "SELECT provider_user_id FROM account_links "
+                "WHERE boss_id=$1 AND provider=$2",
+                ctx.boss_id, provider,
+            )
+    if chat_id is None:
+        provider = None  # không rõ đích → để firer fallback DM web như cũ
+
     svc = ReminderService(ctx.pool, ctx.bus)
     rid = await svc.create(
         boss_id=ctx.boss_id,
         text=text,
         due_at=datetime.fromisoformat(due_at_iso),
         scope=scope,
-        chat_id=target_chat_id,
+        chat_id=chat_id,
+        provider=provider,
         recurring=recurring,
         created_by_op=getattr(ctx, "op_name", "unknown"),
     )

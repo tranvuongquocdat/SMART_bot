@@ -100,6 +100,12 @@ async def lifespan(app: FastAPI):
     InboundIngest(
         app.state.db_pool, app.state.bus, app.state.outbound_service
     ).register()
+    # Persist trạng thái acc (logged_out/rate_limited/...) khi bridge/health
+    # job publish — không có subscriber này thì UI Channels không bao giờ
+    # biết session chết.
+    from src.services.bot_account_status import BotAccountStatusSync
+
+    BotAccountStatusSync(app.state.db_pool).register(app.state.bus)
     _setup_ctx = ChannelSetupContext(
         bus=app.state.bus,
         pool=app.state.db_pool,

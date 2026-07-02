@@ -41,6 +41,15 @@ BRIDGE_DIR = Path(__file__).parent / "bridge"
 BRIDGE_SCRIPT = BRIDGE_DIR / "bridge.js"
 
 
+def _bridge_script() -> Path:
+    """Bridge thật mặc định; settings.ZALO_BRIDGE_SCRIPT override cho test/harness."""
+    from src.config import settings
+
+    if settings.ZALO_BRIDGE_SCRIPT:
+        return Path(settings.ZALO_BRIDGE_SCRIPT)
+    return BRIDGE_SCRIPT
+
+
 class ZaloAdapter(BaseChannelAdapter):
     provider = "zalo"
 
@@ -68,13 +77,14 @@ class ZaloAdapter(BaseChannelAdapter):
         proxy_url = await self._resolve_proxy(bot_acc)
         if proxy_url:
             env["PROXY_URL"] = proxy_url
+        script = _bridge_script()
         proc = await asyncio.create_subprocess_exec(
             "node",
-            str(BRIDGE_SCRIPT),
+            str(script),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(BRIDGE_DIR),
+            cwd=str(script.parent),
             env=env,
         )
         self._procs[bot_acc.id] = proc

@@ -31,6 +31,7 @@ def make_scheduler(app_state: Any) -> AsyncIOScheduler:
     from src.scheduler.jobs.bot_account_health import job as health_job
     from src.scheduler.jobs.cache_hit_ratio import job as cache_job
     from src.scheduler.jobs.group_membership_reverify import job as reverify_job
+    from src.scheduler.jobs.raw_message_retention import job as retention_job
     from src.scheduler.jobs.reminder_firer import job as remind_job
     from src.scheduler.jobs.subscription_check import job as sub_job
 
@@ -66,9 +67,16 @@ def make_scheduler(app_state: Any) -> AsyncIOScheduler:
         except Exception:
             log.exception("group_membership_reverify job crashed")
 
+    async def _retention() -> None:
+        try:
+            await retention_job(app_state)
+        except Exception:
+            log.exception("raw_message_retention job crashed")
+
     sched.add_job(_remind, "interval", seconds=30, id="reminder_firer")
     sched.add_job(_reverify, "interval", minutes=60, id="group_membership_reverify")
     sched.add_job(_health, "interval", seconds=60, id="bot_account_health")
     sched.add_job(_sub, "cron", hour=2, id="subscription_check")
+    sched.add_job(_retention, "cron", hour=3, id="raw_message_retention")
     sched.add_job(_cache, "interval", seconds=60, id="cache_hit_ratio")
     return sched

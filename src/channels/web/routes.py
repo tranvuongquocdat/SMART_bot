@@ -230,21 +230,34 @@ async def fire_extract(request: Request):
     if not chat_id:
         raise HTTPException(400, "chat_id required")
     reset = bool(body.get("reset"))
+    # Harness đa kênh: mặc định 'web'; harness zalo truyền provider='zalo' để
+    # extract trên hội thoại đi qua adapter thật (fake bridge).
+    provider = body.get("provider") or "web"
 
     from src.repositories.base import BossContext
     from src.repositories.group_notes import GroupNotesRepo
 
-    candidates = await _candidates_for_web(a)
+    if provider == "web":
+        candidates = await _candidates_for_web(a)
+    else:
+        async with a.pool.acquire() as c:
+            rows = await c.fetch(
+                "SELECT baa.boss_id FROM bot_account_assignments baa "
+                "JOIN bot_accounts ba ON ba.id = baa.bot_account_id "
+                "WHERE ba.provider=$1 AND baa.status='active'",
+                provider,
+            )
+        candidates = [r["boss_id"] for r in rows]
     tracked = await GroupNotesRepo(
         a.pool, BossContext(boss_id=0, user_role="superadmin")
-    ).bosses_tracking("web", chat_id)
+    ).bosses_tracking(provider, chat_id)
     bosses = [b for b in tracked if b in candidates]
 
     if reset:
         for boss_id in bosses:
             await GroupNotesRepo(
                 a.pool, BossContext(boss_id=boss_id, user_role="boss")
-            ).set_last_extracted("web", chat_id, 0)
+            ).set_last_extracted(provider, chat_id, 0)
 
     for boss_id in bosses:
         await a.bus.publish(
@@ -253,7 +266,7 @@ async def fire_extract(request: Request):
                 "reason": "manual",
                 "boss_id": boss_id,
                 "source_event": {
-                    "provider": "web",
+                    "provider": provider,
                     "chat_id": chat_id,
                     "chat_type": "group",
                 },
