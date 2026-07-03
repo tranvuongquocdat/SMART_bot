@@ -32,8 +32,9 @@ log = logging.getLogger(__name__)
 CONSENT_NOTICE_VI = (
     "Xin chào cả nhóm. Em là thư ký ảo của {boss_name}, được thêm vào nhóm để "
     "ghi nhận và hỗ trợ công việc chung (việc được giao, deadline, nhắc lịch). "
-    "Tin nhắn trong nhóm sẽ được ghi nhận cho mục đích này. Nếu nhóm không "
-    "đồng ý, vui lòng mời em rời nhóm."
+    "Tin nhắn trong nhóm sẽ được ghi nhận cho mục đích này. Nếu anh/chị không "
+    "muốn tin nhắn của riêng mình được ghi nhận, chỉ cần nhắc tên em trong nhóm "
+    "và nói rõ yêu cầu. Nếu cả nhóm không đồng ý, vui lòng mời em rời nhóm."
 )
 
 
