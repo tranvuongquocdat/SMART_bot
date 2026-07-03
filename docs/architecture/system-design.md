@@ -803,6 +803,24 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
 - **UX:** modal thanh toán render **ảnh VietQR** (img.vietqr.io, điền sẵn số tiền + nội dung CK);
   nav superadmin có **badge số request pending** (poll 60s) — luồng duyệt manual không còn mù việc mới.
 
+**2026-07-03 — LEGAL/CONSENT (PDPL mô hình B) — user chốt B + làm điều khoản luôn.**
+- **Spec:** `docs/superpowers/specs/2026-07-02-legal-consent-design.md`.
+- **Điều khoản version hoá (migration 0021):** `legal_documents` + `legal_acceptances`; draft ToS/Privacy VN
+  ở `config/seeds/legal/` (khung PDPL/NĐ13 — **luật sư duyệt trước khi thu tiền**), seed `scripts/seed_legal.py`.
+  Trang public `/app/legal/{terms,privacy}`; **LegalGate** modal chặn sau login tới khi chấp nhận bản active;
+  superadmin trang **Legal** (nav 'Điều khoản') publish bản mới → mọi user phải đồng ý lại. Đầu mối liên hệ
+  trong privacy.md còn placeholder [email] — điền trước khi phát hành.
+- **Opt-out cá nhân (consent B):** tool `opt_out_capture` (LLM quyết — không keyword), member nhắn bot
+  "đừng ghi tin của tôi" → `capture_optouts` → InboundIngest bỏ qua MỌI tin của người đó (mọi nhóm/boss cùng
+  provider, forward-only; gỡ opt-out = thao tác quản trị). `message.captured` + `ToolContext` mang thêm
+  `sender_provider_id/sender_name` (additive). Prompt **in_group v9** (hướng dẫn xác nhận lịch sự).
+- **Boss cam kết:** lần đầu QR connect Zalo phải tick "có quyền thêm bot + sẽ thông báo thành viên"
+  (409 `consent_required` → FE checkbox; ghi `users.group_consent_confirmed_at`, 1 lần cho mọi kênh).
+- **Bẫy đã gỡ:** bảng mới phải thêm vào TRUNCATE list của `clean_db` (conftest) — không thì row opt-out
+  sống sót giữa các lần chạy full-suite (fail chỉ ở run thứ 2, không phải run đầu).
+- **Verify:** pytest 535 · gold 11/11 (judge 8.6) · harness zalo 12/12 · FE build sạch. Hành vi LLM gọi
+  opt_out_capture đúng lúc = LLM-dependent, sẽ khoá thêm case harness ở vòng tune sau.
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).
