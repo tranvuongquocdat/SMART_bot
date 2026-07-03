@@ -179,6 +179,59 @@ def _build_tool_ctx(ctx, op_name: str, event: dict | None = None) -> ToolContext
     )
 
 
+
+_HISTORY_LIMIT = 12
+_HISTORY_SNIPPET = 400  # cắt mỗi tin — đủ ngữ cảnh, không phình token
+_QUICK_ACKS = {"Để em xem...", "Em xem rồi trả lời ngay ạ."}
+
+
+async def _recent_history(ctx, event: dict) -> str:
+    """Cửa sổ hội thoại gần đây của CHÍNH chat này (inbound + trả lời của bot).
+
+    Thiếu nó thì mỗi lượt chat là một hòn đảo — bot quên ngay điều vừa nói
+    trong cùng đoạn DM/nhóm (memory episodic là recall theo độ tương đồng,
+    không thay được continuity theo lượt)."""
+    chat_id, provider = event.get("chat_id"), event.get("provider")
+    if not chat_id or not provider:
+        return ""
+    try:
+        async with ctx.db.acquire() as c:
+            rows = await c.fetch(
+                """
+                (SELECT COALESCE(sender_name, 'Thành viên') AS who, text, ts
+                   FROM messages
+                  WHERE boss_id=$1 AND provider=$2 AND chat_id=$3 AND id <> $4
+                    AND text IS NOT NULL)
+                UNION ALL
+                (SELECT 'Thư ký (em)' AS who, content AS text, sent_at AS ts
+                   FROM outbound_messages
+                  WHERE boss_id=$1 AND provider=$2 AND chat_id=$3
+                    AND status='sent')
+                ORDER BY ts DESC LIMIT $5
+                """,
+                ctx.boss.id, provider, chat_id,
+                event.get("message_id") or 0, _HISTORY_LIMIT,
+            )
+    except Exception:
+        log.exception("recent history fetch failed")
+        return ""
+    lines = []
+    for r in reversed(rows):  # cũ → mới
+        text = (r["text"] or "").strip()
+        if not text or text in _QUICK_ACKS:
+            continue
+        if len(text) > _HISTORY_SNIPPET:
+            text = text[:_HISTORY_SNIPPET] + "…"
+        lines.append(f"[{r['who']}]: {text}")
+    if not lines:
+        return ""
+    return (
+        "HỘI THOẠI GẦN ĐÂY trong chính đoạn chat này (cũ → mới, để nối mạch "
+        "các lượt trước; tin cuối cùng bên dưới là tin đang trả lời):\n"
+        + "\n".join(lines)
+    )
+
+
 async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
     cfg = op_cls._op_config
     op_name = cfg.name
@@ -227,6 +280,7 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
         except Exception:
             log.exception("prospective action_items recall failed")
 
+    history_block = await _recent_history(ctx, event)
     msgs: list[ChatMessage] = [
         ChatMessage(role="system", content=system_prompt),
         ChatMessage(
@@ -235,8 +289,10 @@ async def run_agent(op_cls, event: dict, ctx, max_iters: int = 5) -> str:
             + _format_memory(semantic, episodic, reminders, action_items),
             name="memory_block",
         ),
-        ChatMessage(role="user", content=event.get("text", "")),
     ]
+    if history_block:
+        msgs.append(ChatMessage(role="user", content=history_block, name="history_block"))
+    msgs.append(ChatMessage(role="user", content=event.get("text", "")))
 
     # 3. Tool surface (base allowlist + enabled plugin tools for this boss)
     allowed = await _allowed_tools(cfg, ctx)

@@ -201,6 +201,19 @@
       "max_chars": 800,
       "must_exclude": [],
       "note": "Template/độ súc tích: tóm tắt phải đủ ý chính (người + mốc chung) nhưng ≤800 ký tự — chống trả lời tràng giang."
+    },
+    {
+      "id": "continuity-pronoun-dm",
+      "q": "Vậy deadline của việc đó là khi nào?",
+      "ask_in": "dm",
+      "pre": [
+        "Ai đang lo phần backend của Apollo?"
+      ],
+      "must_include": [
+        "10/7"
+      ],
+      "must_exclude": [],
+      "note": "CONTINUITY trong cùng đoạn chat: 'việc đó' = backend Apollo từ lượt TRƯỚC (history window); không có cửa sổ hội thoại thì bot hỏi lại/bịa."
     }
   ]
 }

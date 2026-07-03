@@ -411,6 +411,10 @@ async def gold(path="scripts/gold_cases.json", label=None):
     fails, records = [], []
     for c in cases:
         gid = _gid_for(s, c.get("ask_in"))
+        # Multi-turn: các câu "pre" gửi trước (bỏ qua trả lời) — test continuity
+        # (câu chính dùng đại từ/tham chiếu lượt trước).
+        for pre_q in c.get("pre", []):
+            _ask_capture(s, gid, pre_q)
         t0 = _t.monotonic()
         answer = "\n".join(_ask_capture(s, gid, c["q"]))
         latency = round(_t.monotonic() - t0, 2)
