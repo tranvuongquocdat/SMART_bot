@@ -54,6 +54,11 @@ công việc X (tách ra sẽ đếm trùng khối lượng của người đó)
 - Hai đầu việc KHÁC NHAU của cùng một người (vd "An làm backend" và "An rà soát bảo mật") vẫn là HAI
   mục — chỉ gộp khi cùng MỘT đầu việc.
 
+KIỂM TRA ĐỦ TRƯỚC KHI TRẢ LỜI: đi lại TỪNG tin nhắn một lần cuối — MỌI phân công việc-cho-người
+(kể cả nói ngắn gọn "Em X nhận phần Y") PHẢI có mặt trong output, mỗi người một mục riêng cho mỗi
+đầu việc khác nhau. Bỏ sót một phân công là lỗi NẶNG nhất của trích xuất — thà thêm mục nhỏ còn
+hơn thiếu người.
+
 Mỗi mục có:
 - kind: một trong [decision, fact, note, risk]
 - title: tiêu đề ngắn

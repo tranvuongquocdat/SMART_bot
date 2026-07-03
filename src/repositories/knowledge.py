@@ -146,8 +146,19 @@ class KnowledgeRepo(BossScopedRepo):
             )
         agg: dict[str, dict] = {}
         overdue_items = []
+        upcoming_items = []
         for r in rows:
             name = (r["assignee_name"] or "").strip()
+            # Mốc CHUNG (không assignee, vd deadline demo) không tính vào
+            # thống kê theo người nhưng PHẢI có mặt trong danh sách hạn —
+            # câu "deadline gần nhất" cần đủ ứng viên cả chung lẫn theo người.
+            if r["status"] == "active" and r["due_at"]:
+                item = {
+                    "assignee": name or "(chung)",
+                    "what": r["title"] or (r["content"] or "")[:60],
+                    "due": r["due_at"].strftime("%Y-%m-%d"),
+                }
+                (overdue_items if r["due_at"] < now else upcoming_items).append(item)
             if not name:
                 continue
             b = agg.setdefault(name, {"open": 0, "overdue": 0, "done": 0})
@@ -155,14 +166,10 @@ class KnowledgeRepo(BossScopedRepo):
                 b["open"] += 1
                 if r["due_at"] and r["due_at"] < now:
                     b["overdue"] += 1
-                    overdue_items.append({
-                        "assignee": name,
-                        "what": r["title"] or (r["content"] or "")[:60],
-                        "due": r["due_at"].strftime("%Y-%m-%d"),
-                    })
             elif r["status"] == "resolved":
                 b["done"] += 1
         overdue_items.sort(key=lambda x: x["due"])
+        upcoming_items.sort(key=lambda x: x["due"])
         by = []
         for name, b in agg.items():
             total = b["open"] + b["done"]
@@ -176,6 +183,9 @@ class KnowledgeRepo(BossScopedRepo):
         return {
             "scope": chat_id or "all_groups", "totals": totals, "by_assignee": by,
             "overdue_items": overdue_items[:15],
+            # Việc TƯƠNG LAI xếp theo hạn tăng dần — nguồn TẤT ĐỊNH cho câu
+            # "deadline sắp tới gần nhất" (semantic search dễ trượt khi data phình).
+            "upcoming_items": upcoming_items[:15],
         }
 
     async def get_many(self, ids: list[int]) -> list[KnowledgeItem]:

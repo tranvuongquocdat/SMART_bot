@@ -1,5 +1,5 @@
 key: knowledge_extract
-version: 8
+version: 9
 is_active: true
 notes: v8 — gộp theo đầu việc/người (phân công + deadline/ước lượng/tiến độ của CÙNG việc → 1 mục, due gắn vào mục đó VÀ nêu hạn trong content để tra cứu) để workload khỏi đếm trùng; deadline CHUNG dự án vẫn riêng. v7 — content giữ ngày kiểu VN (15/7), ISO chỉ ở field due. v6 — due chỉ cho hạn rõ ràng. v5 — thêm assignee+due. Placeholder：{{ window }} {{ today }}
 body: |
@@ -28,6 +28,10 @@ body: |
   trùng khối lượng của người đó).
   - NGOẠI LỆ: deadline / cột mốc CHUNG của cả dự án hoặc bản demo (KHÔNG gắn một người cụ thể)
     VẪN là mục decision riêng (assignee bỏ trống), KHÔNG gộp vào việc của ai.
+  KIỂM TRA ĐỦ TRƯỚC KHI TRẢ LỜI: đi lại TỪNG tin nhắn một lần cuối — MỌI phân công
+  việc-cho-người (kể cả nói ngắn gọn "Em X nhận phần Y") PHẢI có mặt trong output, mỗi người
+  một mục riêng cho mỗi đầu việc khác nhau. Bỏ sót một phân công là lỗi NẶNG nhất của trích xuất
+  — thà thêm mục nhỏ còn hơn thiếu người.
   - Hai đầu việc KHÁC NHAU của cùng một người (vd "An làm backend" và "An rà soát bảo mật") vẫn
     là HAI mục — chỉ gộp khi cùng MỘT đầu việc.
 

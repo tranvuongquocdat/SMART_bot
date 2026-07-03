@@ -69,6 +69,18 @@ BETA_CONVO = [
     ("boss", "Deadline demo Beta mình chốt 20/8 nhé."),
 ]
 
+# Dự án thứ 3 — case KHÓ thực tế: khoanh vùng thời gian theo người (Tuấn),
+# việc resolved giữa chừng, deadline rải trong tháng, người cross-group (An).
+GAMMA_CONVO = [
+    ("boss", "Team mở thêm dự án Gamma — chuyển văn phòng sang toà nhà mới. Phân việc nhé."),
+    ("tuan", "Em Tuấn nhận khảo sát mặt bằng văn phòng mới, bắt đầu từ 5/6, xong trước 10/6 nhé sếp."),
+    ("tuan", "Em lo luôn phần hợp đồng thuê văn phòng, deadline ký là 18/6."),
+    ("boss", "Tuấn thêm việc đặt mua nội thất nữa nhé, chốt đơn trước 25/6."),
+    ("an",   "Em An lo phần IT — kéo mạng và chuyển server, deadline 28/6."),
+    ("tuan", "Báo cáo sếp: khảo sát mặt bằng em làm xong rồi ạ."),
+    ("boss", "Chốt: deadline chuyển toàn bộ văn phòng sang toà mới là 30/6 nhé."),
+]
+
 # Kịch bản 2-PASS cho reconcile cross-batch (RESOLVE/UPDATE/DELETE). Pass 1 thiết lập
 # trạng thái, Pass 2 (extract incremental) đính chính/giải quyết/đổi quyết định.
 MP_P1 = [
@@ -118,11 +130,13 @@ async def _boss_id(conn, boss_web_uid):
 async def setup():
     boss = _post("/api/users", {"name": "Sếp Minh", "role": "boss"})["id"]
     emps = {n: _post("/api/users", {"name": nm, "role": "employee"})["id"]
-            for n, nm in [("an", "An"), ("binh", "Bình"), ("chau", "Châu")]}
-    members = [boss] + list(emps.values())
+            for n, nm in [("an", "An"), ("binh", "Bình"), ("chau", "Châu"), ("tuan", "Tuấn")]}
+    members = [boss] + [emps[k] for k in ("an", "binh", "chau")]
     gid = _post("/api/groups", {"name": "Dự án Apollo", "member_ids": members})["id"]
     beta = _post("/api/groups", {"name": "Dự án Beta", "member_ids": members})["id"]
-    state = {"boss": boss, "emps": emps, "gid": gid, "beta": beta}
+    gamma = _post("/api/groups", {"name": "Dự án Gamma",
+                                  "member_ids": [boss, emps["an"], emps["tuan"]]})["id"]
+    state = {"boss": boss, "emps": emps, "gid": gid, "beta": beta, "gamma": gamma}
     _save(state)
 
     conn = await asyncpg.connect(DSN)
@@ -156,10 +170,14 @@ async def convo():
         _post("/api/send", {"as": who[role], "chat_id": s["gid"], "text": text})
     for role, text in BETA_CONVO:
         _post("/api/send", {"as": who[role], "chat_id": s["beta"], "text": text})
+    for role, text in GAMMA_CONVO:
+        _post("/api/send", {"as": who[role], "chat_id": s["gamma"], "text": text})
     ok_a = _wait_ingested(s["gid"], len(APOLLO_CONVO))
     ok_b = _wait_ingested(s["beta"], len(BETA_CONVO))
-    print(f"sent {len(APOLLO_CONVO)} apollo + {len(BETA_CONVO)} beta messages; "
-          f"ingested apollo={ok_a} beta={ok_b} (apollo={s['gid']} beta={s['beta']})")
+    ok_g = _wait_ingested(s["gamma"], len(GAMMA_CONVO))
+    print(f"sent {len(APOLLO_CONVO)} apollo + {len(BETA_CONVO)} beta + "
+          f"{len(GAMMA_CONVO)} gamma messages; ingested apollo={ok_a} beta={ok_b} "
+          f"gamma={ok_g}")
 
 
 async def wipe_knowledge():
@@ -212,6 +230,8 @@ async def extract():
     print("apollo:", _post("/api/extract", {"chat_id": s["gid"], "reset": True}))
     if s.get("beta"):
         print("beta:  ", _post("/api/extract", {"chat_id": s["beta"], "reset": True}))
+    if s.get("gamma"):
+        print("gamma: ", _post("/api/extract", {"chat_id": s["gamma"], "reset": True}))
     await dump()
 
 
@@ -260,6 +280,8 @@ def _gid_for(s, ask_in):
         return s["gid"]
     if ask_in == "beta":
         return s["beta"]
+    if ask_in == "gamma":
+        return s["gamma"]
     if ask_in == "dm":
         return f"dm:{s['boss']}"
     return ask_in  # cho phép truyền thẳng group id
@@ -395,7 +417,8 @@ async def gold(path="scripts/gold_cases.json", label=None):
         inc = [_expand_token(t) for t in c.get("must_include", [])]
         miss = [t for t in inc if _token_missing(t, answer)]
         leak = [t for t in c.get("must_exclude", []) if t in answer]
-        ok = not miss and not leak and bool(answer.strip())
+        too_long = bool(c.get("max_chars")) and len(answer) > c["max_chars"]
+        ok = not miss and not leak and not too_long and bool(answer.strip())
         judge = _judge_answer(c["q"], ", ".join(inc), answer, note=c.get("note"))
         js = judge.get("score") if isinstance(judge, dict) else None
         mark = "PASS" if ok else "FAIL"
@@ -418,6 +441,8 @@ async def gold(path="scripts/gold_cases.json", label=None):
                 detail.append(f"missing={miss}")
             if leak:
                 detail.append(f"leaked={leak}")
+            if too_long:
+                detail.append(f"too_long={len(answer)}>{c['max_chars']}")
             fails.append((c["id"], "; ".join(detail), answer))
 
     cost, tokens = await _token_cost_since(bid, t0_iso)

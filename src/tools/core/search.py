@@ -251,6 +251,11 @@ async def search_knowledge(
     )
     if kind:
         items = [it for it in items if it.kind == kind]
+    # Tên nhóm cho từng item — DM cross-group phải GỌI TÊN được dự án/nhóm
+    # nguồn ("Gamma: ..."), không thì tổng hợp toàn cảnh mất attribution.
+    group_names = await _group_names(
+        ctx, {it.chat_id for it in items[:10] if it.chat_id}
+    )
     out = []
     for it in items[:10]:
         prov = await repo.provenance(it.id)
@@ -264,7 +269,24 @@ async def search_knowledge(
                 "status": it.status,  # 'active' | 'resolved' (đã xử lý/đã xong)
                 "assignee": it.assignee_name,
                 "due": it.due_at.strftime("%Y-%m-%d") if it.due_at else None,
+                "group": group_names.get(it.chat_id),
                 "source_message_ids": prov[:5],
             }
         )
     return ToolResult(content=out)
+
+
+async def _group_names(ctx, chat_ids: set) -> dict:
+    if not chat_ids:
+        return {}
+    async with ctx.pool.acquire() as c:
+        rows = await c.fetch(
+            """
+            SELECT gn.chat_id, COALESCE(gn.group_name, wg.name) AS name
+            FROM group_notes gn
+            LEFT JOIN web_groups wg ON wg.id = gn.chat_id
+            WHERE gn.boss_id = $1 AND gn.chat_id = ANY($2::text[])
+            """,
+            ctx.boss_id, list(chat_ids),
+        )
+    return {r["chat_id"]: r["name"] for r in rows}

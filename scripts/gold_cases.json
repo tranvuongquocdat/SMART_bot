@@ -1,27 +1,37 @@
 {
-  "_doc": "Gold cases cho Q&A spine. Mỗi BUG tìm qua harness → thêm 1 case (D6). Chạy: uv run python scripts/harness.py gold. must_include khớp KHÔNG phân biệt hoa/thường (hỗ trợ token động {days_until:YYYY-MM-DD}); must_exclude PHÂN BIỆT hoa/thường (token cụ thể/tên riêng, tránh false-positive). ask_in: apollo | beta | dm (mặc định apollo). State giả định = harness setup tái lập (Apollo: An backend FastAPI 10/7, Bình UI/UX wireframe done, Châu test+PM, DB=Supabase, demo 15/7, VNPay risk đã resolved, báo cáo tiến độ hạn 10/6 TRỄ; Beta: Bình backend Django, Châu frontend, An tích hợp ngân hàng, demo 20/8).",
+  "_doc": "Gold cases cho Q&A spine. Mỗi BUG tìm qua harness → thêm 1 case (D6). Chạy: uv run python scripts/harness.py gold. must_include khớp KHÔNG phân biệt hoa/thường (hỗ trợ token động {days_until:YYYY-MM-DD}); must_exclude PHÂN BIỆT hoa/thường (token cụ thể/tên riêng, tránh false-positive). ask_in: apollo | beta | dm (mặc định apollo). State giả định = harness setup tái lập (Apollo: An backend FastAPI 10/7, Bình UI/UX wireframe done, Châu test+PM, DB=Supabase, demo 15/7, VNPay risk đã resolved, báo cáo tiến độ hạn 10/6 TRỄ; Beta: Bình backend Django, Châu frontend, An tích hợp ngân hàng, demo 20/8; Gamma: Tuấn khảo sát mặt bằng 5-10/6 ĐÃ XONG + hợp đồng thuê 18/6 + nội thất 25/6, An kéo mạng/server 28/6, chuyển văn phòng 30/6). ask_in thêm 'gamma'. max_chars: giới hạn độ dài trả lời (template/độ súc tích).",
   "cases": [
     {
       "id": "backend-owner-apollo",
       "q": "Ai phụ trách backend?",
       "ask_in": "apollo",
-      "must_include": ["An"],
-      "must_exclude": ["Django"],
+      "must_include": [
+        "An"
+      ],
+      "must_exclude": [
+        "Django"
+      ],
       "note": "Ownership Apollo backend = An; KHÔNG lẫn backend Beta (Django) -> leak guard."
     },
     {
       "id": "backend-owner-beta",
       "q": "Ai phụ trách backend?",
       "ask_in": "beta",
-      "must_include": ["Bình"],
-      "must_exclude": ["FastAPI"],
+      "must_include": [
+        "Bình"
+      ],
+      "must_exclude": [
+        "FastAPI"
+      ],
       "note": "Hỏi trong Beta -> Bình; KHÔNG lẫn backend Apollo (FastAPI). Scope nhóm 2 chiều."
     },
     {
       "id": "frontend-owner-beta",
       "q": "Ai làm frontend của dự án này?",
       "ask_in": "beta",
-      "must_include": ["Châu"],
+      "must_include": [
+        "Châu"
+      ],
       "must_exclude": [],
       "note": "Ownership Beta frontend = Châu."
     },
@@ -29,7 +39,9 @@
       "id": "database-supabase",
       "q": "Database dự án này dùng gì?",
       "ask_in": "apollo",
-      "must_include": ["Supabase"],
+      "must_include": [
+        "Supabase"
+      ],
       "must_exclude": [],
       "note": "Reconcile PostgreSQL -> Supabase: phải trả Supabase (quyết định mới nhất)."
     },
@@ -37,15 +49,24 @@
       "id": "deadline-demo-days-apollo",
       "q": "Deadline bản demo là khi nào, còn mấy ngày nữa tính từ hôm nay?",
       "ask_in": "apollo",
-      "must_include": ["15/7", "{days_until:2026-07-15}"],
-      "must_exclude": ["20/8", "Beta"],
+      "must_include": [
+        "15/7",
+        "{days_until:2026-07-15}"
+      ],
+      "must_exclude": [
+        "20/8",
+        "Beta"
+      ],
       "note": "Time-arithmetic (số ngày tới 15/7, token động) + KHÔNG lẫn demo Beta 20/8 (bug group_id='')."
     },
     {
       "id": "multi-hop-an-deadline",
       "q": "An phụ trách phần gì và deadline của An là ngày nào?",
       "ask_in": "apollo",
-      "must_include": ["backend", "10/7"],
+      "must_include": [
+        "backend",
+        "10/7"
+      ],
       "must_exclude": [],
       "note": "Multi-hop: ghép ownership (backend) + deadline riêng của An (10/7)."
     },
@@ -53,7 +74,9 @@
       "id": "nearest-deadline-apollo",
       "q": "Việc nào sắp tới hạn nhất trong dự án này?",
       "ask_in": "apollo",
-      "must_include": ["10/7"],
+      "must_include": [
+        "10/7"
+      ],
       "must_exclude": [],
       "note": "Ranking thời gian: mốc SẮP TỚI gần nhất là backend 10/7 (trước demo 15/7)."
     },
@@ -61,7 +84,9 @@
       "id": "overdue-apollo",
       "q": "Có việc nào đang trễ hạn không?",
       "ask_in": "apollo",
-      "must_include": ["báo cáo"],
+      "must_include": [
+        "báo cáo"
+      ],
       "must_exclude": [],
       "note": "Suy luận thời gian: báo cáo tiến độ hạn 10/6 đã quá hạn so với hôm nay -> phải nhận ra là trễ."
     },
@@ -69,7 +94,9 @@
       "id": "no-budget-info-apollo",
       "q": "Ngân sách dự án Apollo là bao nhiêu?",
       "ask_in": "apollo",
-      "must_include": ["chưa"],
+      "must_include": [
+        "chưa"
+      ],
       "must_exclude": [],
       "note": "Không bịa: không có dữ liệu ngân sách -> phải nói chưa có thông tin."
     },
@@ -77,7 +104,10 @@
       "id": "projects-list-dm",
       "q": "Hiện công ty đang chạy những dự án nào?",
       "ask_in": "dm",
-      "must_include": ["Apollo", "Beta"],
+      "must_include": [
+        "Apollo",
+        "Beta"
+      ],
       "must_exclude": [],
       "note": "Tổng hợp chéo nhóm (DM scope=mọi nhóm): liệt kê đủ Apollo + Beta. Đường Pha B."
     },
@@ -85,9 +115,92 @@
       "id": "cross-nearest-deadline-dm",
       "q": "Trong tất cả dự án, mốc deadline sắp tới gần nhất là việc nào?",
       "ask_in": "dm",
-      "must_include": ["10/7"],
+      "must_include": [
+        "10/7"
+      ],
       "must_exclude": [],
       "note": "Ranking thời gian XUYÊN nhóm trong DM: gần nhất sắp tới = backend Apollo 10/7."
+    },
+    {
+      "id": "time-range-person-gamma",
+      "q": "Từ ngày 5/6 đến 20/6, Tuấn có những việc gì? Kể tên giúp anh.",
+      "ask_in": "gamma",
+      "must_include": [
+        "khảo sát",
+        "hợp đồng"
+      ],
+      "must_exclude": [],
+      "note": "Khoanh vùng thời gian THEO NGƯỜI: trong 5/6-20/6 Tuấn có khảo sát (5-10/6) + hợp đồng (18/6); nội thất 25/6 NGOÀI khoảng (không bắt exclude vì bot có thể nhắc 'ngoài khoảng' — judge chấm phần đó)."
+    },
+    {
+      "id": "time-range-empty-gamma",
+      "q": "Trong tháng 8 này Tuấn có việc gì cần làm không?",
+      "ask_in": "gamma",
+      "must_include": [
+        "không"
+      ],
+      "must_exclude": [],
+      "note": "Chống bịa khi khoanh vùng RỖNG: tháng 8 Tuấn không có việc nào → phải trả 'không', không kéo việc tháng 6 vào."
+    },
+    {
+      "id": "resolved-person-gamma",
+      "q": "Việc nào của Tuấn đã xong rồi?",
+      "ask_in": "gamma",
+      "must_include": [
+        "khảo sát"
+      ],
+      "must_exclude": [],
+      "note": "Trạng thái theo người: khảo sát mặt bằng đã báo xong (resolved); hợp đồng + nội thất chưa."
+    },
+    {
+      "id": "open-items-person-gamma",
+      "q": "Tuấn còn những việc nào chưa xong?",
+      "ask_in": "gamma",
+      "must_include": [
+        "hợp đồng",
+        "nội thất"
+      ],
+      "must_exclude": [],
+      "note": "Đầy đủ danh sách việc MỞ theo người — thiếu 1 trong 2 là fail (completeness)."
+    },
+    {
+      "id": "person-cross-groups-dm",
+      "q": "An đang phụ trách những việc gì ở tất cả các dự án?",
+      "ask_in": "dm",
+      "must_include": [
+        "backend",
+        "ngân hàng",
+        "mạng"
+      ],
+      "must_exclude": [],
+      "note": "Tổng hợp chéo nhóm THEO NGƯỜI phải ĐỦ: An có việc ở cả Apollo (backend), Beta (tích hợp ngân hàng), Gamma (kéo mạng/server)."
+    },
+    {
+      "id": "all-projects-deadlines-dm",
+      "q": "Liệt kê các dự án đang chạy kèm deadline chính của từng dự án.",
+      "ask_in": "dm",
+      "must_include": [
+        "Apollo",
+        "Beta",
+        "Gamma",
+        "15/7",
+        "20/8",
+        "30/6"
+      ],
+      "must_exclude": [],
+      "note": "Tổng hợp toàn cảnh phải ĐỦ 3 dự án + đúng 3 mốc chính (Apollo 15/7, Beta 20/8, Gamma 30/6)."
+    },
+    {
+      "id": "concise-summary-gamma",
+      "q": "Tóm tắt nhanh tình hình dự án Gamma trong vài dòng.",
+      "ask_in": "gamma",
+      "must_include": [
+        "Tuấn",
+        "30/6"
+      ],
+      "max_chars": 800,
+      "must_exclude": [],
+      "note": "Template/độ súc tích: tóm tắt phải đủ ý chính (người + mốc chung) nhưng ≤800 ký tự — chống trả lời tràng giang."
     }
   ]
 }
