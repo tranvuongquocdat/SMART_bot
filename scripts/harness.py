@@ -13,6 +13,8 @@ Commands:
                    vào scripts/eval_runs/<label>.json.
   compare a.json b.json  so 2 run gold (đổi prompt / swap model qua llm_routes
                    rồi chạy gold với label khác → compare).
+  demo [email]     seed dữ liệu demo cho boss có sẵn (mặc định boss@local.test)
+                   — 3 nhóm + hội thoại + extract, test được ngay trên acc login.
   zalo             e2e kênh Zalo trên fake bridge: tự spawn server (cổng 24815),
                    seed acc+boss, bơm hội thoại, extract, Q&A, reminder người
                    chưa onboard — không cần acc Zalo thật.
@@ -942,6 +944,50 @@ async def zalo():
     sys.exit(1 if fails else 0)
 
 
+
+async def demo(email="boss@local.test"):
+    """Seed dữ liệu demo cho MỘT BOSS CÓ SẴN (mặc định boss@local.test) —
+    đi qua pipeline THẬT (gửi hội thoại web → ingest → extract) để user test
+    trên chính acc login của mình: 3 nhóm Apollo/Beta/Gamma + 4 nhân viên,
+    có phân công/deadline/resolved đủ để vẽ biểu đồ + hỏi đáp."""
+    conn = await asyncpg.connect(DSN)
+    bid = await conn.fetchval("SELECT id FROM users WHERE email=$1", email)
+    if bid is None:
+        print(f"Không thấy user {email}")
+        await conn.close()
+        sys.exit(1)
+    boss_uid = await conn.fetchval(
+        "SELECT id FROM web_users WHERE boss_user_id=$1 AND is_boss "
+        "ORDER BY created_at LIMIT 1", bid)
+    await conn.close()
+    if boss_uid is None:
+        print(f"{email} chưa có web identity — mở trang chat admin một lần rồi chạy lại")
+        sys.exit(1)
+
+    emps = {n: _post("/api/users", {"name": nm, "role": "employee"})["id"]
+            for n, nm in [("an", "An"), ("binh", "Bình"), ("chau", "Châu"), ("tuan", "Tuấn")]}
+    members = [boss_uid] + [emps[k] for k in ("an", "binh", "chau")]
+    gid = _post("/api/groups", {"name": "Dự án Apollo", "member_ids": members})["id"]
+    beta = _post("/api/groups", {"name": "Dự án Beta", "member_ids": members})["id"]
+    gamma = _post("/api/groups", {"name": "Dự án Gamma",
+                                  "member_ids": [boss_uid, emps["an"], emps["tuan"]]})["id"]
+    who = {"boss": boss_uid, **emps}
+    for chat, convo in ((gid, APOLLO_CONVO), (beta, BETA_CONVO), (gamma, GAMMA_CONVO)):
+        for role, text in convo:
+            _post("/api/send", {"as": who[role], "chat_id": chat, "text": text})
+        _wait_ingested(chat, len(convo))
+        _post("/api/extract", {"chat_id": chat, "reset": True})
+
+    conn = await asyncpg.connect(DSN)
+    n_items, n_assigned = await conn.fetchrow(
+        "SELECT count(*), count(*) FILTER (WHERE assignee_name IS NOT NULL) "
+        "FROM knowledge_items WHERE boss_id=$1", bid)
+    await conn.close()
+    print(f"demo seeded cho {email} (boss_id={bid}, web_uid={boss_uid}): "
+          f"apollo={gid} beta={beta} gamma={gamma}; "
+          f"knowledge={n_items} items ({n_assigned} có assignee)")
+
+
 async def teardown():
     s = _load()
     conn = await asyncpg.connect(DSN)
@@ -982,6 +1028,8 @@ async def main():
         await workload()
     elif cmd == "zalo":
         await zalo()
+    elif cmd == "demo":
+        await demo(sys.argv[2] if len(sys.argv) > 2 else "boss@local.test")
     elif cmd == "teardown":
         await teardown()
     else:
