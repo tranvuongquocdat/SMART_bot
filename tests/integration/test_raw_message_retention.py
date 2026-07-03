@@ -11,6 +11,7 @@ import pytest
 
 from src.config import settings
 from src.scheduler.jobs.raw_message_retention import job
+from src.services import platform_settings
 
 
 async def _boss(pool, email):
@@ -33,6 +34,7 @@ async def _msg(pool, boss_id, age_days, text):
 @pytest.mark.asyncio
 async def test_purges_old_keeps_recent_and_knowledge(clean_db, monkeypatch):
     monkeypatch.setattr(settings, "RAW_MESSAGE_RETENTION_DAYS", 30)
+    platform_settings.clear_cache()  # cache in-process sống xuyên test
     boss = await _boss(clean_db, "ttl1@x.test")
     old_id = await _msg(clean_db, boss, 45, "tin cũ quá hạn")
     new_id = await _msg(clean_db, boss, 5, "tin mới")
@@ -59,6 +61,7 @@ async def test_purges_old_keeps_recent_and_knowledge(clean_db, monkeypatch):
 @pytest.mark.asyncio
 async def test_zero_ttl_disables_purge(clean_db, monkeypatch):
     monkeypatch.setattr(settings, "RAW_MESSAGE_RETENTION_DAYS", 0)
+    platform_settings.clear_cache()
     boss = await _boss(clean_db, "ttl2@x.test")
     old_id = await _msg(clean_db, boss, 400, "tin rất cũ nhưng TTL tắt")
 

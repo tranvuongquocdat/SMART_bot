@@ -24,6 +24,9 @@ export default function GeneralTab() {
   const [tz, setTz] = useState('');
   const [uiLanguage, setUiLanguage] = useState<Lang>(lang);
   const [botLanguage, setBotLanguage] = useState('vi'); // vi | en | auto
+  // Cửa sổ hội thoại: '' = theo mặc định hệ thống (null)
+  const [histDm, setHistDm] = useState('');
+  const [histGroup, setHistGroup] = useState('');
 
   useEffect(() => {
     if (data) {
@@ -31,6 +34,8 @@ export default function GeneralTab() {
       setTz(data.tz ?? 'Asia/Ho_Chi_Minh');
       if (data.ui_language === 'vi' || data.ui_language === 'en') setUiLanguage(data.ui_language);
       setBotLanguage(data.language ?? 'vi');
+      setHistDm(data.history_window_dm == null ? '' : String(data.history_window_dm));
+      setHistGroup(data.history_window_group == null ? '' : String(data.history_window_group));
     }
   }, [data]);
 
@@ -41,6 +46,8 @@ export default function GeneralTab() {
         tz: tz || undefined,
         language: botLanguage || undefined,
         ui_language: uiLanguage || undefined,
+        history_window_dm: histDm === '' ? null : Number(histDm),
+        history_window_group: histGroup === '' ? null : Number(histGroup),
       }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: generalQuery.queryKey });
@@ -108,6 +115,29 @@ export default function GeneralTab() {
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">{t('settings.general.botLanguageHint')}</p>
+      </div>
+
+      <div className="space-y-2">
+        <Label>{t('settings.general.historyWindow')}</Label>
+        <div className="flex gap-3">
+          <div className="flex-1 space-y-1">
+            <p className="text-xs text-muted-foreground">{t('settings.general.historyDm')}</p>
+            <Input
+              type="number" min={0} max={50} value={histDm}
+              onChange={(e) => setHistDm(e.target.value)}
+              placeholder={t('settings.general.historyDefault', { n: data.history_window_dm_default ?? 12 })}
+            />
+          </div>
+          <div className="flex-1 space-y-1">
+            <p className="text-xs text-muted-foreground">{t('settings.general.historyGroup')}</p>
+            <Input
+              type="number" min={0} max={50} value={histGroup}
+              onChange={(e) => setHistGroup(e.target.value)}
+              placeholder={t('settings.general.historyDefault', { n: data.history_window_group_default ?? 12 })}
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">{t('settings.general.historyHint')}</p>
       </div>
 
       <Button onClick={() => mut.mutate()} disabled={mut.isPending}>

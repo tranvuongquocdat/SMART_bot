@@ -818,14 +818,21 @@ async def get_settings_general(
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
     """Return general/profile settings: name, tz, language (bot), ui_language (web)."""
+    from src.services.platform_settings import get_setting
+
     async with db.acquire() as c:
         row = await c.fetchrow(
-            "SELECT id, name, tz, language, ui_language FROM users WHERE id=$1",
+            "SELECT id, name, tz, language, ui_language, "
+            "history_window_dm, history_window_group FROM users WHERE id=$1",
             ctx.boss_id,
         )
     if not row:
         raise HTTPException(status_code=404, detail="user not found")
-    return dict(row)
+    out = dict(row)
+    # Mặc định nền tảng — FE hiện placeholder "theo hệ thống (N)"
+    out["history_window_dm_default"] = await get_setting(db, "history_window_dm", 12)
+    out["history_window_group_default"] = await get_setting(db, "history_window_group", 12)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1036,8 +1043,15 @@ async def patch_settings_general(
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
     """Update name, tz, language (bot), ui_language (web)."""
-    allowed = {"name", "tz", "language", "ui_language"}
+    allowed = {"name", "tz", "language", "ui_language",
+               "history_window_dm", "history_window_group"}
     sets = {k: v for k, v in payload.items() if k in allowed}
+    for k in ("history_window_dm", "history_window_group"):
+        if k in sets and sets[k] is not None:
+            try:
+                sets[k] = max(0, min(50, int(sets[k])))
+            except (TypeError, ValueError):
+                raise HTTPException(422, f"{k} phải là số 0-50 hoặc null")
     if not sets:
         return {"updated": 0}
     keys = list(sets.keys())

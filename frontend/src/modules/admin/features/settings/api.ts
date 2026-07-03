@@ -47,6 +47,10 @@ export type GeneralSettings = {
   tz: string | null;
   language: string | null; // ngôn ngữ trợ lý trả lời (vi | en | auto)
   ui_language: string | null; // ngôn ngữ giao diện web (vi | en)
+  history_window_dm?: number | null;
+  history_window_group?: number | null;
+  history_window_dm_default?: number;
+  history_window_group_default?: number;
 };
 
 export const accountQuery = queryOptions({
@@ -101,7 +105,7 @@ export const testAiKey = (body: { provider: string; api_key: string; base_url?: 
   });
 
 export const patchGeneral = (
-  body: Partial<Pick<GeneralSettings, 'name' | 'tz' | 'language' | 'ui_language'>>,
+  body: Partial<Pick<GeneralSettings, 'name' | 'tz' | 'language' | 'ui_language' | 'history_window_dm' | 'history_window_group'>>,
 ) => api('/api/v1/admin/settings/general', { method: 'PATCH', body: JSON.stringify(body) });
 
 export type ProviderModelsResult = { ok: boolean; models: { id: string }[]; message?: string };

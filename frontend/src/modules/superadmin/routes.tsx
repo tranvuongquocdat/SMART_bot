@@ -28,6 +28,7 @@ export function superadminRoutes(qc: QueryClient): RouteObject {
       },
       { path: 'note-templates', lazy: async () => ({ Component: (await import('./features/note-templates/page')).default }), handle: { breadcrumb: 'nav.sa.noteTemplates' } },
       { path: 'agent-triggers', lazy: async () => ({ Component: (await import('./features/agent-triggers/page')).default }), handle: { breadcrumb: 'nav.sa.agentTriggers' } },
+      { path: 'platform', lazy: async () => ({ Component: (await import('./features/platform/page')).default }), handle: { breadcrumb: 'nav.sa.platform' } },
       { path: 'legal', lazy: async () => ({ Component: (await import('./features/legal/page')).default }), handle: { breadcrumb: 'nav.sa.legal' } },
       { path: 'announcements', lazy: async () => ({ Component: (await import('./features/announcements/page')).default }), handle: { breadcrumb: 'nav.sa.announcements' } },
       { path: 'audit', lazy: async () => ({ Component: (await import('./features/audit-log/page')).default }), handle: { breadcrumb: 'nav.sa.audit' } },

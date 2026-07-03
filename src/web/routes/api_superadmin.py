@@ -2083,3 +2083,58 @@ async def integration_usage(
         "totals": await repo.usage_totals(provider),
         "daily": await repo.usage_daily(provider, range),
     }
+
+
+# ===========================================================================
+# Platform settings — knob vận hành nền tảng (history window, retention...)
+# ===========================================================================
+
+_PLATFORM_KEYS = {
+    "history_window_dm": (0, 50),
+    "history_window_group": (0, 50),
+    "raw_message_retention_days": (0, 3650),
+}
+
+
+@router.get("/platform-settings")
+async def get_platform_settings(
+    db: asyncpg.Pool = Depends(get_db),
+    _: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.config import settings as app_settings
+    from src.services.platform_settings import get_setting
+
+    return {
+        "history_window_dm": await get_setting(db, "history_window_dm", 12),
+        "history_window_group": await get_setting(db, "history_window_group", 12),
+        "raw_message_retention_days": await get_setting(
+            db, "raw_message_retention_days", app_settings.RAW_MESSAGE_RETENTION_DAYS),
+    }
+
+
+@router.patch("/platform-settings", dependencies=[Depends(verify_json_csrf)])
+async def patch_platform_settings(
+    payload: dict,
+    db: asyncpg.Pool = Depends(get_db),
+    actor: BossContext = Depends(require_superadmin),
+) -> dict:
+    from src.services.platform_settings import set_setting
+
+    updated = {}
+    for key, (lo, hi) in _PLATFORM_KEYS.items():
+        if key not in payload:
+            continue
+        try:
+            val = max(lo, min(hi, int(payload[key])))
+        except (TypeError, ValueError):
+            raise HTTPException(422, f"{key} phải là số {lo}-{hi}")
+        await set_setting(db, key, val)
+        updated[key] = val
+    if updated:
+        from src.repositories.admin_audit_log import AdminAuditLogRepo
+
+        await AdminAuditLogRepo(db, actor).insert(
+            action="platform_settings.updated", target_kind="platform",
+            target_id="settings", payload=updated,
+        )
+    return {"updated": updated}

@@ -180,9 +180,30 @@ def _build_tool_ctx(ctx, op_name: str, event: dict | None = None) -> ToolContext
 
 
 
-_HISTORY_LIMIT = 12
 _HISTORY_SNIPPET = 400  # cắt mỗi tin — đủ ngữ cảnh, không phình token
 _QUICK_ACKS = {"Để em xem...", "Em xem rồi trả lời ngay ạ."}
+
+
+async def _history_limit(ctx, chat_type: str | None) -> int:
+    """Số tin lịch sử: boss override (Settings) → mặc định superadmin
+    (platform_settings) → 12. DM và nhóm là 2 knob riêng (user chốt 03/7)."""
+    from src.services.platform_settings import get_setting
+
+    col = "history_window_dm" if chat_type == "dm" else "history_window_group"
+    override = None
+    try:
+        async with ctx.db.acquire() as c:
+            override = await c.fetchval(
+                f"SELECT {col} FROM users WHERE id=$1", ctx.boss.id)
+    except Exception:
+        log.exception("history override lookup failed")
+    if override is not None:
+        return max(0, min(50, int(override)))
+    default = await get_setting(ctx.db, col, 12)
+    try:
+        return max(0, min(50, int(default)))
+    except (TypeError, ValueError):
+        return 12
 
 
 async def _recent_history(ctx, event: dict) -> str:
@@ -194,6 +215,9 @@ async def _recent_history(ctx, event: dict) -> str:
     chat_id, provider = event.get("chat_id"), event.get("provider")
     if not chat_id or not provider:
         return ""
+    limit = await _history_limit(ctx, event.get("chat_type"))
+    if limit <= 0:
+        return ""  # 0 = tắt cửa sổ hội thoại
     try:
         async with ctx.db.acquire() as c:
             rows = await c.fetch(
@@ -210,7 +234,7 @@ async def _recent_history(ctx, event: dict) -> str:
                 ORDER BY ts DESC LIMIT $5
                 """,
                 ctx.boss.id, provider, chat_id,
-                event.get("message_id") or 0, _HISTORY_LIMIT,
+                event.get("message_id") or 0, limit,
             )
     except Exception:
         log.exception("recent history fetch failed")

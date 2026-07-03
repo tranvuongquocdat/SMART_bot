@@ -143,7 +143,7 @@ async def clean_db(db_pool):
               projects,
               tool_call_log, token_usage, pins, outbound_messages, messages,
               group_note_versions, group_notes, memory_entries, linking_tokens,
-              capture_optouts, legal_documents,
+              capture_optouts, legal_documents, platform_settings,
               account_links, bot_account_assignments, bot_accounts, users,
               web_group_members, web_groups, web_users,
               mcp_catalog,

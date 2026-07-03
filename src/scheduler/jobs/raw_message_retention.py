@@ -23,7 +23,17 @@ BATCH = 5000
 
 
 async def job(app_state: Any) -> dict[str, int]:
-    days = settings.RAW_MESSAGE_RETENTION_DAYS
+    from src.services.platform_settings import get_setting
+
+    # Superadmin chỉnh qua UI (platform_settings) thắng env; chưa set thì env.
+    days = await get_setting(
+        app_state.db_pool, "raw_message_retention_days",
+        settings.RAW_MESSAGE_RETENTION_DAYS,
+    )
+    try:
+        days = int(days)
+    except (TypeError, ValueError):
+        days = settings.RAW_MESSAGE_RETENTION_DAYS
     if not days or days <= 0:
         return {"messages": 0, "outbound_messages": 0}
 
