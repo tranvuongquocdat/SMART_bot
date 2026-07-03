@@ -40,3 +40,4 @@ src/web/static/app/
 .worktrees/
 uploads/
 scripts/eval_runs/
+backups/

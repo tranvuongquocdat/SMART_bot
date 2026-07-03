@@ -821,6 +821,44 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
 - **Verify:** pytest 535 · gold 11/11 (judge 8.6) · harness zalo 12/12 · FE build sạch. Hành vi LLM gọi
   opt_out_capture đúng lúc = LLM-dependent, sẽ khoá thêm case harness ở vòng tune sau.
 
+**2026-07-03 — QA-HARDENING (gold 11→18) + OPS.**
+- **QA (user chốt: mock case khó qua web, khi tích hợp chỉ smoke Zalo):** thêm kịch bản **Gamma**
+  (Tuấn, việc có ngày rải tháng 6, resolve giữa chừng, An cross-group) + 7 case khó: khoanh vùng
+  thời gian theo người, khoảng RỖNG chống bịa, liệt kê mở/xong theo người, tổng hợp chéo nhóm đủ ý,
+  toàn cảnh dự án+deadline, tóm tắt ≤800 ký tự (gold runner thêm check `max_chars`).
+- **4 root-cause tìm ra nhờ case mới (đều đã fix):** (1) extract thỉnh thoảng RƠI nguyên tin phân
+  công (Beta mất 3/5 item một lần chạy) → extract prompt v9 "kiểm tra đủ từng tin trước khi trả
+  lời"; (2) trả lời cross-group không GỌI TÊN được dự án nguồn → `search_knowledge` trả thêm field
+  `group`; (3) "deadline gần nhất" dựa semantic search → flaky 1/3 khi data phình → `workload_summary`
+  thêm **upcoming_items** (hạn tương lai xếp tăng dần, gồm mốc chung "(chung)") + prompt route câu này
+  về đó; (4) responder dùng nhầm after/before (thời-điểm-ghi-nhận) cho khoảng-deadline → rule rõ trong
+  in_group v10 + dm_general v9. **gold 18/18 ×3 · multipass 6/6 · workload 6/6 · pytest 535.**
+- **OPS (đã chạy thật cả 3):** `scripts/backup.sh` (pg_dump + qdrant snapshot, giữ 14 bản, đã chạy:
+  516K+7.8M) · `scripts/restore_drill.sh` (restore vào DB scratch + so row-count 6 bảng — **DRILL
+  PASS**) · `scripts/monitor.sh` (healthz + Telegram alert khi đổi trạng thái). RUNBOOK OPS + DEPLOY
+  CHECKLIST 7 bước ở mục dưới.
+
+### RUNBOOK — OPS (backup / restore / monitor / deploy)
+
+**Backup (cron 02:00 đêm):** `bash scripts/backup.sh` — pg_dump custom-format (docker exec) +
+Qdrant snapshot tải về `backups/` (gitignored), giữ 14 bản. **Diễn tập restore** (chạy sau backup
+đầu tuần): `bash scripts/restore_drill.sh` — restore bản mới nhất vào DB scratch, so row-count
+6 bảng lõi với live, dọn sạch; PASS = backup dùng được thật. **Monitor (cron */5'):**
+`bash scripts/monitor.sh` — curl `/healthz` (db+qdrant), alert Telegram khi ĐỔI trạng thái
+(set TELEGRAM_BOT_TOKEN/CHAT_ID trong `~/.smartbot-monitor.env`), log `~/.smartbot-monitor.log`.
+
+**DEPLOY CHECKLIST (thứ tự bắt buộc — tránh lặp sự cố migration không đồng bộ):**
+1. `bash scripts/backup.sh` (LUÔN backup trước khi đụng code/schema).
+2. `git pull` → `uv sync` → `cd frontend && npm ci && npm run build` (nếu FE đổi).
+3. `uv run alembic upgrade head` — migration LUÔN chạy TRƯỚC khi restart app; nếu fail: DỪNG,
+   không restart, xem lỗi (app cũ vẫn chạy được với schema cũ vì migration additive).
+4. Seed nếu round có ghi trong BUILD LOG (prompts: `scripts/seed_prompts.py`; llm: `seed_llm.sh`;
+   legal: `seed_legal.py`).
+5. `bash scripts/restart.sh` → check `/healthz` + đuôi log.
+6. Smoke 3': login admin → chat test 1 câu → trang Channels/Subscriptions mở được.
+7. Rollback khi hỏng: `git checkout <commit trước>` + restart (schema additive nên app cũ chạy
+   được); dữ liệu hỏng thì restore từ `backups/` (dừng app → pg_restore vào DB chính → restart).
+
 ### RUNBOOK — chạy harness tune loop (session mới, context sạch)
 1. `bash scripts/restart.sh` (hoặc `uv run uvicorn src.main:app`) — cần `ENABLE_WEB_TEST_CHANNEL=true`, web bot_account provider='web' active.
    **Seed bắt buộc (1 lần/môi trường):** `bash scripts/seed_llm.sh` (models/routes/budgets — gồm `knowledge_extract`/`knowledge_reconcile`) + `uv run python scripts/seed_prompts.py` (prompts; **bảng `prompts` rỗng = responder chạy KHÔNG có system prompt → trả lời lung tung**).
