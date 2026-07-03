@@ -4,6 +4,7 @@ import { Paperclip, SendHorizontal, Square, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { useT } from '@/lib/i18n';
+import { ChatChart, parseChartBlocks } from './chat-chart';
 import {
   chatMessagesQuery,
   sendChatMessage,
@@ -35,11 +36,11 @@ function MessageBubble({ m }: { m: ChatMessage }) {
   return (
     <div className={`flex ${fromBot ? 'justify-start' : 'justify-end'}`}>
       <div
-        className={`max-w-[75%] rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap break-words ${
+        className={`rounded-2xl px-4 py-2.5 text-sm whitespace-pre-wrap break-words ${
           fromBot
             ? 'bg-card border text-foreground rounded-bl-sm'
             : 'bg-primary text-primary-foreground rounded-br-sm'
-        }`}
+        } ${fromBot && m.text?.includes('```chart') ? 'w-full max-w-[560px]' : 'max-w-[75%]'}`}
       >
         {m.media_url && m.media_kind === 'image' && (
           <img
@@ -61,7 +62,14 @@ function MessageBubble({ m }: { m: ChatMessage }) {
             {t('chat.attachment')}
           </a>
         )}
-        {m.text && <p>{m.text}</p>}
+        {m.text &&
+          parseChartBlocks(m.text).map((part, i) =>
+            typeof part === 'string' ? (
+              part.trim() ? <p key={i}>{part.trim()}</p> : null
+            ) : (
+              <ChatChart key={i} spec={part} />
+            )
+          )}
         <p
           className={`mt-1 text-[10px] ${
             fromBot ? 'text-muted-foreground' : 'text-primary-foreground/70'
@@ -290,6 +298,26 @@ export function ChatPanel({
               <X className="h-3 w-3" />
             </button>
           </span>
+        </div>
+      )}
+
+      {!draft.trim() && (
+        <div className="px-3 pt-2 flex flex-wrap gap-1.5">
+          {[
+            ['chat.tpl.workload', 'Vẽ biểu đồ khối lượng việc đang mở theo từng người giúp anh.'],
+            ['chat.tpl.due', 'Vẽ biểu đồ các việc sắp tới hạn và quá hạn theo người.'],
+            ['chat.tpl.groups', 'Tổng hợp nhanh tình hình từng nhóm: việc mở, quá hạn, đã xong — kèm biểu đồ so sánh giữa các nhóm.'],
+          ].map(([key, prompt]) => (
+            <button
+              key={key}
+              onClick={() => {
+                setDraft(prompt);
+              }}
+              className="rounded-full border bg-card px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--hover))] transition-colors"
+            >
+              {t(key)}
+            </button>
+          ))}
         </div>
       )}
 

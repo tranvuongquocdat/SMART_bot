@@ -50,7 +50,7 @@ export function AssistantBubble() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 12, scale: 0.98 }}
             transition={{ duration: 0.18, ease: 'easeOut' }}
-            className="fixed bottom-24 right-6 z-50 w-[400px] max-w-[calc(100vw-3rem)]"
+            className="fixed bottom-24 right-6 z-50 w-[560px] max-w-[calc(100vw-3rem)]"
           >
             <div className="rounded-xl shadow-2xl bg-background border overflow-hidden">
               <div className="flex items-center gap-2 px-3 py-2 border-b bg-card">
@@ -90,7 +90,7 @@ export function AssistantBubble() {
               <ChatPanel
                 key={activeId ?? 'none'}
                 conversationId={activeId}
-                className="h-[480px] max-h-[60vh] border-0 rounded-none"
+                className="h-[640px] max-h-[78vh] border-0 rounded-none"
               />
             </div>
           </motion.div>
