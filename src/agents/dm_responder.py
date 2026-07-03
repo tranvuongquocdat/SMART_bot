@@ -45,6 +45,7 @@ class DMContext:
         "mark_action_item",
         "workload_summary",
         "list_members",
+        "opt_out_capture",
         "edit_group_note",
         "read_group_note",
         "refresh_group_note",

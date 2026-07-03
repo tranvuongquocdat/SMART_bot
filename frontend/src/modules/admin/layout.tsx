@@ -6,6 +6,7 @@ import { useT } from '@/lib/i18n';
 import type { Me } from '@/lib/auth';
 import { adminNav } from './nav';
 import { AssistantBubble } from './features/chat/assistant-bubble';
+import { LegalGate } from '@/components/legal-gate';
 
 export default function AdminLayout() {
   const t = useT();
@@ -54,6 +55,7 @@ export default function AdminLayout() {
           <Outlet />
         </motion.div>
       </AnimatePresence>
+      <LegalGate />
       <AssistantBubble />
     </AppShell>
   );

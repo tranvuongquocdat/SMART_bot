@@ -45,10 +45,10 @@ export type ZaloQrStatus = {
   expires_in_s: number;
 };
 
-export const startZaloQrLogin = () =>
+export const startZaloQrLogin = (consentConfirmed = false) =>
   api<{ login_id: string; status: string }>('/api/v1/admin/channels/zalo/qr-login', {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify(consentConfirmed ? { consent_confirmed: true } : {}),
   });
 
 export const zaloQrLoginStatus = (loginId: string) =>

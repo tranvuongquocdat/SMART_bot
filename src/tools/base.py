@@ -19,6 +19,9 @@ class ToolContext:
     chat_id: str | None = None
     provider: str | None = None
     chat_type: str | None = None  # "group" | "dm"
+    # Người gửi tin đang xử lý — tool opt_out_capture (PDPL) cần biết ai yêu cầu.
+    sender_provider_id: str | None = None
+    sender_name: str | None = None
 
 
 @dataclass

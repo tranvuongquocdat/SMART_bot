@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Loader2, RefreshCw, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -36,6 +37,9 @@ export function ZaloQrDialog({
   const qc = useQueryClient();
   const [state, setState] = useState<ZaloQrStatus | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  // PDPL: lần đầu kết nối cần boss tick cam kết (409 consent_required từ BE).
+  const [needConsent, setNeedConsent] = useState(false);
+  const [consentChecked, setConsentChecked] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   // Sau khi QR success → bước handshake để bot nhận diện acc chính của boss.
   const [handshake, setHandshake] = useState<LinkToken | null>(null);
@@ -50,18 +54,20 @@ export function ZaloQrDialog({
     return () => clearTimeout(timer);
   }, [countdown]);
 
-  async function begin() {
+  async function begin(consentConfirmed = false) {
     setState(null);
     setStartError(null);
+    setNeedConsent(false);
     try {
-      const { login_id } = await startZaloQrLogin();
+      const { login_id } = await startZaloQrLogin(consentConfirmed);
       loginIdRef.current = login_id;
     } catch (e) {
-      const detail =
-        e instanceof ApiError && typeof (e.body as { detail?: string })?.detail === 'string'
-          ? (e.body as { detail: string }).detail
-          : t('zaloqr.startError');
-      setStartError(detail);
+      const detail = e instanceof ApiError ? (e.body as { detail?: unknown })?.detail : null;
+      if (detail && typeof detail === 'object' && (detail as { code?: string }).code === 'consent_required') {
+        setNeedConsent(true);
+        return;
+      }
+      setStartError(typeof detail === 'string' ? detail : t('zaloqr.startError'));
     }
   }
 
@@ -160,10 +166,30 @@ export function ZaloQrDialog({
                 {t('zaloqr.handshakeDone')}
               </Button>
             </div>
+          ) : needConsent ? (
+            <div className="flex w-full flex-col gap-3">
+              <p className="text-sm">{t('zaloqr.consentText')}</p>
+              <label className="flex items-start gap-2 text-sm">
+                <Checkbox
+                  checked={consentChecked}
+                  onCheckedChange={(v) => setConsentChecked(v === true)}
+                  className="mt-0.5"
+                />
+                <span>
+                  {t('zaloqr.consentCheckbox')}{' '}
+                  <a href="/app/legal/terms" target="_blank" rel="noreferrer" className="underline underline-offset-4">
+                    {t('legal.terms')}
+                  </a>
+                </span>
+              </label>
+              <Button className="self-end" size="sm" disabled={!consentChecked} onClick={() => begin(true)}>
+                {t('zaloqr.consentContinue')}
+              </Button>
+            </div>
           ) : startError ? (
             <>
               <p className="text-sm text-destructive text-center">{startError}</p>
-              <Button size="sm" variant="outline" onClick={begin}>
+              <Button size="sm" variant="outline" onClick={() => begin()}>
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                 {t('zaloqr.retry')}
               </Button>
@@ -199,7 +225,7 @@ export function ZaloQrDialog({
               <p className="text-sm text-destructive text-center">
                 {state?.error ?? t('zaloqr.loginFailed')}
               </p>
-              <Button size="sm" variant="outline" onClick={begin}>
+              <Button size="sm" variant="outline" onClick={() => begin()}>
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                 {t('zaloqr.retry')}
               </Button>

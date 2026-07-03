@@ -1673,6 +1673,7 @@ async def _check_channel_slot(db, ctx, provider: str) -> None:
 @router.post("/channels/zalo/qr-login", dependencies=[Depends(verify_json_csrf)])
 async def zalo_qr_login_start(
     request: Request,
+    payload: dict | None = None,
     ctx: BossContext = Depends(require_boss),
     db: asyncpg.Pool = Depends(get_db),
 ) -> dict:
@@ -1682,7 +1683,29 @@ async def zalo_qr_login_start(
     logged_out là chuyện thường với acc cá nhân — chặn ở đây là boss kẹt luôn,
     phải gỡ kênh mới kết nối lại được). Chỉ chặn khi kênh zalo hiện tại là acc
     pool (phải gỡ trước) hoặc khi kết nối MỚI vượt limit gói.
+
+    PDPL (consent mô hình B): lần ĐẦU kết nối, boss xác nhận cam kết "có quyền
+    thêm bot vào nhóm + sẽ thông báo thành viên" — FE gửi
+    {consent_confirmed: true}; thiếu thì 409 code consent_required.
     """
+    async with db.acquire() as c:
+        confirmed = await c.fetchval(
+            "SELECT group_consent_confirmed_at FROM users WHERE id=$1", ctx.boss_id
+        )
+    if confirmed is None:
+        if not (payload or {}).get("consent_confirmed"):
+            raise HTTPException(
+                409,
+                {"code": "consent_required",
+                 "message": tr(ctx,
+                               vi="Cần xác nhận cam kết trước khi kết nối kênh",
+                               en="Consent confirmation is required before connecting")},
+            )
+        async with db.acquire() as c:
+            await c.execute(
+                "UPDATE users SET group_consent_confirmed_at=NOW() WHERE id=$1",
+                ctx.boss_id,
+            )
     async with db.acquire() as c:
         existing_kind = await c.fetchval(
             """

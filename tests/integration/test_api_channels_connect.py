@@ -156,7 +156,7 @@ def test_zalo_qr_login_allows_relogin_for_boss_owned(client, logged_in_boss, cle
     )
     r = client.post(
         "/api/v1/admin/channels/zalo/qr-login",
-        json={},
+        json={"consent_confirmed": True},
         headers=_csrf(client),
     )
     # Gate cho qua → manager mở phiên (200). Trạng thái phiên (error vì thiếu
@@ -171,7 +171,8 @@ def test_zalo_qr_login_blocked_when_platform_assigned(client, logged_in_boss, cl
     )
     r = client.post(
         "/api/v1/admin/channels/zalo/qr-login",
-        json={},
+        json={"consent_confirmed": True},
         headers=_csrf(client),
     )
     assert r.status_code == 409
+    assert "detail" in r.json() and r.json()["detail"] != {"code": "consent_required"}

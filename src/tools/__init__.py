@@ -4,6 +4,7 @@ from src.tools.core import (  # noqa: F401
     memory,
     meta,
     notes,
+    privacy,
     reminders,
     search,
     web,

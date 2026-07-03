@@ -179,6 +179,10 @@ app.include_router(api_superadmin_bosses.router)
 from src.web.routes import api_admin
 app.include_router(api_admin.router)
 
+from src.web.routes import api_legal
+app.include_router(api_legal.router)
+app.include_router(api_legal.sa_router)
+
 from src.web.routes.spa import mount_spa
 mount_spa(app)
 if settings.ENABLE_WEB_TEST_CHANNEL:

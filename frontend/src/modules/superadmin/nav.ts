@@ -1,4 +1,4 @@
-import { Cpu, Bot, UserCog, FileText, BarChart3, Code2, BookTemplate, Zap, GitBranch, CreditCard, Package, Plug2, Network, Megaphone, Search } from 'lucide-react';
+import { Cpu, Bot, Scale, UserCog, FileText, BarChart3, Code2, BookTemplate, Zap, GitBranch, CreditCard, Package, Plug2, Network, Megaphone, Search } from 'lucide-react';
 import type { NavSection } from '@/components/app-shell';
 
 // label = khóa i18n (app-shell + command-palette render qua t()).
@@ -28,6 +28,7 @@ export const superadminNav: NavSection[] = [
     items: [
       { label: 'nav.sa.plans', href: '/app/superadmin/plans', icon: Package },
       { label: 'nav.sa.subscriptions', href: '/app/superadmin/subscriptions', icon: CreditCard },
+      { label: 'nav.sa.legal', href: '/app/superadmin/legal', icon: Scale },
     ],
   },
   {

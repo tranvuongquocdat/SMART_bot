@@ -50,10 +50,26 @@ class InboundIngest:
         msg: InboundMessage = payload["message"]
         if should_drop_normalized(msg):
             return
+        if await self._sender_opted_out(msg):
+            return
         if msg.chat_type == "dm":
             await self._handle_dm(msg)
         else:
             await self._handle_group(msg)
+
+    async def _sender_opted_out(self, msg: InboundMessage) -> bool:
+        """PDPL opt-out cá nhân: người đã yêu cầu 'đừng ghi tin của tôi' —
+        không persist tin của họ, mọi nhóm mọi boss trên provider đó.
+        NGOẠI LỆ: tin mention bot vẫn đi qua (không persist ở nhánh dưới nếu
+        opt-out, nhưng để lean thì chặn hẳn — người opt-out muốn tương tác lại
+        thì nhắn bot gỡ opt-out qua kênh khác/boss)."""
+        if not msg.sender_provider_id:
+            return False
+        async with self.pool.acquire() as c:
+            return bool(await c.fetchval(
+                "SELECT 1 FROM capture_optouts WHERE provider=$1 AND provider_user_id=$2",
+                msg.provider, msg.sender_provider_id,
+            ))
 
     # ---- candidates / identity helpers -----------------------------------
 
@@ -193,4 +209,7 @@ class InboundIngest:
             "chat_id": msg.chat_id, "chat_type": msg.chat_type,
             "mentions_bot": bool(msg.mentions_bot), "sender_is_boss": sender_is_boss,
             "text": msg.text, "bot_account_id": msg.bot_account_id,
+            # tool opt_out_capture cần biết AI đang yêu cầu (PDPL opt-out)
+            "sender_provider_id": msg.sender_provider_id,
+            "sender_name": msg.sender_name,
         })

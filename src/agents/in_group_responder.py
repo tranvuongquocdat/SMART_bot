@@ -49,6 +49,7 @@ _QUICK_ACK_THRESHOLD = 60  # chars
         "web_search",
         "remember",
         "current_time",
+        "opt_out_capture",
     },
     timeout_s=20,
     progress_mode="quick_ack",

@@ -7,6 +7,7 @@ import { pageTransition } from '@/lib/motion';
 import { useT } from '@/lib/i18n';
 import type { Me } from '@/lib/auth';
 import { superadminNav } from './nav';
+import { LegalGate } from '@/components/legal-gate';
 
 export default function SuperadminLayout() {
   const t = useT();
@@ -53,6 +54,7 @@ export default function SuperadminLayout() {
         )
       }
     >
+      <LegalGate />
       <AnimatePresence mode="wait">
         <motion.div
           key={location.pathname}

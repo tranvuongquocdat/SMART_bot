@@ -174,6 +174,8 @@ def _build_tool_ctx(ctx, op_name: str, event: dict | None = None) -> ToolContext
         chat_id=event.get("chat_id"),
         provider=event.get("provider"),
         chat_type=event.get("chat_type"),
+        sender_provider_id=event.get("sender_provider_id"),
+        sender_name=event.get("sender_name"),
     )
 
 
