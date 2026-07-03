@@ -838,6 +838,23 @@ khai báo 14 in_group / 18 dm) — nên cap 5 của trial là sai.
   PASS**) · `scripts/monitor.sh` (healthz + Telegram alert khi đổi trạng thái). RUNBOOK OPS + DEPLOY
   CHECKLIST 7 bước ở mục dưới.
 
+**2026-07-03 — CHAT CONTINUITY (bug user báo từ test live) + CHART TRONG CHAT WEB BOSS.**
+- **Continuity (root cause thật):** `run_agent` chỉ gửi [system + memory + tin hiện tại] — KHÔNG có
+  lịch sử lượt trước → bot "quên turn trước" ngay trong 1 đoạn DM (memory episodic là recall tương
+  đồng, không thay continuity). Fix: `_recent_history` — 12 tin gần nhất của CHÍNH chat đó (inbound
+  `messages` + trả lời bot `outbound_messages`, lọc quick-ack, cắt 400 ký tự/tin) chèn thành block
+  transcript trước tin hiện tại; ăn cho CẢ dm + in_group. Verify live đúng kịch bản user báo
+  (khai task 3 người → hỏi đại từ lượt sau). Gold hỗ trợ **multi-turn** (field `pre`) + case
+  `continuity-pronoun-dm`. **Gold 19/19.**
+- **Chart trong chat web boss (user chốt, đảo quyết định 06-15 cho riêng web chat):** cơ chế =
+  **chart-spec JSON qua tool `render_chart`** (KHÔNG execute code — an toàn/tất định; sandbox để
+  sau nếu spec không đủ). LLM lấy số liệu THẬT từ tool khác rồi vẽ; fence ```chart``` trong reply;
+  FE `ChatChart` render bar/rank (charts.tsx) + line/pie (SVG tay); spec hỏng degrade về chữ; kênh
+  ngoài web tool từ chối → bot trả lời bảng chữ. **Template chips** trên ô nhập (khối lượng theo
+  người / việc sắp-quá hạn / tổng hợp nhóm); khung chat 400×480 → **560×640**. dm_general v10.
+  Verify e2e live: hỏi "vẽ biểu đồ khối lượng" → spec bar đúng số liệu Tuấn/An/Châu/Bình. 4 tool test.
+- Regression: pytest 539 · gold 19/19 · zalo 12/12.
+
 ### RUNBOOK — OPS (backup / restore / monitor / deploy)
 
 **Backup (cron 02:00 đêm):** `bash scripts/backup.sh` — pg_dump custom-format (docker exec) +
